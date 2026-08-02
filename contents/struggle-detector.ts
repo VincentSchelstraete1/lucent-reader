@@ -1,3 +1,5 @@
+import { downloadSessionLog } from "../lib/session-log"
+
 export const config = {
   matches: ["https://en.wikipedia.org/*"]
 }
@@ -403,8 +405,25 @@ function injectMenu() {
   row.appendChild(label)
   row.appendChild(switchBtn)
 
+  const exportBtn = document.createElement("button")
+  exportBtn.textContent = "Export Session Log"
+  exportBtn.style.padding = "10px 14px"
+  exportBtn.style.borderRadius = "20px"
+  exportBtn.style.border = `1px solid ${tokens.captionText}`
+  exportBtn.style.backgroundColor = "#FFFFFF"
+  exportBtn.style.color = tokens.readingText
+  exportBtn.style.fontSize = "14px"
+  exportBtn.style.cursor = "pointer"
+  exportBtn.style.textAlign = "left"
+
+  exportBtn.addEventListener("click", () => {
+    downloadSessionLog()
+  })
+
   panel.appendChild(simplifyAllBtn)
   panel.appendChild(row)
+  panel.appendChild(exportBtn)
+
 
   menuButton.addEventListener("click", () => {
     panel.style.display = panel.style.display === "none" ? "flex" : "none"
