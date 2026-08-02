@@ -23,38 +23,114 @@ function loadReadingFont() {
   document.head.appendChild(link)
 }
 
+function injectBadgeStyles() {
+  const style = document.createElement("style")
+  style.textContent = `
+    .arw-badge {
+      position: absolute;
+      top: 2px;
+      left: -40px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      white-space: nowrap;
+      cursor: pointer;
+      padding: 0;
+      border: 1px solid ${tokens.captionText};
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      transition: width 200ms ease, border-radius 200ms ease, justify-content 0ms 200ms;
+      z-index: 999999;
+    }
+    .arw-badge:hover,
+    .arw-badge.arw-expanded {
+      width: 190px;
+      border-radius: 20px;
+      justify-content: flex-start;
+      padding-left: 8px;
+    }
+    .arw-badge .arw-icon {
+      flex-shrink: 0;
+      font-size: 14px;
+      width: 20px;
+      text-align: center;
+    }
+    .arw-badge .arw-label {
+      opacity: 0;
+      max-width: 0;
+      overflow: hidden;
+      margin-left: 0;
+      font-family: Inter, sans-serif;
+      font-size: 13px;
+      transition: opacity 150ms ease 80ms, margin-left 150ms ease 80ms, max-width 200ms ease;
+    }
+    .arw-badge:hover .arw-label,
+    .arw-badge.arw-expanded .arw-label {
+      opacity: 1;
+      max-width: 160px;
+      margin-left: 6px;
+    }
+    @keyframes arw-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .arw-icon.arw-spinning svg {
+      animation: arw-spin 800ms linear infinite;
+    }
+
+  `
+  document.head.appendChild(style)
+}
+
 const badge = document.createElement("button")
-badge.style.position = "absolute"
-badge.style.zIndex = "999999"
-badge.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"
-badge.style.transition = "opacity 120ms ease"
+badge.className = "arw-badge"
+
+const badgeIcon = document.createElement("span")
+badgeIcon.className = "arw-icon"
+
+const badgeLabel = document.createElement("span")
+badgeLabel.className = "arw-label"
+
+badge.appendChild(badgeIcon)
+badge.appendChild(badgeLabel)
 badge.style.opacity = "0"
 badge.style.pointerEvents = "none"
+badge.style.transition = "opacity 120ms ease"
 
 let currentParagraph: HTMLElement | null = null
 let hideTimeoutId: number | null = null
 
-function styleBadge(state: "idle" | "loading" | "done") {
-  badge.style.display = "inline-flex"
-  badge.style.alignItems = "center"
-  badge.style.gap = "6px"
-  badge.style.padding = "8px 14px"
-  badge.style.borderRadius = "20px"
-  badge.style.fontFamily = "Inter, sans-serif"
-  badge.style.fontSize = "14px"
-  badge.style.border = "none"
-  badge.style.cursor = state === "idle" ? "pointer" : "default"
+const ICONS = {
+  idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
+  loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
+  done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`
+}
 
-  if (state === "idle") {
+function styleBadge(state: "idle" | "loading" | "done") {
+   if (state === "idle") {
+    badgeIcon.innerHTML = ICONS.idle
+    badgeLabel.textContent = "Simplify this paragraph"
     badge.style.backgroundColor = tokens.readingBg
     badge.style.color = tokens.readingText
-    badge.style.border = `1px solid ${tokens.captionText}`
+    badge.classList.remove("arw-expanded")
+    badgeIcon.classList.remove("arw-spinning")
   } else if (state === "loading") {
+    badgeIcon.innerHTML = ICONS.loading
+    badgeLabel.textContent = "Simplifying..."
     badge.style.backgroundColor = tokens.accentTeal
     badge.style.color = "#FFFFFF"
+    badge.classList.add("arw-expanded")
+    badgeIcon.classList.add("arw-spinning")
   } else if (state === "done") {
+    badgeIcon.innerHTML = ICONS.done
+    badgeLabel.textContent = "Simplified"
     badge.style.backgroundColor = tokens.badgeDoneBg
     badge.style.color = tokens.badgeDoneText
+    badge.classList.add("arw-expanded")
+    badgeIcon.classList.remove("arw-spinning")
   }
 }
 
@@ -64,12 +140,9 @@ function showBadgeFor(paragraph: HTMLElement) {
     hideTimeoutId = null
   }
   currentParagraph = paragraph
-  badge.textContent = "Simplify this paragraph"
   styleBadge("idle")
 
   if (!paragraph.style.position) paragraph.style.position = "relative"
-  badge.style.top = "4px"
-  badge.style.left = "4px"
   paragraph.appendChild(badge)
 
   badge.style.opacity = "1"
@@ -143,12 +216,10 @@ badge.addEventListener("click", async () => {
   if (!currentParagraph) return
   const paragraph = currentParagraph
 
-  badge.textContent = "Simplifying..."
   styleBadge("loading")
 
   await simplifyParagraph(paragraph)
 
-  badge.textContent = "✓ Simplified"
   styleBadge("done")
 
   hideTimeoutId = window.setTimeout(hideBadge, 2000)
@@ -181,7 +252,7 @@ function handleSelectionChange() {
 document.addEventListener("selectionchange", handleSelectionChange)
 
 document.addEventListener("mousedown", (e) => {
-  if (e.target !== badge) hideBadge()
+  if (!badge.contains(e.target as Node)) hideBadge()
 })
 
 // ---- Trigger 2: dwell time (struggle detection) ----
@@ -344,4 +415,5 @@ function injectMenu() {
 }
 
 loadReadingFont()
+injectBadgeStyles()
 injectMenu()
