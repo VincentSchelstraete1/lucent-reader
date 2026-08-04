@@ -1,4 +1,4 @@
-import { downloadSessionLog } from "../lib/session-log"
+import { logEvent, downloadSessionLog } from "../lib/session-log"
 
 export const config = {
   matches: ["https://en.wikipedia.org/*"]
@@ -144,6 +144,7 @@ function showBadgeFor(paragraph: HTMLElement) {
   currentParagraph = paragraph
   styleBadge("idle")
 
+  getTextSpan(paragraph)
   if (!paragraph.style.position) paragraph.style.position = "relative"
   paragraph.appendChild(badge)
 
@@ -157,23 +158,36 @@ function hideBadge() {
   currentParagraph = null
 }
 
+function getTextSpan(paragraph: HTMLElement): HTMLSpanElement {
+  let span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
+  if (!span) {
+    const originalText = paragraph.textContent || ""
+    span = document.createElement("span")
+    span.className = "arw-text"
+    span.textContent = originalText
+    paragraph.textContent = ""
+    paragraph.appendChild(span)
+  }
+  return span
+}
+
 function styleRevertButton(el: HTMLElement) {
-  el.style.position = "absolute"
-  el.style.top = "4px"
-  el.style.right = "4px"
-  el.style.width = "20px"
-  el.style.height = "20px"
+  el.style.display = "inline-flex"
+  el.style.alignItems = "center"
+  el.style.justifyContent = "center"
+  el.style.width = "18px"
+  el.style.height = "18px"
+  el.style.marginLeft = "6px"
+  el.style.verticalAlign = "middle"
   el.style.borderRadius = "50%"
   el.style.border = `1px solid ${tokens.captionText}`
   el.style.backgroundColor = "#FFFFFF"
   el.style.color = tokens.readingText
-  el.style.fontSize = "12px"
-  el.style.lineHeight = "18px"
-  el.style.textAlign = "center"
+  el.style.fontSize = "11px"
+  el.style.lineHeight = "1"
   el.style.padding = "0"
   el.style.cursor = "pointer"
   el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.15)"
-  el.style.zIndex = "999999"
 }
 
 function addRevertButton(paragraph: HTMLElement) {
@@ -184,29 +198,37 @@ function addRevertButton(paragraph: HTMLElement) {
 
   revertBtn.addEventListener("click", (e) => {
     e.stopPropagation()
+    logEvent("revert_click", {})
     const original = originalTextByParagraph.get(paragraph)
-    if (original !== undefined) {
-      paragraph.textContent = original
+    const span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
+    if (original !== undefined && span) {
+      span.textContent = original
     }
     paragraph.style.borderLeft = ""
     paragraph.style.paddingLeft = ""
-    paragraph.style.position = ""
+    revertBtn.remove()
     originalTextByParagraph.delete(paragraph)
   })
 
-  paragraph.appendChild(revertBtn)
+  const span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
+  if (span) {
+    span.insertAdjacentElement("afterend", revertBtn)
+  } else {
+    paragraph.appendChild(revertBtn)
+  }
 }
 
 async function simplifyParagraph(paragraph: HTMLElement) {
   if (originalTextByParagraph.has(paragraph)) return
 
-  const originalText = paragraph.textContent || ""
+  const span = getTextSpan(paragraph)
+  const originalText = span.textContent || ""
   if (!originalText.trim()) return
 
   const simplified = await fakeSimplify(originalText)
 
   originalTextByParagraph.set(paragraph, originalText)
-  paragraph.textContent = simplified
+  span.textContent = simplified
   paragraph.style.position = "relative"
   paragraph.style.borderLeft = `3px solid ${tokens.accentTeal}`
   paragraph.style.paddingLeft = "10px"
@@ -214,9 +236,16 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   addRevertButton(paragraph)
 }
 
+async function fakeSimplify(text: string): Promise<string> {
+  await new Promise((resolve) => setTimeout(resolve, 1000))
+  return "[Simplified] " + text.split(". ")[0] + "."
+}
+
 badge.addEventListener("click", async () => {
   if (!currentParagraph) return
   const paragraph = currentParagraph
+
+  logEvent("simplify_click", { textPreview: (paragraph.textContent || "").slice(0, 60) })
 
   styleBadge("loading")
 
@@ -224,13 +253,10 @@ badge.addEventListener("click", async () => {
 
   styleBadge("done")
 
+  logEvent("simplify_done", { textPreview: (paragraph.textContent || "").slice(0, 60) })
+
   hideTimeoutId = window.setTimeout(hideBadge, 2000)
 })
-
-async function fakeSimplify(text: string): Promise<string> {
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  return "[Simplified] " + text.split(". ")[0] + "."
-}
 
 // ---- Trigger 1: user highlights text themselves ----
 
@@ -266,6 +292,7 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
       const timerId = window.setTimeout(() => {
         if (!flaggedParagraphs.has(paragraph)) {
           flaggedParagraphs.add(paragraph)
+          logEvent("dwell_flag", { textPreview: (paragraph.textContent || "").slice(0, 60) })
           showBadgeFor(paragraph)
         }
       }, STRUGGLE_THRESHOLD_MS)
@@ -358,6 +385,7 @@ function injectMenu() {
   simplifyAllBtn.style.textAlign = "left"
 
   simplifyAllBtn.addEventListener("click", async () => {
+    logEvent("simplify_all_click", {})
     simplifyAllBtn.disabled = true
     simplifyAllBtn.textContent = "Simplifying page..."
     simplifyAllBtn.style.backgroundColor = tokens.accentTeal
