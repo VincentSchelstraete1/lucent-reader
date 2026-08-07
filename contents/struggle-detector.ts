@@ -82,7 +82,6 @@ function injectBadgeStyles() {
     .arw-icon.arw-spinning svg {
       animation: arw-spin 800ms linear infinite;
     }
-
   `
   document.head.appendChild(style)
 }
@@ -105,6 +104,12 @@ badge.style.transition = "opacity 120ms ease"
 let currentParagraph: HTMLElement | null = null
 let hideTimeoutId: number | null = null
 
+// The target reading level for simplification. Selectable by the user
+// for now - later, this gets set automatically instead of picked
+// manually, but everything downstream (the simplify call, the logging)
+// stays the same either way.
+let targetGradeLevel = 5
+
 const ICONS = {
   idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
   loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
@@ -112,7 +117,7 @@ const ICONS = {
 }
 
 function styleBadge(state: "idle" | "loading" | "done") {
-   if (state === "idle") {
+  if (state === "idle") {
     badgeIcon.innerHTML = ICONS.idle
     badgeLabel.textContent = "Simplify this paragraph"
     badge.style.backgroundColor = tokens.readingBg
@@ -136,6 +141,19 @@ function styleBadge(state: "idle" | "loading" | "done") {
   }
 }
 
+function getTextSpan(paragraph: HTMLElement): HTMLSpanElement {
+  let span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
+  if (!span) {
+    const originalText = paragraph.textContent || ""
+    span = document.createElement("span")
+    span.className = "arw-text"
+    span.textContent = originalText
+    paragraph.textContent = ""
+    paragraph.appendChild(span)
+  }
+  return span
+}
+
 function showBadgeFor(paragraph: HTMLElement) {
   if (hideTimeoutId) {
     clearTimeout(hideTimeoutId)
@@ -156,19 +174,6 @@ function hideBadge() {
   badge.style.opacity = "0"
   badge.style.pointerEvents = "none"
   currentParagraph = null
-}
-
-function getTextSpan(paragraph: HTMLElement): HTMLSpanElement {
-  let span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
-  if (!span) {
-    const originalText = paragraph.textContent || ""
-    span = document.createElement("span")
-    span.className = "arw-text"
-    span.textContent = originalText
-    paragraph.textContent = ""
-    paragraph.appendChild(span)
-  }
-  return span
 }
 
 function styleRevertButton(el: HTMLElement) {
@@ -225,7 +230,7 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   const originalText = span.textContent || ""
   if (!originalText.trim()) return
 
-  const simplified = await fakeSimplify(originalText)
+  const simplified = await fakeSimplify(originalText, targetGradeLevel)
 
   originalTextByParagraph.set(paragraph, originalText)
   span.textContent = simplified
@@ -236,16 +241,22 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   addRevertButton(paragraph)
 }
 
-async function fakeSimplify(text: string): Promise<string> {
+// Takes the target grade level as a parameter now - once this becomes
+// a real API call, this same value slots directly into the prompt,
+// e.g. "Simplify this to a Grade {targetLevel} reading level."
+async function fakeSimplify(text: string, targetLevel: number): Promise<string> {
   await new Promise((resolve) => setTimeout(resolve, 1000))
-  return "[Simplified] " + text.split(". ")[0] + "."
+  return `[Simplified to Grade ${targetLevel}] ` + text.split(". ")[0] + "."
 }
 
 badge.addEventListener("click", async () => {
   if (!currentParagraph) return
   const paragraph = currentParagraph
 
-  logEvent("simplify_click", { textPreview: (paragraph.textContent || "").slice(0, 60) })
+  logEvent("simplify_click", {
+    textPreview: (paragraph.textContent || "").slice(0, 60),
+    targetGradeLevel
+  })
 
   styleBadge("loading")
 
@@ -253,7 +264,10 @@ badge.addEventListener("click", async () => {
 
   styleBadge("done")
 
-  logEvent("simplify_done", { textPreview: (paragraph.textContent || "").slice(0, 60) })
+  logEvent("simplify_done", {
+    textPreview: (paragraph.textContent || "").slice(0, 60),
+    targetGradeLevel
+  })
 
   hideTimeoutId = window.setTimeout(hideBadge, 2000)
 })
@@ -310,7 +324,7 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
 const observer = new IntersectionObserver(handleIntersection, { threshold: 0.5 })
 document.querySelectorAll("p").forEach((p) => observer.observe(p))
 
-// ---- Menu: Simplify Entire Page + Reading Mode toggle ----
+// ---- Menu: Simplify Entire Page + Reading Mode + Target Grade Level ----
 
 let readingModeOn = false
 
@@ -385,7 +399,7 @@ function injectMenu() {
   simplifyAllBtn.style.textAlign = "left"
 
   simplifyAllBtn.addEventListener("click", async () => {
-    logEvent("simplify_all_click", {})
+    logEvent("simplify_all_click", { targetGradeLevel })
     simplifyAllBtn.disabled = true
     simplifyAllBtn.textContent = "Simplifying page..."
     simplifyAllBtn.style.backgroundColor = tokens.accentTeal
@@ -433,6 +447,43 @@ function injectMenu() {
   row.appendChild(label)
   row.appendChild(switchBtn)
 
+  // ---- New: target grade level selector ----
+  const gradeLevelRow = document.createElement("div")
+  gradeLevelRow.style.display = "flex"
+  gradeLevelRow.style.alignItems = "center"
+  gradeLevelRow.style.justifyContent = "space-between"
+  gradeLevelRow.style.padding = "4px 2px"
+
+  const gradeLevelLabel = document.createElement("span")
+  gradeLevelLabel.textContent = "Target Reading Level"
+  gradeLevelLabel.style.fontSize = "14px"
+  gradeLevelLabel.style.color = tokens.readingText
+
+  const gradeLevelSelect = document.createElement("select")
+  gradeLevelSelect.style.padding = "6px 10px"
+  gradeLevelSelect.style.borderRadius = "20px"
+  gradeLevelSelect.style.border = `1px solid ${tokens.captionText}`
+  gradeLevelSelect.style.fontSize = "12px"
+  gradeLevelSelect.style.cursor = "pointer"
+  gradeLevelSelect.style.backgroundColor = "#FFFFFF"
+  gradeLevelSelect.style.color = tokens.readingText
+
+  ;[3, 5, 8, 10].forEach((level) => {
+    const option = document.createElement("option")
+    option.value = String(level)
+    option.textContent = `Grade ${level}`
+    if (level === targetGradeLevel) option.selected = true
+    gradeLevelSelect.appendChild(option)
+  })
+
+  gradeLevelSelect.addEventListener("change", () => {
+    targetGradeLevel = Number(gradeLevelSelect.value)
+    logEvent("target_grade_level_changed", { targetGradeLevel })
+  })
+
+  gradeLevelRow.appendChild(gradeLevelLabel)
+  gradeLevelRow.appendChild(gradeLevelSelect)
+
   const exportBtn = document.createElement("button")
   exportBtn.textContent = "Export Session Log"
   exportBtn.style.padding = "10px 14px"
@@ -450,8 +501,8 @@ function injectMenu() {
 
   panel.appendChild(simplifyAllBtn)
   panel.appendChild(row)
+  panel.appendChild(gradeLevelRow)
   panel.appendChild(exportBtn)
-
 
   menuButton.addEventListener("click", () => {
     panel.style.display = panel.style.display === "none" ? "flex" : "none"
