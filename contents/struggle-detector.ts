@@ -1,4 +1,5 @@
 import { logEvent, downloadSessionLog } from "../lib/session-log"
+import { getInstallId } from "../lib/install-id"
 
 export const config = {
   matches: ["https://en.wikipedia.org/*"]
@@ -49,7 +50,7 @@ function injectBadgeStyles() {
     }
     .arw-badge:hover,
     .arw-badge.arw-expanded {
-      width: 190px;
+      width: 230px;
       border-radius: 20px;
       justify-content: flex-start;
       padding-left: 8px;
@@ -72,7 +73,7 @@ function injectBadgeStyles() {
     .arw-badge:hover .arw-label,
     .arw-badge.arw-expanded .arw-label {
       opacity: 1;
-      max-width: 160px;
+      max-width: 200px;
       margin-left: 6px;
     }
     @keyframes arw-spin {
@@ -114,6 +115,7 @@ const ICONS = {
   idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
   loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
   done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`
+  error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
 }
 
 function styleBadge(state: "idle" | "loading" | "done") {
@@ -230,7 +232,7 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   const originalText = span.textContent || ""
   if (!originalText.trim()) return
 
-  const simplified = await fakeSimplify(originalText, targetGradeLevel)
+  const simplified = await simplifyText(originalText, targetGradeLevel)
 
   originalTextByParagraph.set(paragraph, originalText)
   span.textContent = simplified
@@ -244,9 +246,33 @@ async function simplifyParagraph(paragraph: HTMLElement) {
 // Takes the target grade level as a parameter now - once this becomes
 // a real API call, this same value slots directly into the prompt,
 // e.g. "Simplify this to a Grade {targetLevel} reading level."
-async function fakeSimplify(text: string, targetLevel: number): Promise<string> {
-  await new Promise((resolve) => setTimeout(resolve, 1000))
-  return `[Simplified to Grade ${targetLevel}] ` + text.split(". ")[0] + "."
+
+async function simplifyText(text: string, targetLevel: number): Promise<string> {
+  const installId = await getInstallId()
+  
+  const response = await fetch("http://localhost:8000/simplify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text, 
+      target_grade_level: targetLevel,
+      install_id: installId
+    })
+  })
+
+
+  if (response.status === 429) {
+    const errorData = await response.json()
+    throw new Error(errorData.detail)
+  }
+
+  if (!response.ok) {
+    throw new Error("Simplify request failed")
+  }
+
+  const data = await response.json()
+  return data.simplified
+
 }
 
 badge.addEventListener("click", async () => {
@@ -260,14 +286,25 @@ badge.addEventListener("click", async () => {
 
   styleBadge("loading")
 
-  await simplifyParagraph(paragraph)
-
-  styleBadge("done")
-
-  logEvent("simplify_done", {
-    textPreview: (paragraph.textContent || "").slice(0, 60),
-    targetGradeLevel
-  })
+  try {
+    await simplifyParagraph(paragraph)
+    styleBadge("done")
+    logEvent("simplify_done", {
+      textPreview: (paragraph.textContent || "").slice(0, 60),
+      targetGradeLevel
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Something went wrong"
+    badgeIcon.innerHTML = ICONS.error
+    badgeLabel.textContent = message
+    badge.style.backgroundColor = "#FBEAEA"
+    badge.style.color = "#8A2E2E"
+    badge.classList.add("arw-expanded")
+    logEvent("simplify_error", {
+      textPreview: (paragraph.textContent || "").slice(0, 60),
+      error: message
+    })
+  }
 
   hideTimeoutId = window.setTimeout(hideBadge, 2000)
 })
