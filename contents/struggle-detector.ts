@@ -434,7 +434,26 @@ function applyReadingMode(on: boolean) {
   })
 }
 
-function injectMenu() {
+function createSectionLabel(text: string): HTMLDivElement {
+  const label = document.createElement("div")
+  label.textContent = text
+  label.style.fontSize = "11px"
+  label.style.fontWeight = "600"
+  label.style.letterSpacing = "0.06em"
+  label.style.textTransform = "uppercase"
+  label.style.color = tokens.captionText
+  return label
+}
+
+function createDivider(): HTMLDivElement {
+  const divider = document.createElement("div")
+  divider.style.borderTop = `1px solid ${tokens.captionText}`
+  divider.style.opacity = "0.3"
+  divider.style.margin = "2px 0"
+  return divider
+}
+
+function injectMenu(devModeEnabled: boolean) {
   const menuButton = document.createElement("button")
   menuButton.textContent = "Aa"
   menuButton.style.position = "fixed"
@@ -528,13 +547,19 @@ function injectMenu() {
   row.appendChild(label)
   row.appendChild(switchBtn)
 
-  // ---- New: target grade level selector ----
+  // ---- Target grade level selector, with the quiz as a small link
+  // underneath rather than its own competing full-width button ----
   const gradeLevelRow = document.createElement("div")
   gradeLevelRow.style.display = "flex"
-  gradeLevelRow.style.alignItems = "center"
-  gradeLevelRow.style.justifyContent = "space-between"
-  gradeLevelRow.style.gap = "12px"
+  gradeLevelRow.style.flexDirection = "column"
+  gradeLevelRow.style.gap = "4px"
   gradeLevelRow.style.padding = "4px 2px"
+
+  const gradeLevelTopRow = document.createElement("div")
+  gradeLevelTopRow.style.display = "flex"
+  gradeLevelTopRow.style.alignItems = "center"
+  gradeLevelTopRow.style.justifyContent = "space-between"
+  gradeLevelTopRow.style.gap = "12px"
 
   const gradeLevelLabel = document.createElement("span")
   gradeLevelLabel.textContent = "Target Reading Level"
@@ -566,8 +591,29 @@ function injectMenu() {
 
   gradeLevelSelectEl = gradeLevelSelect
 
-  gradeLevelRow.appendChild(gradeLevelLabel)
-  gradeLevelRow.appendChild(gradeLevelSelect)
+  gradeLevelTopRow.appendChild(gradeLevelLabel)
+  gradeLevelTopRow.appendChild(gradeLevelSelect)
+
+  const quizLink = document.createElement("button")
+  quizLink.textContent = "Not sure? Take the quiz"
+  quizLink.style.alignSelf = "flex-start"
+  quizLink.style.border = "none"
+  quizLink.style.background = "none"
+  quizLink.style.padding = "0"
+  quizLink.style.fontSize = "12px"
+  quizLink.style.color = tokens.accentTeal
+  quizLink.style.textDecoration = "underline"
+  quizLink.style.cursor = "pointer"
+
+  quizLink.addEventListener("click", () => {
+    // Close the menu panel first so it isn't sitting behind the modal
+    // backdrop while the quiz is open.
+    panel.style.display = "none"
+    openQuizModal()
+  })
+
+  gradeLevelRow.appendChild(gradeLevelTopRow)
+  gradeLevelRow.appendChild(quizLink)
 
   // ---- New: text length slider ----
   // Still just the same four fixed TEXT_LENGTH_OPTIONS from
@@ -626,25 +672,6 @@ function injectMenu() {
   textLengthRow.appendChild(textLengthHeader)
   textLengthRow.appendChild(textLengthSlider)
 
-  // ---- New: reading level quiz link ----
-  const quizBtn = document.createElement("button")
-  quizBtn.textContent = "Take Reading Level Quiz"
-  quizBtn.style.padding = "10px 14px"
-  quizBtn.style.borderRadius = "20px"
-  quizBtn.style.border = `1px solid ${tokens.captionText}`
-  quizBtn.style.backgroundColor = "#FFFFFF"
-  quizBtn.style.color = tokens.readingText
-  quizBtn.style.fontSize = "14px"
-  quizBtn.style.cursor = "pointer"
-  quizBtn.style.textAlign = "left"
-
-  quizBtn.addEventListener("click", () => {
-    // Close the menu panel first so it isn't sitting behind the modal
-    // backdrop while the quiz is open.
-    panel.style.display = "none"
-    openQuizModal()
-  })
-
   const exportBtn = document.createElement("button")
   exportBtn.textContent = "Export Session Log"
   exportBtn.style.padding = "10px 14px"
@@ -660,12 +687,26 @@ function injectMenu() {
     downloadSessionLog()
   })
 
+  // ---- Actions ----
+  panel.appendChild(createSectionLabel("Actions"))
   panel.appendChild(simplifyAllBtn)
+
+  panel.appendChild(createDivider())
+
+  // ---- Preferences ----
+  panel.appendChild(createSectionLabel("Preferences"))
   panel.appendChild(row)
-  panel.appendChild(quizBtn)
   panel.appendChild(gradeLevelRow)
   panel.appendChild(textLengthRow)
-  panel.appendChild(exportBtn)
+
+  // Research/dev tool, not something real end users need - only shown
+  // when chrome.storage.local has devMode === true, which nothing sets
+  // by default (see init()).
+  if (devModeEnabled) {
+    panel.appendChild(createDivider())
+    panel.appendChild(createSectionLabel("Dev"))
+    panel.appendChild(exportBtn)
+  }
 
   menuButton.addEventListener("click", () => {
     panel.style.display = panel.style.display === "none" ? "flex" : "none"
@@ -907,6 +948,14 @@ function injectQuizModal() {
   quizContentEl = content
 }
 
+// Nothing sets this key by default, so devModeEnabled is false - and the
+// "Export Session Log" button absent - for every real user. See the
+// bottom of this file for how to flip it on locally for testing.
+async function isDevModeEnabled(): Promise<boolean> {
+  const stored = await chrome.storage.local.get("devMode")
+  return stored.devMode === true
+}
+
 // Loads the stored grade level and text length (set by the options-page
 // assessment, the in-page quiz, or a prior dropdown change) before
 // building the menu, so both dropdowns' initial selections are correct
@@ -914,9 +963,10 @@ function injectQuizModal() {
 async function init() {
   targetGradeLevel = await getTargetGradeLevel()
   targetLength = await getTargetLength()
+  const devModeEnabled = await isDevModeEnabled()
   loadReadingFont()
   injectBadgeStyles()
-  injectMenu()
+  injectMenu(devModeEnabled)
   injectQuizModal()
 }
 
