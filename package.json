@@ -10,6 +10,7 @@
     "package": "plasmo package"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "plasmo": "0.90.5",
     "react": "18.2.0",
     "react-dom": "18.2.0"
@@ -24,7 +25,9 @@
     "typescript": "5.3.3"
   },
   "manifest": {
-    "permissions": ["storage"],
+    "permissions": [
+      "storage"
+    ],
     "host_permissions": [
       "http://localhost:8000/*"
     ]

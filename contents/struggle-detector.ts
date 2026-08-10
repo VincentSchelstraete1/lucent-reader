@@ -1,3 +1,5 @@
+import { Readability } from "@mozilla/readability"
+
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
 import {
@@ -403,35 +405,281 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
 }
 
 const observer = new IntersectionObserver(handleIntersection, { threshold: 0.5 })
-document.querySelectorAll("p").forEach((p) => observer.observe(p))
+
+// Tracks exactly which paragraphs the observer currently watches.
+// IntersectionObserver has no "list what's observed" API, so this Set is
+// the only way to cleanly unobserve everything when Reading Mode swaps
+// which paragraph set (real page vs. extracted reader view) is active.
+const observedParagraphs = new Set<Element>()
+
+function observeParagraph(p: Element) {
+  if (observedParagraphs.has(p)) return
+  observedParagraphs.add(p)
+  observer.observe(p)
+}
+
+function unobserveAllParagraphs() {
+  observedParagraphs.forEach((p) => observer.unobserve(p))
+  observedParagraphs.clear()
+  activeTimers.forEach((timerId) => clearTimeout(timerId))
+  activeTimers.clear()
+}
+
+document.querySelectorAll("p").forEach(observeParagraph)
+
+// Returns whichever paragraph set "Simplify Entire Page" should act on:
+// the extracted reader-view paragraphs while Reading Mode is on (the
+// real page underneath is hidden and shouldn't be touched), or the real
+// page's own paragraphs otherwise.
+function getActiveParagraphs(): HTMLElement[] {
+  return readingModeOn ? readerParagraphs : (Array.from(document.querySelectorAll("p")) as HTMLElement[])
+}
 
 // ---- Menu: Simplify Entire Page + Reading Mode + Target Grade Level ----
 
 let readingModeOn = false
 
-const READING_CONTAINER_SELECTORS = [
-  "html",
-  "body",
-  "#content",
-  "#bodyContent",
-  "#mw-content-text",
-  ".mw-parser-output",
-  "#mw-content-container"
+// ---- Reader Mode ----
+//
+// Real article extraction via Mozilla's Readability (the engine behind
+// Firefox Reader View), rendered as a full-screen overlay on top of the
+// untouched real page - not a recoloring of Wikipedia's own DOM. The
+// simplify features (badge, dwell detection, highlight-to-simplify,
+// revert) aren't reimplemented for this view: getTextSpan, showBadgeFor,
+// addRevertButton, and the selectionchange handler are all already
+// generic over any <p> element, so once the extracted paragraphs are
+// real elements in the live document and handed to observeParagraph(),
+// everything else just works unmodified.
+
+let readerOverlayEl: HTMLDivElement | null = null
+let readerParagraphs: HTMLElement[] = []
+let switchBtnEl: HTMLButtonElement | null = null
+
+function injectReaderStyles() {
+  const style = document.createElement("style")
+  style.textContent = `
+    .arw-reader-content p {
+      margin: 0 0 1.3em;
+      font-size: 19px;
+      line-height: 1.8;
+      color: ${tokens.readingText};
+    }
+    .arw-reader-content h1, .arw-reader-content h2, .arw-reader-content h3 {
+      color: ${tokens.readingText};
+      line-height: 1.4;
+      margin: 1.4em 0 0.6em;
+    }
+    .arw-reader-content ul, .arw-reader-content ol {
+      color: ${tokens.readingText};
+      font-size: 19px;
+      line-height: 1.8;
+      padding-left: 1.4em;
+    }
+    .arw-reader-content img, .arw-reader-content figure {
+      max-width: 100%;
+      height: auto;
+    }
+    .arw-reader-content pre, .arw-reader-content code {
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 100%;
+    }
+    .arw-reader-content blockquote {
+      border-left: 3px solid ${tokens.accentTeal};
+      margin: 1em 0;
+      padding-left: 1em;
+      color: ${tokens.captionText};
+    }
+    .arw-reader-content a {
+      color: ${tokens.accentTeal};
+    }
+    /* Defensive backstop, not the primary fix - real infoboxes/navboxes
+       are stripped before extraction in extractArticle() below. This
+       just keeps any unanticipated table on some other page from
+       stacking (Wikipedia's own responsive table CSS still applies
+       inside this overlay, since it's the same live document, and can
+       force table cells to display:block below certain widths). */
+    .arw-reader-content table {
+      border-collapse: collapse;
+      margin: 1em 0;
+      font-size: 16px;
+    }
+    .arw-reader-content th, .arw-reader-content td {
+      display: table-cell !important;
+      border: 1px solid ${tokens.captionText};
+      padding: 6px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .arw-reader-content tr {
+      display: table-row !important;
+    }
+    .arw-reader-table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+    }
+  `
+  document.head.appendChild(style)
+}
+
+// Wikipedia classes that are never real article prose - infoboxes,
+// sidebars, navigation footers, and maintenance banners. Readability's
+// own content-scoring can still pull these in (an infobox sits right
+// next to the lead paragraph, so it sometimes looks like "part of the
+// content" structurally), so they're removed from the clone before
+// Readability ever sees it, rather than relying on Readability to
+// exclude them correctly.
+const NON_ARTICLE_SELECTORS = [
+  ".infobox",
+  ".sidebar",
+  ".navbox",
+  ".vertical-navbox",
+  ".metadata",
+  ".ambox",
+  ".toc",
+  "#toc"
 ]
 
-function applyReadingMode(on: boolean) {
-  READING_CONTAINER_SELECTORS.forEach((selector) => {
-    const el = document.querySelector(selector) as HTMLElement | null
-    if (el) el.style.backgroundColor = on ? tokens.readingBg : ""
+// Runs Readability against a clone of the document, never the live one -
+// Readability mutates the tree it's given as it parses, and doing that
+// to the real page would break it.
+function extractArticle(): { title: string; contentHTML: string } | null {
+  const clone = document.cloneNode(true) as Document
+  NON_ARTICLE_SELECTORS.forEach((selector) => {
+    clone.querySelectorAll(selector).forEach((el) => el.remove())
   })
+  const article = new Readability(clone).parse()
+  if (!article || !article.content) return null
+  return { title: article.title || document.title, contentHTML: article.content }
+}
 
-  document.querySelectorAll("p").forEach((p) => {
-    const el = p as HTMLElement
-    el.style.fontFamily = on ? "'Varela Round', sans-serif" : ""
-    el.style.fontSize = on ? "18px" : ""
-    el.style.lineHeight = on ? "1.8" : ""
-    el.style.color = on ? tokens.readingText : ""
+// Wraps any table that still made it through extraction in its own
+// horizontally-scrollable container, so an unexpectedly wide table
+// scrolls within itself instead of forcing the whole page to scroll
+// sideways.
+function wrapWideTables(container: HTMLElement) {
+  container.querySelectorAll("table").forEach((table) => {
+    const wrap = document.createElement("div")
+    wrap.className = "arw-reader-table-wrap"
+    table.parentNode?.insertBefore(wrap, table)
+    wrap.appendChild(table)
   })
+}
+
+function buildReaderOverlay(article: { title: string; contentHTML: string }): {
+  overlay: HTMLDivElement
+  contentContainer: HTMLDivElement
+} {
+  const overlay = document.createElement("div")
+  overlay.id = "arw-reader-overlay"
+  overlay.style.position = "fixed"
+  overlay.style.top = "0"
+  overlay.style.left = "0"
+  overlay.style.right = "0"
+  overlay.style.bottom = "0"
+  overlay.style.zIndex = "500000"
+  overlay.style.backgroundColor = tokens.readingBg
+  overlay.style.overflowY = "auto"
+  overlay.style.overflowX = "hidden"
+  overlay.style.boxSizing = "border-box"
+
+  const closeBtn = document.createElement("button")
+  closeBtn.textContent = "✕ Exit Reading Mode"
+  closeBtn.style.position = "fixed"
+  closeBtn.style.top = "16px"
+  closeBtn.style.right = "16px"
+  closeBtn.style.zIndex = "500001"
+  closeBtn.style.padding = "8px 16px"
+  closeBtn.style.borderRadius = "20px"
+  closeBtn.style.border = "none"
+  closeBtn.style.backgroundColor = tokens.accentTeal
+  closeBtn.style.color = "#FFFFFF"
+  closeBtn.style.fontFamily = "Inter, sans-serif"
+  closeBtn.style.fontSize = "13px"
+  closeBtn.style.cursor = "pointer"
+  closeBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)"
+  closeBtn.addEventListener("click", () => setReadingMode(false))
+
+  const wrapper = document.createElement("div")
+  wrapper.style.maxWidth = "680px"
+  wrapper.style.width = "100%"
+  wrapper.style.boxSizing = "border-box"
+  wrapper.style.margin = "0 auto"
+  wrapper.style.padding = "72px 24px 80px"
+  wrapper.style.fontFamily = "'Varela Round', sans-serif"
+
+  const titleEl = document.createElement("h1")
+  titleEl.textContent = article.title
+  titleEl.style.fontSize = "28px"
+  titleEl.style.lineHeight = "1.3"
+  titleEl.style.color = tokens.readingText
+  titleEl.style.marginBottom = "24px"
+
+  const contentContainer = document.createElement("div")
+  contentContainer.className = "arw-reader-content"
+  contentContainer.innerHTML = article.contentHTML
+  wrapWideTables(contentContainer)
+
+  wrapper.appendChild(titleEl)
+  wrapper.appendChild(contentContainer)
+  overlay.appendChild(closeBtn)
+  overlay.appendChild(wrapper)
+
+  return { overlay, contentContainer }
+}
+
+// Builds a fresh overlay from a fresh extraction every time Reading Mode
+// turns on, rather than trying to persist/reuse one across toggles - the
+// real page is never mutated in the first place, so there's nothing to
+// restore on exit beyond removing this overlay.
+function enterReaderMode(): boolean {
+  const article = extractArticle()
+  if (!article) return false
+
+  unobserveAllParagraphs()
+
+  const { overlay, contentContainer } = buildReaderOverlay(article)
+  document.body.appendChild(overlay)
+  readerOverlayEl = overlay
+
+  readerParagraphs = Array.from(contentContainer.querySelectorAll("p"))
+  readerParagraphs.forEach(observeParagraph)
+
+  return true
+}
+
+function exitReaderMode() {
+  if (readerOverlayEl) {
+    readerOverlayEl.remove()
+    readerOverlayEl = null
+  }
+  readerParagraphs = []
+
+  unobserveAllParagraphs()
+  document.querySelectorAll("p").forEach(observeParagraph)
+}
+
+function syncReadingModeSwitch(on: boolean) {
+  if (!switchBtnEl) return
+  switchBtnEl.textContent = on ? "On" : "Off"
+  switchBtnEl.style.backgroundColor = on ? tokens.accentTeal : tokens.captionText
+}
+
+function setReadingMode(on: boolean) {
+  if (on) {
+    const entered = enterReaderMode()
+    if (!entered) {
+      logEvent("reading_mode_error", {})
+      syncReadingModeSwitch(false)
+      return
+    }
+  } else {
+    exitReaderMode()
+  }
+
+  readingModeOn = on
+  syncReadingModeSwitch(on)
+  logEvent("reading_mode_toggled", { readingModeOn })
 }
 
 function createSectionLabel(text: string): HTMLDivElement {
@@ -505,8 +753,7 @@ function injectMenu(devModeEnabled: boolean) {
     simplifyAllBtn.style.backgroundColor = tokens.accentTeal
     simplifyAllBtn.style.color = "#FFFFFF"
 
-    const paragraphs = Array.from(document.querySelectorAll("p")) as HTMLElement[]
-    for (const p of paragraphs) {
+    for (const p of getActiveParagraphs()) {
       await simplifyParagraph(p)
     }
 
@@ -537,12 +784,9 @@ function injectMenu(devModeEnabled: boolean) {
   switchBtn.style.backgroundColor = tokens.captionText
   switchBtn.style.color = "#FFFFFF"
 
-  switchBtn.addEventListener("click", () => {
-    readingModeOn = !readingModeOn
-    applyReadingMode(readingModeOn)
-    switchBtn.textContent = readingModeOn ? "On" : "Off"
-    switchBtn.style.backgroundColor = readingModeOn ? tokens.accentTeal : tokens.captionText
-  })
+  switchBtn.addEventListener("click", () => setReadingMode(!readingModeOn))
+
+  switchBtnEl = switchBtn
 
   row.appendChild(label)
   row.appendChild(switchBtn)
@@ -966,6 +1210,7 @@ async function init() {
   const devModeEnabled = await isDevModeEnabled()
   loadReadingFont()
   injectBadgeStyles()
+  injectReaderStyles()
   injectMenu(devModeEnabled)
   injectQuizModal()
 }
