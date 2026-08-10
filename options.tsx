@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react"
 
 import {
-  ASSESSMENT_PASSAGES,
-  computeTargetGradeLevel,
+  type AssessmentPassage,
+  type AssessmentResponse,
+  MAX_QUIZ_QUESTIONS,
+  type QuizState,
+  applyQuizAnswer,
+  finalizeQuizResult,
   getTargetGradeLevel,
+  getTierLabel,
+  isQuizConfident,
+  pickPassageForTier,
   setTargetGradeLevel,
-  type AssessmentResponse
+  startQuizState
 } from "~lib/reading-level"
 
 const tokens = {
@@ -28,32 +35,40 @@ const ANSWER_OPTIONS: { value: AssessmentResponse; label: string }[] = [
 function OptionsPage() {
   const [view, setView] = useState<View>("intro")
   const [currentLevel, setCurrentLevel] = useState<number | null>(null)
-  const [stepIndex, setStepIndex] = useState(0)
-  const [responses, setResponses] = useState<AssessmentResponse[]>([])
+  const [questionCount, setQuestionCount] = useState(0)
+  const [quizState, setQuizState] = useState<QuizState>(startQuizState())
+  const [passage, setPassage] = useState<AssessmentPassage | null>(null)
 
   useEffect(() => {
     getTargetGradeLevel().then(setCurrentLevel)
   }, [])
 
   function startAssessment() {
-    setStepIndex(0)
-    setResponses([])
+    const initialState = startQuizState()
+    setQuizState(initialState)
+    setPassage(pickPassageForTier(initialState.tierIndex, initialState.usedPassageTexts))
+    setQuestionCount(0)
     setView("assessment")
   }
 
   async function answer(response: AssessmentResponse) {
-    const next = [...responses, response]
+    if (!passage) return
 
-    if (next.length < ASSESSMENT_PASSAGES.length) {
-      setResponses(next)
-      setStepIndex(stepIndex + 1)
+    const nextState = applyQuizAnswer(quizState, passage, response)
+    const nextCount = questionCount + 1
+
+    if (nextCount >= MAX_QUIZ_QUESTIONS || isQuizConfident(nextState)) {
+      const level = finalizeQuizResult(nextState)
+      await setTargetGradeLevel(level)
+      setCurrentLevel(level)
+      setQuizState(nextState)
+      setView("done")
       return
     }
 
-    const level = computeTargetGradeLevel(next)
-    await setTargetGradeLevel(level)
-    setCurrentLevel(level)
-    setView("done")
+    setQuizState(nextState)
+    setQuestionCount(nextCount)
+    setPassage(pickPassageForTier(nextState.tierIndex, nextState.usedPassageTexts))
   }
 
   return (
@@ -78,10 +93,11 @@ function OptionsPage() {
         {view === "intro" && (
           <div>
             <p style={{ fontSize: 15, lineHeight: 1.6 }}>
-              You'll see three short passages. For each one, just say
-              whether it felt too easy, too hard, or about right. That's
-              used to pick a target reading level for simplified text — you
-              can always change it later from the dropdown on the page too.
+              You'll see a short passage at a time. Just say whether it felt
+              too easy, too hard, or about right, and the next passage will
+              adjust to match - usually just a few questions before we
+              settle on a level. You can always change it later from the
+              dropdown on the page too.
             </p>
             {currentLevel !== null && (
               <p
@@ -90,18 +106,16 @@ function OptionsPage() {
                   color: tokens.captionText,
                   marginTop: 12
                 }}>
-                Current target level: Grade {currentLevel}
+                Current target level: {getTierLabel(currentLevel)}
               </p>
             )}
-            <button
-              onClick={startAssessment}
-              style={primaryButtonStyle}>
+            <button onClick={startAssessment} style={primaryButtonStyle}>
               {currentLevel !== null ? "Take assessment" : "Start"}
             </button>
           </div>
         )}
 
-        {view === "assessment" && (
+        {view === "assessment" && passage && (
           <div>
             <p
               style={{
@@ -109,7 +123,7 @@ function OptionsPage() {
                 color: tokens.captionText,
                 marginBottom: 10
               }}>
-              Passage {stepIndex + 1} of {ASSESSMENT_PASSAGES.length}
+              Question {questionCount + 1} (up to {MAX_QUIZ_QUESTIONS})
             </p>
             <div
               style={{
@@ -121,7 +135,7 @@ function OptionsPage() {
                 lineHeight: 1.7,
                 marginBottom: 20
               }}>
-              {ASSESSMENT_PASSAGES[stepIndex].text}
+              {passage.text}
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               {ANSWER_OPTIONS.map((option) => (
@@ -136,7 +150,7 @@ function OptionsPage() {
           </div>
         )}
 
-        {view === "done" && (
+        {view === "done" && currentLevel !== null && (
           <div>
             <div
               style={{
@@ -146,7 +160,8 @@ function OptionsPage() {
                 padding: 20,
                 fontSize: 15
               }}>
-              Target reading level set to <strong>Grade {currentLevel}</strong>.
+              Target reading level set to{" "}
+              <strong>{getTierLabel(currentLevel)}</strong>.
             </div>
             <button onClick={startAssessment} style={secondaryButtonStyle}>
               Take assessment again

@@ -1,13 +1,20 @@
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
 import {
-  ASSESSMENT_PASSAGES,
   DEFAULT_GRADE_LEVEL,
+  MAX_QUIZ_QUESTIONS,
   VALID_GRADE_LEVELS,
-  computeTargetGradeLevel,
+  applyQuizAnswer,
+  finalizeQuizResult,
   getTargetGradeLevel,
+  getTierLabel,
+  isQuizConfident,
+  pickPassageForTier,
   setTargetGradeLevel,
-  type AssessmentResponse
+  startQuizState,
+  type AssessmentPassage,
+  type AssessmentResponse,
+  type QuizState
 } from "../lib/reading-level"
 import {
   DEFAULT_TEXT_LENGTH,
@@ -546,7 +553,7 @@ function injectMenu() {
   VALID_GRADE_LEVELS.forEach((level) => {
     const option = document.createElement("option")
     option.value = String(level)
-    option.textContent = `Grade ${level}`
+    option.textContent = getTierLabel(level)
     if (level === targetGradeLevel) option.selected = true
     gradeLevelSelect.appendChild(option)
   })
@@ -657,8 +664,9 @@ function injectMenu() {
 // in lib/reading-level.ts and are reused as-is here - this section only
 // builds the modal DOM and re-renders it as the user answers.
 
-let quizStepIndex = 0
-let quizResponses: AssessmentResponse[] = []
+let quizState: QuizState = startQuizState()
+let quizQuestionCount = 0
+let quizCurrentPassage: AssessmentPassage | null = null
 let quizContentEl: HTMLDivElement | null = null
 let quizBackdropEl: HTMLDivElement | null = null
 
@@ -689,17 +697,17 @@ function syncGradeLevelDropdown(level: number) {
 }
 
 function renderQuizStep() {
-  if (!quizContentEl) return
+  if (!quizContentEl || !quizCurrentPassage) return
   quizContentEl.innerHTML = ""
 
   const progress = document.createElement("p")
-  progress.textContent = `Passage ${quizStepIndex + 1} of ${ASSESSMENT_PASSAGES.length}`
+  progress.textContent = `Question ${quizQuestionCount + 1} (up to ${MAX_QUIZ_QUESTIONS})`
   progress.style.fontSize = "13px"
   progress.style.color = tokens.captionText
   progress.style.marginBottom = "10px"
 
   const passageBox = document.createElement("div")
-  passageBox.textContent = ASSESSMENT_PASSAGES[quizStepIndex].text
+  passageBox.textContent = quizCurrentPassage.text
   passageBox.style.backgroundColor = "#FFFFFF"
   passageBox.style.border = `1px solid ${tokens.captionText}`
   passageBox.style.borderRadius = "12px"
@@ -738,7 +746,7 @@ function renderQuizResult(level: number) {
   quizContentEl.innerHTML = ""
 
   const resultBox = document.createElement("div")
-  resultBox.innerHTML = `Target reading level set to <strong>Grade ${level}</strong>.`
+  resultBox.innerHTML = `Target reading level set to <strong>${getTierLabel(level)}</strong>.`
   resultBox.style.backgroundColor = tokens.badgeDoneBg
   resultBox.style.color = tokens.badgeDoneText
   resultBox.style.borderRadius = "12px"
@@ -761,26 +769,38 @@ function renderQuizResult(level: number) {
   quizContentEl.appendChild(retakeBtn)
 }
 
+// Applies one answer via the shared adaptive engine in lib/reading-level.ts,
+// then either asks the next (narrower) question or - once the engine
+// reports it's confident, or we've hit the hard cap - finalizes and shows
+// the result. All the branching/confidence logic lives in the lib module;
+// this only decides what to render next.
 async function handleQuizAnswer(response: AssessmentResponse) {
-  quizResponses.push(response)
+  if (!quizCurrentPassage) return
 
-  if (quizResponses.length < ASSESSMENT_PASSAGES.length) {
-    quizStepIndex++
-    renderQuizStep()
+  const nextState = applyQuizAnswer(quizState, quizCurrentPassage, response)
+  const nextCount = quizQuestionCount + 1
+
+  if (nextCount >= MAX_QUIZ_QUESTIONS || isQuizConfident(nextState)) {
+    const level = finalizeQuizResult(nextState)
+    await setTargetGradeLevel(level)
+    targetGradeLevel = level
+    syncGradeLevelDropdown(level)
+    logEvent("quiz_completed", { targetGradeLevel: level, questionCount: nextCount })
+    quizState = nextState
+    renderQuizResult(level)
     return
   }
 
-  const level = computeTargetGradeLevel(quizResponses)
-  await setTargetGradeLevel(level)
-  targetGradeLevel = level
-  syncGradeLevelDropdown(level)
-  logEvent("quiz_completed", { targetGradeLevel: level })
-  renderQuizResult(level)
+  quizState = nextState
+  quizQuestionCount = nextCount
+  quizCurrentPassage = pickPassageForTier(quizState.tierIndex, quizState.usedPassageTexts)
+  renderQuizStep()
 }
 
 function startQuiz() {
-  quizStepIndex = 0
-  quizResponses = []
+  quizState = startQuizState()
+  quizQuestionCount = 0
+  quizCurrentPassage = pickPassageForTier(quizState.tierIndex, quizState.usedPassageTexts)
   renderQuizStep()
 }
 
