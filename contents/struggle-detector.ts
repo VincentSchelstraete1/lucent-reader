@@ -569,44 +569,62 @@ function injectMenu() {
   gradeLevelRow.appendChild(gradeLevelLabel)
   gradeLevelRow.appendChild(gradeLevelSelect)
 
-  // ---- New: text length selector ----
+  // ---- New: text length slider ----
+  // Still just the same four fixed TEXT_LENGTH_OPTIONS from
+  // lib/text-length.ts - the slider's integer value (0-3) is used
+  // directly as an index into that array, so it's a different control
+  // for picking one of the four options, not a new continuous value.
   const textLengthRow = document.createElement("div")
   textLengthRow.style.display = "flex"
-  textLengthRow.style.alignItems = "center"
-  textLengthRow.style.justifyContent = "space-between"
-  textLengthRow.style.gap = "12px"
+  textLengthRow.style.flexDirection = "column"
+  textLengthRow.style.gap = "6px"
   textLengthRow.style.padding = "4px 2px"
+
+  const textLengthHeader = document.createElement("div")
+  textLengthHeader.style.display = "flex"
+  textLengthHeader.style.justifyContent = "space-between"
 
   const textLengthLabel = document.createElement("span")
   textLengthLabel.textContent = "Text Length"
   textLengthLabel.style.fontSize = "14px"
   textLengthLabel.style.color = tokens.readingText
 
-  const textLengthSelect = document.createElement("select")
-  textLengthSelect.style.padding = "6px 10px"
-  textLengthSelect.style.borderRadius = "20px"
-  textLengthSelect.style.border = `1px solid ${tokens.captionText}`
-  textLengthSelect.style.fontSize = "12px"
-  textLengthSelect.style.cursor = "pointer"
-  textLengthSelect.style.backgroundColor = "#FFFFFF"
-  textLengthSelect.style.color = tokens.readingText
+  const textLengthValue = document.createElement("span")
+  textLengthValue.style.fontSize = "12px"
+  textLengthValue.style.color = tokens.captionText
 
-  TEXT_LENGTH_OPTIONS.forEach(({ value, label }) => {
-    const option = document.createElement("option")
-    option.value = value
-    option.textContent = label
-    if (value === targetLength) option.selected = true
-    textLengthSelect.appendChild(option)
-  })
+  const textLengthSlider = document.createElement("input")
+  textLengthSlider.type = "range"
+  textLengthSlider.min = "0"
+  textLengthSlider.max = String(TEXT_LENGTH_OPTIONS.length - 1)
+  textLengthSlider.step = "1"
+  textLengthSlider.style.width = "100%"
+  textLengthSlider.style.cursor = "pointer"
+  textLengthSlider.style.accentColor = tokens.accentTeal
 
-  textLengthSelect.addEventListener("change", () => {
-    targetLength = textLengthSelect.value as TextLength
+  function syncTextLengthDisplay(index: number) {
+    textLengthSlider.value = String(index)
+    textLengthValue.textContent = TEXT_LENGTH_OPTIONS[index].label
+  }
+
+  const initialIndex = Math.max(
+    0,
+    TEXT_LENGTH_OPTIONS.findIndex((o) => o.value === targetLength)
+  )
+  syncTextLengthDisplay(initialIndex)
+
+  textLengthSlider.addEventListener("input", () => {
+    const index = Number(textLengthSlider.value)
+    targetLength = TEXT_LENGTH_OPTIONS[index].value
+    syncTextLengthDisplay(index)
     setTargetLength(targetLength)
     logEvent("target_length_changed", { targetLength })
   })
 
-  textLengthRow.appendChild(textLengthLabel)
-  textLengthRow.appendChild(textLengthSelect)
+  textLengthHeader.appendChild(textLengthLabel)
+  textLengthHeader.appendChild(textLengthValue)
+  textLengthRow.appendChild(textLengthHeader)
+  textLengthRow.appendChild(textLengthSlider)
 
   // ---- New: reading level quiz link ----
   const quizBtn = document.createElement("button")
