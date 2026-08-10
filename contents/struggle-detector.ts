@@ -34,6 +34,7 @@ function injectBadgeStyles() {
       top: 2px;
       left: -40px;
       width: 32px;
+      max-width: 32px;
       height: 32px;
       border-radius: 50%;
       display: flex;
@@ -45,15 +46,16 @@ function injectBadgeStyles() {
       padding: 0;
       border: 1px solid ${tokens.captionText};
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      transition: width 200ms ease, border-radius 200ms ease, justify-content 0ms 200ms;
+      transition: max-width 200ms ease, border-radius 200ms ease, justify-content 0ms 200ms;
       z-index: 999999;
     }
-    .arw-badge:hover,
+   .arw-badge:hover,
     .arw-badge.arw-expanded {
-      width: 230px;
+      width: auto;
+      max-width: 400px;
       border-radius: 20px;
       justify-content: flex-start;
-      padding-left: 8px;
+      padding: 0 12px 0 8px;
     }
     .arw-badge .arw-icon {
       flex-shrink: 0;
@@ -73,7 +75,7 @@ function injectBadgeStyles() {
     .arw-badge:hover .arw-label,
     .arw-badge.arw-expanded .arw-label {
       opacity: 1;
-      max-width: 200px;
+      max-width: 350px;
       margin-left: 6px;
     }
     @keyframes arw-spin {
@@ -114,7 +116,7 @@ let targetGradeLevel = 5
 const ICONS = {
   idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
   loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
-  done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`
+  done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`,
   error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
 }
 

@@ -43,7 +43,7 @@ def check_and_increment(install_id: str):
     if record["count"] >= DAILY_LIMIT:
         raise HTTPException(
             status_code=429,
-            detail=f"Daily limit reached. Try again tomorrow."
+            detail=f"Daily limit reached."
         )
 
     record["count"] += 1
