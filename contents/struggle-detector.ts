@@ -1,5 +1,21 @@
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
+import {
+  ASSESSMENT_PASSAGES,
+  DEFAULT_GRADE_LEVEL,
+  VALID_GRADE_LEVELS,
+  computeTargetGradeLevel,
+  getTargetGradeLevel,
+  setTargetGradeLevel,
+  type AssessmentResponse
+} from "../lib/reading-level"
+import {
+  DEFAULT_TEXT_LENGTH,
+  TEXT_LENGTH_OPTIONS,
+  getTargetLength,
+  setTargetLength,
+  type TextLength
+} from "../lib/text-length"
 
 export const config = {
   matches: ["https://en.wikipedia.org/*"]
@@ -107,11 +123,23 @@ badge.style.transition = "opacity 120ms ease"
 let currentParagraph: HTMLElement | null = null
 let hideTimeoutId: number | null = null
 
-// The target reading level for simplification. Selectable by the user
-// for now - later, this gets set automatically instead of picked
-// manually, but everything downstream (the simplify call, the logging)
-// stays the same either way.
-let targetGradeLevel = 5
+// The target reading level for simplification. Defaults to
+// DEFAULT_GRADE_LEVEL until the stored value loads (see init() at the
+// bottom of this file), then reflects whatever the options-page
+// assessment or the manual dropdown last set - both write to the same
+// chrome.storage.local key via lib/reading-level.ts, so this stays in
+// sync with the options page across page loads.
+let targetGradeLevel = DEFAULT_GRADE_LEVEL
+
+// Same idea as targetGradeLevel above, but for output length. Loaded from
+// storage in init() and kept in sync with the "Text Length" dropdown.
+let targetLength: TextLength = DEFAULT_TEXT_LENGTH
+
+// Reference to the menu's grade-level <select>, set once injectMenu()
+// builds it. The quiz modal needs this so that finishing the quiz updates
+// the dropdown's displayed value immediately, without the two drifting
+// out of sync until the next page load.
+let gradeLevelSelectEl: HTMLSelectElement | null = null
 
 const ICONS = {
   idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
@@ -234,7 +262,7 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   const originalText = span.textContent || ""
   if (!originalText.trim()) return
 
-  const simplified = await simplifyText(originalText, targetGradeLevel)
+  const simplified = await simplifyText(originalText, targetGradeLevel, targetLength)
 
   originalTextByParagraph.set(paragraph, originalText)
   span.textContent = simplified
@@ -249,15 +277,20 @@ async function simplifyParagraph(paragraph: HTMLElement) {
 // a real API call, this same value slots directly into the prompt,
 // e.g. "Simplify this to a Grade {targetLevel} reading level."
 
-async function simplifyText(text: string, targetLevel: number): Promise<string> {
+async function simplifyText(
+  text: string,
+  targetLevel: number,
+  length: TextLength
+): Promise<string> {
   const installId = await getInstallId()
-  
+
   const response = await fetch("http://localhost:8000/simplify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      text, 
+      text,
       target_grade_level: targetLevel,
+      target_length: length,
       install_id: installId
     })
   })
@@ -283,7 +316,8 @@ badge.addEventListener("click", async () => {
 
   logEvent("simplify_click", {
     textPreview: (paragraph.textContent || "").slice(0, 60),
-    targetGradeLevel
+    targetGradeLevel,
+    targetLength
   })
 
   styleBadge("loading")
@@ -293,7 +327,8 @@ badge.addEventListener("click", async () => {
     styleBadge("done")
     logEvent("simplify_done", {
       textPreview: (paragraph.textContent || "").slice(0, 60),
-      targetGradeLevel
+      targetGradeLevel,
+      targetLength
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Something went wrong"
@@ -438,7 +473,7 @@ function injectMenu() {
   simplifyAllBtn.style.textAlign = "left"
 
   simplifyAllBtn.addEventListener("click", async () => {
-    logEvent("simplify_all_click", { targetGradeLevel })
+    logEvent("simplify_all_click", { targetGradeLevel, targetLength })
     simplifyAllBtn.disabled = true
     simplifyAllBtn.textContent = "Simplifying page..."
     simplifyAllBtn.style.backgroundColor = tokens.accentTeal
@@ -491,6 +526,7 @@ function injectMenu() {
   gradeLevelRow.style.display = "flex"
   gradeLevelRow.style.alignItems = "center"
   gradeLevelRow.style.justifyContent = "space-between"
+  gradeLevelRow.style.gap = "12px"
   gradeLevelRow.style.padding = "4px 2px"
 
   const gradeLevelLabel = document.createElement("span")
@@ -507,7 +543,7 @@ function injectMenu() {
   gradeLevelSelect.style.backgroundColor = "#FFFFFF"
   gradeLevelSelect.style.color = tokens.readingText
 
-  ;[3, 5, 8, 10].forEach((level) => {
+  VALID_GRADE_LEVELS.forEach((level) => {
     const option = document.createElement("option")
     option.value = String(level)
     option.textContent = `Grade ${level}`
@@ -517,11 +553,72 @@ function injectMenu() {
 
   gradeLevelSelect.addEventListener("change", () => {
     targetGradeLevel = Number(gradeLevelSelect.value)
+    setTargetGradeLevel(targetGradeLevel)
     logEvent("target_grade_level_changed", { targetGradeLevel })
   })
 
+  gradeLevelSelectEl = gradeLevelSelect
+
   gradeLevelRow.appendChild(gradeLevelLabel)
   gradeLevelRow.appendChild(gradeLevelSelect)
+
+  // ---- New: text length selector ----
+  const textLengthRow = document.createElement("div")
+  textLengthRow.style.display = "flex"
+  textLengthRow.style.alignItems = "center"
+  textLengthRow.style.justifyContent = "space-between"
+  textLengthRow.style.gap = "12px"
+  textLengthRow.style.padding = "4px 2px"
+
+  const textLengthLabel = document.createElement("span")
+  textLengthLabel.textContent = "Text Length"
+  textLengthLabel.style.fontSize = "14px"
+  textLengthLabel.style.color = tokens.readingText
+
+  const textLengthSelect = document.createElement("select")
+  textLengthSelect.style.padding = "6px 10px"
+  textLengthSelect.style.borderRadius = "20px"
+  textLengthSelect.style.border = `1px solid ${tokens.captionText}`
+  textLengthSelect.style.fontSize = "12px"
+  textLengthSelect.style.cursor = "pointer"
+  textLengthSelect.style.backgroundColor = "#FFFFFF"
+  textLengthSelect.style.color = tokens.readingText
+
+  TEXT_LENGTH_OPTIONS.forEach(({ value, label }) => {
+    const option = document.createElement("option")
+    option.value = value
+    option.textContent = label
+    if (value === targetLength) option.selected = true
+    textLengthSelect.appendChild(option)
+  })
+
+  textLengthSelect.addEventListener("change", () => {
+    targetLength = textLengthSelect.value as TextLength
+    setTargetLength(targetLength)
+    logEvent("target_length_changed", { targetLength })
+  })
+
+  textLengthRow.appendChild(textLengthLabel)
+  textLengthRow.appendChild(textLengthSelect)
+
+  // ---- New: reading level quiz link ----
+  const quizBtn = document.createElement("button")
+  quizBtn.textContent = "Take Reading Level Quiz"
+  quizBtn.style.padding = "10px 14px"
+  quizBtn.style.borderRadius = "20px"
+  quizBtn.style.border = `1px solid ${tokens.captionText}`
+  quizBtn.style.backgroundColor = "#FFFFFF"
+  quizBtn.style.color = tokens.readingText
+  quizBtn.style.fontSize = "14px"
+  quizBtn.style.cursor = "pointer"
+  quizBtn.style.textAlign = "left"
+
+  quizBtn.addEventListener("click", () => {
+    // Close the menu panel first so it isn't sitting behind the modal
+    // backdrop while the quiz is open.
+    panel.style.display = "none"
+    openQuizModal()
+  })
 
   const exportBtn = document.createElement("button")
   exportBtn.textContent = "Export Session Log"
@@ -540,7 +637,9 @@ function injectMenu() {
 
   panel.appendChild(simplifyAllBtn)
   panel.appendChild(row)
+  panel.appendChild(quizBtn)
   panel.appendChild(gradeLevelRow)
+  panel.appendChild(textLengthRow)
   panel.appendChild(exportBtn)
 
   menuButton.addEventListener("click", () => {
@@ -551,6 +650,236 @@ function injectMenu() {
   document.body.appendChild(panel)
 }
 
-loadReadingFont()
-injectBadgeStyles()
-injectMenu()
+// ---- Reading Level Quiz modal ----
+//
+// An in-page wrapper around the same assessment used by options.tsx.
+// The scoring logic, the passages, and the storage read/write all live
+// in lib/reading-level.ts and are reused as-is here - this section only
+// builds the modal DOM and re-renders it as the user answers.
+
+let quizStepIndex = 0
+let quizResponses: AssessmentResponse[] = []
+let quizContentEl: HTMLDivElement | null = null
+let quizBackdropEl: HTMLDivElement | null = null
+
+const QUIZ_ANSWER_OPTIONS: { value: AssessmentResponse; label: string }[] = [
+  { value: "too_easy", label: "Too easy" },
+  { value: "just_right", label: "Just right" },
+  { value: "too_hard", label: "Too hard" }
+]
+
+function injectQuizStyles() {
+  const style = document.createElement("style")
+  style.textContent = `
+    .arw-quiz-answer-btn:hover {
+      background-color: ${tokens.accentTeal};
+      color: #FFFFFF;
+      border-color: ${tokens.accentTeal};
+    }
+    .arw-quiz-close:hover {
+      background-color: rgba(0, 0, 0, 0.06);
+    }
+  `
+  document.head.appendChild(style)
+}
+
+function syncGradeLevelDropdown(level: number) {
+  if (!gradeLevelSelectEl) return
+  gradeLevelSelectEl.value = String(level)
+}
+
+function renderQuizStep() {
+  if (!quizContentEl) return
+  quizContentEl.innerHTML = ""
+
+  const progress = document.createElement("p")
+  progress.textContent = `Passage ${quizStepIndex + 1} of ${ASSESSMENT_PASSAGES.length}`
+  progress.style.fontSize = "13px"
+  progress.style.color = tokens.captionText
+  progress.style.marginBottom = "10px"
+
+  const passageBox = document.createElement("div")
+  passageBox.textContent = ASSESSMENT_PASSAGES[quizStepIndex].text
+  passageBox.style.backgroundColor = "#FFFFFF"
+  passageBox.style.border = `1px solid ${tokens.captionText}`
+  passageBox.style.borderRadius = "12px"
+  passageBox.style.padding = "20px"
+  passageBox.style.fontSize = "16px"
+  passageBox.style.lineHeight = "1.7"
+  passageBox.style.marginBottom = "20px"
+
+  const answerRow = document.createElement("div")
+  answerRow.style.display = "flex"
+  answerRow.style.gap = "10px"
+
+  QUIZ_ANSWER_OPTIONS.forEach(({ value, label }) => {
+    const btn = document.createElement("button")
+    btn.textContent = label
+    btn.className = "arw-quiz-answer-btn"
+    btn.style.flex = "1"
+    btn.style.padding = "10px 12px"
+    btn.style.borderRadius = "20px"
+    btn.style.border = `1px solid ${tokens.captionText}`
+    btn.style.backgroundColor = "#FFFFFF"
+    btn.style.color = tokens.readingText
+    btn.style.fontSize = "13px"
+    btn.style.cursor = "pointer"
+    btn.addEventListener("click", () => handleQuizAnswer(value))
+    answerRow.appendChild(btn)
+  })
+
+  quizContentEl.appendChild(progress)
+  quizContentEl.appendChild(passageBox)
+  quizContentEl.appendChild(answerRow)
+}
+
+function renderQuizResult(level: number) {
+  if (!quizContentEl) return
+  quizContentEl.innerHTML = ""
+
+  const resultBox = document.createElement("div")
+  resultBox.innerHTML = `Target reading level set to <strong>Grade ${level}</strong>.`
+  resultBox.style.backgroundColor = tokens.badgeDoneBg
+  resultBox.style.color = tokens.badgeDoneText
+  resultBox.style.borderRadius = "12px"
+  resultBox.style.padding = "20px"
+  resultBox.style.fontSize = "15px"
+  resultBox.style.marginBottom = "16px"
+
+  const retakeBtn = document.createElement("button")
+  retakeBtn.textContent = "Take Again"
+  retakeBtn.style.padding = "10px 20px"
+  retakeBtn.style.borderRadius = "20px"
+  retakeBtn.style.border = `1px solid ${tokens.captionText}`
+  retakeBtn.style.backgroundColor = "#FFFFFF"
+  retakeBtn.style.color = tokens.readingText
+  retakeBtn.style.fontSize = "14px"
+  retakeBtn.style.cursor = "pointer"
+  retakeBtn.addEventListener("click", startQuiz)
+
+  quizContentEl.appendChild(resultBox)
+  quizContentEl.appendChild(retakeBtn)
+}
+
+async function handleQuizAnswer(response: AssessmentResponse) {
+  quizResponses.push(response)
+
+  if (quizResponses.length < ASSESSMENT_PASSAGES.length) {
+    quizStepIndex++
+    renderQuizStep()
+    return
+  }
+
+  const level = computeTargetGradeLevel(quizResponses)
+  await setTargetGradeLevel(level)
+  targetGradeLevel = level
+  syncGradeLevelDropdown(level)
+  logEvent("quiz_completed", { targetGradeLevel: level })
+  renderQuizResult(level)
+}
+
+function startQuiz() {
+  quizStepIndex = 0
+  quizResponses = []
+  renderQuizStep()
+}
+
+function openQuizModal() {
+  if (!quizBackdropEl) return
+  logEvent("quiz_opened", {})
+  startQuiz()
+  quizBackdropEl.style.display = "flex"
+}
+
+function closeQuizModal() {
+  if (!quizBackdropEl) return
+  quizBackdropEl.style.display = "none"
+}
+
+function injectQuizModal() {
+  injectQuizStyles()
+
+  const backdrop = document.createElement("div")
+  backdrop.style.position = "fixed"
+  backdrop.style.top = "0"
+  backdrop.style.left = "0"
+  backdrop.style.right = "0"
+  backdrop.style.bottom = "0"
+  backdrop.style.backgroundColor = "rgba(0,0,0,0.5)"
+  backdrop.style.zIndex = "1000000"
+  backdrop.style.display = "none"
+  backdrop.style.alignItems = "center"
+  backdrop.style.justifyContent = "center"
+
+  // Closes only when the backdrop itself is clicked, not clicks that
+  // bubble up from inside the modal - the modal's own click handler
+  // below stops that propagation.
+  backdrop.addEventListener("click", () => closeQuizModal())
+
+  const modal = document.createElement("div")
+  modal.style.backgroundColor = tokens.readingBg
+  modal.style.borderRadius = "16px"
+  modal.style.padding = "24px"
+  modal.style.maxWidth = "480px"
+  modal.style.width = "90%"
+  modal.style.maxHeight = "80vh"
+  modal.style.overflowY = "auto"
+  modal.style.boxShadow = "0 8px 32px rgba(0,0,0,0.3)"
+  modal.style.fontFamily = "Inter, sans-serif"
+  modal.addEventListener("click", (e) => e.stopPropagation())
+
+  const header = document.createElement("div")
+  header.style.display = "flex"
+  header.style.alignItems = "center"
+  header.style.justifyContent = "space-between"
+  header.style.marginBottom = "16px"
+
+  const title = document.createElement("h2")
+  title.textContent = "Reading Level Quiz"
+  title.style.fontSize = "18px"
+  title.style.color = tokens.readingText
+  title.style.margin = "0"
+
+  const closeBtn = document.createElement("button")
+  closeBtn.textContent = "×"
+  closeBtn.className = "arw-quiz-close"
+  closeBtn.setAttribute("aria-label", "Close")
+  closeBtn.style.width = "28px"
+  closeBtn.style.height = "28px"
+  closeBtn.style.borderRadius = "50%"
+  closeBtn.style.border = "none"
+  closeBtn.style.backgroundColor = "transparent"
+  closeBtn.style.color = tokens.readingText
+  closeBtn.style.fontSize = "18px"
+  closeBtn.style.lineHeight = "1"
+  closeBtn.style.cursor = "pointer"
+  closeBtn.addEventListener("click", closeQuizModal)
+
+  header.appendChild(title)
+  header.appendChild(closeBtn)
+
+  const content = document.createElement("div")
+
+  modal.appendChild(header)
+  modal.appendChild(content)
+  backdrop.appendChild(modal)
+  document.body.appendChild(backdrop)
+
+  quizBackdropEl = backdrop
+  quizContentEl = content
+}
+
+// Loads the stored grade level and text length (set by the options-page
+// assessment, the in-page quiz, or a prior dropdown change) before
+// building the menu, so both dropdowns' initial selections are correct
+// instead of always starting at the defaults.
+async function init() {
+  targetGradeLevel = await getTargetGradeLevel()
+  targetLength = await getTargetLength()
+  loadReadingFont()
+  injectBadgeStyles()
+  injectMenu()
+  injectQuizModal()
+}
+
+init()

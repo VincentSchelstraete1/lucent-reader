@@ -20,7 +20,7 @@ app.add_middleware(
 
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-DAILY_LIMIT = 0
+DAILY_LIMIT = 50
 
 # In-memory usage tracking: { install_id: {"date": "2026-08-07", "count": 3} }
 # Resets on server restart - acceptable for now, see note above.
@@ -30,7 +30,16 @@ usage_tracker = {}
 class SimplifyRequest(BaseModel):
     text: str
     target_grade_level: int
+    target_length: str = "same"
     install_id: str
+
+
+LENGTH_INSTRUCTIONS = {
+    "much_shorter": "Condense it significantly - cut anything that isn't essential to the main point.",
+    "shorter": "Make it noticeably shorter than the original while keeping the key details.",
+    "same": "Keep the length roughly the same as the original.",
+    "more_detail": "Expand it with a bit more explanatory detail than the original."
+}
 
 
 def check_and_increment(install_id: str):
@@ -55,24 +64,43 @@ def read_root():
     return {"status": "backend is alive"}
 
 
+def strip_markdown_heading(text: str) -> str:
+    # Claude sometimes prepends a heading like "# Rewritten Paragraph" even
+    # when told to return only the rewritten text - seen most often on the
+    # lead paragraph, likely because it reads like it could use a title.
+    # The prompt now explicitly forbids this, but LLM output isn't
+    # perfectly reliable, so this is a defensive backstop.
+    lines = text.strip().splitlines()
+    if lines and lines[0].lstrip().startswith("#"):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 @app.post("/simplify")
 def simplify(request: SimplifyRequest):
     check_and_increment(request.install_id)
 
+    length_instruction = LENGTH_INSTRUCTIONS.get(
+        request.target_length, LENGTH_INSTRUCTIONS["same"]
+    )
+
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=300,
+        max_tokens=450,
         messages=[
             {
                 "role": "user",
                 "content": (
                     f"Rewrite the following paragraph so it reads at approximately "
                     f"a US grade {request.target_grade_level} reading level. "
-                    f"Keep the meaning accurate. Return only the rewritten text, "
-                    f"nothing else.\n\n{request.text}"
+                    f"{length_instruction} "
+                    f"Keep the meaning accurate. Return only the rewritten "
+                    f"paragraph as plain text - no heading, no title, no "
+                    f"markdown formatting, no preamble.\n\n{request.text}"
                 )
             }
         ]
     )
 
-    return {"simplified": message.content[0].text}
+    simplified = strip_markdown_heading(message.content[0].text)
+    return {"simplified": simplified}
