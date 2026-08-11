@@ -2,7 +2,7 @@
   "name": "accessibility-reader",
   "displayName": "Accessibility reader",
   "version": "0.0.1",
-  "description": "Adaptive reading assistant ",
+  "description": "Adaptive reading assistant",
   "author": "Vincent Schelstraete",
   "scripts": {
     "dev": "plasmo dev",

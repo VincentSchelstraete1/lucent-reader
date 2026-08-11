@@ -1,7 +1,7 @@
 import { logEvent } from "../lib/session-log"
 
 export const config = {
-  matches: ["https://en.wikipedia.org/*"]
+  matches: ["<all_urls>"]
 }
 
 let lastRun = 0

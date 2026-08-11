@@ -1,7 +1,13 @@
 import { Readability } from "@mozilla/readability"
 
+import { findContentBlock, getContentBlocks } from "../lib/content-blocks"
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
+import {
+  SIMPLIFY_MESSAGE_TYPE,
+  type SimplifyMessage,
+  type SimplifyResponse
+} from "../lib/messages"
 import {
   DEFAULT_GRADE_LEVEL,
   MAX_QUIZ_QUESTIONS,
@@ -27,7 +33,7 @@ import {
 } from "../lib/text-length"
 
 export const config = {
-  matches: ["https://en.wikipedia.org/*"]
+  matches: ["<all_urls>"]
 }
 
 const STRUGGLE_THRESHOLD_MS = 4000
@@ -293,30 +299,22 @@ async function simplifyText(
 ): Promise<string> {
   const installId = await getInstallId()
 
-  const response = await fetch("http://localhost:8000/simplify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      target_grade_level: targetLevel,
-      target_length: length,
-      install_id: installId
-    })
-  })
+  // The actual fetch to the backend happens in the background service
+  // worker, not here - see lib/messages.ts for why.
+  const message: SimplifyMessage = {
+    type: SIMPLIFY_MESSAGE_TYPE,
+    text,
+    targetGradeLevel: targetLevel,
+    targetLength: length,
+    installId
+  }
+  const response = (await chrome.runtime.sendMessage(message)) as SimplifyResponse
 
-
-  if (response.status === 429) {
-    const errorData = await response.json()
-    throw new Error(errorData.detail)
+  if (response.ok === false) {
+    throw new Error(response.error)
   }
 
-  if (!response.ok) {
-    throw new Error("Simplify request failed")
-  }
-
-  const data = await response.json()
-  return data.simplified
-
+  return response.simplified
 }
 
 badge.addEventListener("click", async () => {
@@ -367,8 +365,7 @@ function handleSelectionChange() {
 
     const anchorNode = selection.anchorNode
     if (!anchorNode) return
-    const el = anchorNode.nodeType === Node.TEXT_NODE ? anchorNode.parentElement : (anchorNode as HTMLElement)
-    const paragraph = el?.closest("p") as HTMLElement | null
+    const paragraph = findContentBlock(anchorNode)
 
     if (paragraph) showBadgeFor(paragraph)
   }, 150)
@@ -425,14 +422,14 @@ function unobserveAllParagraphs() {
   activeTimers.clear()
 }
 
-document.querySelectorAll("p").forEach(observeParagraph)
+getContentBlocks().forEach(observeParagraph)
 
 // Returns whichever paragraph set "Simplify Entire Page" should act on:
 // the extracted reader-view paragraphs while Reading Mode is on (the
 // real page underneath is hidden and shouldn't be touched), or the real
-// page's own paragraphs otherwise.
+// page's own content blocks otherwise.
 function getActiveParagraphs(): HTMLElement[] {
-  return readingModeOn ? readerParagraphs : (Array.from(document.querySelectorAll("p")) as HTMLElement[])
+  return readingModeOn ? readerParagraphs : getContentBlocks()
 }
 
 // ---- Menu: Simplify Entire Page + Reading Mode + Target Grade Level ----
@@ -656,7 +653,7 @@ function exitReaderMode() {
   readerParagraphs = []
 
   unobserveAllParagraphs()
-  document.querySelectorAll("p").forEach(observeParagraph)
+  getContentBlocks().forEach(observeParagraph)
 }
 
 function syncReadingModeSwitch(on: boolean) {
