@@ -78,6 +78,35 @@ const NON_CONTENT_CLASS_TOKENS = new Set([
 
 const MIN_TEXT_LENGTH = 60
 
+// A candidate can have enough "own text" to pass MIN_TEXT_LENGTH while
+// still containing a heading, list, table, or embedded style/script
+// block somewhere in its subtree - e.g. a news site's card layout
+// (headline + body + tag list all inside one div), or a Wikipedia
+// citation <li> with an embedded <style> block for citation formatting.
+// ownText() deliberately doesn't count text from headings/lists toward
+// the qualification decision, but getTextSpan() (in struggle-detector.ts)
+// reads the matched element's full .textContent to build the simplified
+// span - which includes ALL of that nested content unfiltered. So a
+// candidate whose subtree contains any of these is disqualified outright,
+// regardless of how much qualifying text it appears to have: better to
+// show no badge than to flatten a heading/list/table into plain text or
+// leak a <style> block's raw CSS into the page.
+const DISQUALIFYING_DESCENDANT_SELECTOR =
+  "style, script, svg, h1, h2, h3, h4, h5, h6, ul, ol, table"
+
+function hasDisqualifyingDescendant(el: Element): boolean {
+  return el.querySelector(DISQUALIFYING_DESCENDANT_SELECTOR) !== null
+}
+
+// Caps how far findContentBlock() will climb from a selection anchor
+// looking for a qualifying ancestor. Ordinary inline formatting (a <b>/
+// <a>/<span> inside a <p>) resolves within 1-2 levels; a real climb this
+// deep only happens when the anchor starts at a structurally awkward
+// point (a heading, an icon, a table cell) and nothing reasonably close
+// by qualifies - at that point, refusing to match is safer than settling
+// on whatever large container happens to be sitting further up the tree.
+const MAX_CLIMB_DEPTH = 6
+
 function classTokens(el: Element): string[] {
   const raw = `${String((el as HTMLElement).className || "")} ${el.id || ""}`
   const spaced = raw.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -159,6 +188,7 @@ function isQualifyingBlock(el: Element): el is HTMLElement {
   if (!isStructural(el)) return false
   if (isExcluded(el)) return false
   if (!isVisible(el)) return false
+  if (hasDisqualifyingDescendant(el)) return false
   return ownText(el).length >= MIN_TEXT_LENGTH
 }
 
@@ -198,13 +228,22 @@ export function getContentBlocks(root: ParentNode = document): HTMLElement[] {
 
 // Replacement for element.closest("p") when locating the content block
 // that contains a given node (e.g. the user's text selection anchor).
+// Gives up (returns null) rather than climbing indefinitely - see
+// MAX_CLIMB_DEPTH above. isQualifyingBlock() is what actually stops this
+// from settling on a large/messy container; the depth cap is a cheap
+// second layer of defense for anchors that start at a structurally
+// awkward point (a heading, an icon) with nothing suitable nearby.
 export function findContentBlock(node: Node | null): HTMLElement | null {
   let el: Element | null =
     node instanceof Element ? node : (node?.parentElement ?? null)
 
+  let climbDepth = 0
+
   while (el) {
     if (isQualifyingBlock(el)) return el
+    if (climbDepth >= MAX_CLIMB_DEPTH) return null
     el = el.parentElement
+    climbDepth++
   }
   return null
 }
