@@ -1,4 +1,4 @@
-import { Readability } from "@mozilla/readability"
+import { Readability, isProbablyReaderable } from "@mozilla/readability"
 
 import { findContentBlock, getContentBlocks } from "../lib/content-blocks"
 import { logEvent, downloadSessionLog } from "../lib/session-log"
@@ -317,41 +317,49 @@ async function simplifyText(
   return response.simplified
 }
 
-badge.addEventListener("click", async () => {
-  if (!currentParagraph) return
-  const paragraph = currentParagraph
+// Registers the badge's click handler, the highlight-to-badge and
+// dwell-detection triggers, and starts observing the page's content
+// blocks. Wired up like this (as one function, called conditionally)
+// rather than as top-level side effects, so that a page which fails the
+// isProbablyReaderable() check at the bottom of this file genuinely
+// never activates any of it - no observer, no listeners, no menu.
+function activateBadgeClickHandler() {
+  badge.addEventListener("click", async () => {
+    if (!currentParagraph) return
+    const paragraph = currentParagraph
 
-  logEvent("simplify_click", {
-    textPreview: (paragraph.textContent || "").slice(0, 60),
-    targetGradeLevel,
-    targetLength
-  })
-
-  styleBadge("loading")
-
-  try {
-    await simplifyParagraph(paragraph)
-    styleBadge("done")
-    logEvent("simplify_done", {
+    logEvent("simplify_click", {
       textPreview: (paragraph.textContent || "").slice(0, 60),
       targetGradeLevel,
       targetLength
     })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Something went wrong"
-    badgeIcon.innerHTML = ICONS.error
-    badgeLabel.textContent = message
-    badge.style.backgroundColor = "#FBEAEA"
-    badge.style.color = "#8A2E2E"
-    badge.classList.add("arw-expanded")
-    logEvent("simplify_error", {
-      textPreview: (paragraph.textContent || "").slice(0, 60),
-      error: message
-    })
-  }
 
-  hideTimeoutId = window.setTimeout(hideBadge, 2000)
-})
+    styleBadge("loading")
+
+    try {
+      await simplifyParagraph(paragraph)
+      styleBadge("done")
+      logEvent("simplify_done", {
+        textPreview: (paragraph.textContent || "").slice(0, 60),
+        targetGradeLevel,
+        targetLength
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong"
+      badgeIcon.innerHTML = ICONS.error
+      badgeLabel.textContent = message
+      badge.style.backgroundColor = "#FBEAEA"
+      badge.style.color = "#8A2E2E"
+      badge.classList.add("arw-expanded")
+      logEvent("simplify_error", {
+        textPreview: (paragraph.textContent || "").slice(0, 60),
+        error: message
+      })
+    }
+
+    hideTimeoutId = window.setTimeout(hideBadge, 2000)
+  })
+}
 
 // ---- Trigger 1: user highlights text themselves ----
 
@@ -371,11 +379,13 @@ function handleSelectionChange() {
   }, 150)
 }
 
-document.addEventListener("selectionchange", handleSelectionChange)
+function activateSelectionTrigger() {
+  document.addEventListener("selectionchange", handleSelectionChange)
 
-document.addEventListener("mousedown", (e) => {
-  if (!badge.contains(e.target as Node)) hideBadge()
-})
+  document.addEventListener("mousedown", (e) => {
+    if (!badge.contains(e.target as Node)) hideBadge()
+  })
+}
 
 // ---- Trigger 2: dwell time (struggle detection) ----
 
@@ -401,7 +411,10 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
   }
 }
 
-const observer = new IntersectionObserver(handleIntersection, { threshold: 0.5 })
+// Not constructed until activateDwellDetection() runs, so that a page
+// that fails the isProbablyReaderable() check never gets an
+// IntersectionObserver watching it at all.
+let observer: IntersectionObserver | null = null
 
 // Tracks exactly which paragraphs the observer currently watches.
 // IntersectionObserver has no "list what's observed" API, so this Set is
@@ -410,19 +423,23 @@ const observer = new IntersectionObserver(handleIntersection, { threshold: 0.5 }
 const observedParagraphs = new Set<Element>()
 
 function observeParagraph(p: Element) {
-  if (observedParagraphs.has(p)) return
+  if (!observer || observedParagraphs.has(p)) return
   observedParagraphs.add(p)
   observer.observe(p)
 }
 
 function unobserveAllParagraphs() {
-  observedParagraphs.forEach((p) => observer.unobserve(p))
+  if (!observer) return
+  observedParagraphs.forEach((p) => observer!.unobserve(p))
   observedParagraphs.clear()
   activeTimers.forEach((timerId) => clearTimeout(timerId))
   activeTimers.clear()
 }
 
-getContentBlocks().forEach(observeParagraph)
+function activateDwellDetection() {
+  observer = new IntersectionObserver(handleIntersection, { threshold: 0.5 })
+  getContentBlocks().forEach(observeParagraph)
+}
 
 // Returns whichever paragraph set "Simplify Entire Page" should act on:
 // the extracted reader-view paragraphs while Reading Mode is on (the
@@ -1210,6 +1227,22 @@ async function init() {
   injectReaderStyles()
   injectMenu(devModeEnabled)
   injectQuizModal()
+
+  activateBadgeClickHandler()
+  activateSelectionTrigger()
+  activateDwellDetection()
 }
 
-init()
+// isProbablyReaderable() is the same lightweight heuristic Firefox uses
+// to decide whether to show its own Reader View icon at all - a fast
+// check of text density and node count, not a full Readability.parse().
+// Now that the extension runs on every site (not just Wikipedia), this
+// keeps it genuinely inactive on non-article pages (search results,
+// settings/dashboard UIs, etc.) instead of just hiding the UI: nothing
+// here runs at all - no observer, no selection listener, no menu button -
+// unless the page looks like it actually has article content.
+if (isProbablyReaderable(document)) {
+  init()
+} else {
+  logEvent("page_skipped_not_readerable", {})
+}
