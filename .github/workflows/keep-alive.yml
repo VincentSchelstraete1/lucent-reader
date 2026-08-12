@@ -1,0 +1,21 @@
+name: Keep backend alive
+
+# Render's free tier spins the backend down after a period of
+# inactivity. This just sends enough traffic to the existing "/" health
+# check route to keep that from happening - see the "Waking up the
+# server..." badge label in contents/struggle-detector.ts for the
+# defensive backstop on the extension side, in case a ping window is
+# ever missed (a redeploy, a delayed Actions run, etc).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health check
+        run: |
+          curl -sS --max-time 30 https://adaptive-reader.onrender.com/ \
+            || echo "Ping did not complete in time - likely a cold start, not a real failure."
