@@ -336,8 +336,21 @@ function activateBadgeClickHandler() {
 
     styleBadge("loading")
 
+    // The Render free tier spins the backend down after inactivity - a
+    // keep-alive workflow (.github/workflows/keep-alive.yml) pings it
+    // every 10 minutes to prevent that, but if a ping window is ever
+    // missed (a redeploy, a delayed Actions run), the first real request
+    // after a cold start can take several seconds longer than usual.
+    // Past that point, "Simplifying..." reads as a stuck/broken
+    // extension rather than what it actually is, so this swaps the label
+    // to something that explains the wait instead.
+    const wakeUpTimeoutId = window.setTimeout(() => {
+      badgeLabel.textContent = "Waking up the server..."
+    }, 5000)
+
     try {
       await simplifyParagraph(paragraph)
+      clearTimeout(wakeUpTimeoutId)
       styleBadge("done")
       logEvent("simplify_done", {
         textPreview: (paragraph.textContent || "").slice(0, 60),
@@ -345,6 +358,7 @@ function activateBadgeClickHandler() {
         targetLength
       })
     } catch (err) {
+      clearTimeout(wakeUpTimeoutId)
       const message = err instanceof Error ? err.message : "Something went wrong"
       badgeIcon.innerHTML = ICONS.error
       badgeLabel.textContent = message
