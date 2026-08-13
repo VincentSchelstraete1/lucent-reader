@@ -94,8 +94,23 @@ const MIN_TEXT_LENGTH = 60
 const DISQUALIFYING_DESCENDANT_SELECTOR =
   "style, script, svg, h1, h2, h3, h4, h5, h6, ul, ol, table"
 
+// The badge itself (contents/struggle-detector.ts) gets appended as a
+// child of whichever paragraph is currently showing it, and its idle/
+// loading/done/error icon is an inline <svg> - which is exactly one of
+// the tags above. Confirmed via real repeated-highlight testing: without
+// this exclusion, showing the badge on a paragraph permanently poisons
+// that exact paragraph against ever matching again (it's never removed,
+// only moved elsewhere on the next successful match), which surfaced as
+// "highlighting sometimes just doesn't work" and, worse, as stale
+// tracked-paragraph state in the content script surviving a failed
+// match and later being acted on by an unrelated click. Our own
+// injected UI should never count as page content either way.
 function hasDisqualifyingDescendant(el: Element): boolean {
-  return el.querySelector(DISQUALIFYING_DESCENDANT_SELECTOR) !== null
+  const matches = el.querySelectorAll(DISQUALIFYING_DESCENDANT_SELECTOR)
+  for (const match of Array.from(matches)) {
+    if (!match.closest(".arw-badge")) return true
+  }
+  return false
 }
 
 // Caps how far findContentBlock() will climb from a selection anchor
@@ -113,8 +128,25 @@ function classTokens(el: Element): string[] {
   return spaced.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
 }
 
+// A token immediately preceded by one of these is a BEM-style layout
+// modifier ("page__body--with-sidebar", "content--no-ads"), describing
+// that some OTHER part of the page has a sidebar/ads/etc. - not that
+// this element is one. Confirmed via a real PBS NewsHour article: its
+// whole article body sits inside a wrapper carrying the page-layout
+// class "page__body--with-sidebar", which without this check falsely
+// excluded every real paragraph in the article because "sidebar" alone
+// matched as a token. Real sidebar/nav/ad/footer elements are never
+// named with one of these prefixes directly in front of the word.
+const CLASS_TOKEN_MODIFIER_PREFIXES = new Set(["with", "has", "no", "without"])
+
 function hasNonContentClassToken(el: Element): boolean {
-  return classTokens(el).some((token) => NON_CONTENT_CLASS_TOKENS.has(token))
+  const tokens = classTokens(el)
+  for (let i = 0; i < tokens.length; i++) {
+    if (!NON_CONTENT_CLASS_TOKENS.has(tokens[i])) continue
+    if (CLASS_TOKEN_MODIFIER_PREFIXES.has(tokens[i - 1])) continue
+    return true
+  }
+  return false
 }
 
 // SPAN is normally inline text formatting (bold/italic/emphasis inside
@@ -226,6 +258,32 @@ export function getContentBlocks(root: ParentNode = document): HTMLElement[] {
   )
 }
 
+// selection.anchorNode is usually a text node (the common case: the
+// user's selection starts mid-word, inside a <p>). But for certain
+// block-level selections - confirmed via real triple-click testing near
+// Wikipedia's infobox/cladogram area - the browser instead reports the
+// anchor as an ELEMENT with a child-index offset (e.g. a wrapper <div>
+// with anchorOffset=2), not a text node. Climbing straight up from that
+// wrapper misses the actual content, since the wrapper itself is usually
+// too broad to qualify and the real text lives in one of its children.
+// This resolves down into the offset child first (and, if that child is
+// itself an element, down to its first real text) so the climb starts
+// as close to actual content as a text-node anchor normally would.
+function resolveAnchorStart(node: Node, offset: number): Node | null {
+  if (node.nodeType !== Node.ELEMENT_NODE) return node
+
+  const child = node.childNodes[offset] ?? node.childNodes[node.childNodes.length - 1]
+  if (!child) return node
+  if (child.nodeType === Node.TEXT_NODE) return child
+
+  const walker = document.createTreeWalker(child, NodeFilter.SHOW_TEXT)
+  let textNode: Node | null
+  while ((textNode = walker.nextNode())) {
+    if ((textNode.textContent || "").trim().length > 0) return textNode
+  }
+  return child
+}
+
 // Replacement for element.closest("p") when locating the content block
 // that contains a given node (e.g. the user's text selection anchor).
 // Gives up (returns null) rather than climbing indefinitely - see
@@ -233,9 +291,10 @@ export function getContentBlocks(root: ParentNode = document): HTMLElement[] {
 // from settling on a large/messy container; the depth cap is a cheap
 // second layer of defense for anchors that start at a structurally
 // awkward point (a heading, an icon) with nothing suitable nearby.
-export function findContentBlock(node: Node | null): HTMLElement | null {
+export function findContentBlock(node: Node | null, offset = 0): HTMLElement | null {
+  const resolved = node ? resolveAnchorStart(node, offset) : null
   let el: Element | null =
-    node instanceof Element ? node : (node?.parentElement ?? null)
+    resolved instanceof Element ? resolved : (resolved?.parentElement ?? null)
 
   let climbDepth = 0
 
@@ -246,4 +305,32 @@ export function findContentBlock(node: Node | null): HTMLElement | null {
     climbDepth++
   }
   return null
+}
+
+// Range.intersectsNode() is too lenient for deciding which paragraphs a
+// multi-paragraph selection actually touches - confirmed directly: a
+// range whose end boundary sits at offset 0 of the NEXT paragraph's
+// first text node (selecting zero characters of it) still reports as
+// "intersecting" that paragraph, per the DOM spec's own boundary-point
+// algorithm. This is a completely ordinary occurrence, not an edge
+// case: a real drag that visually ends at the last character of one
+// paragraph very commonly resolves its DOM boundary to the start of the
+// next block instead - which silently swept an unselected paragraph
+// into "Simplify N paragraphs." This checks for genuine overlap
+// (clamping the range to the block's own bounds and confirming
+// non-whitespace text actually remains) rather than mere adjacency.
+export function rangeMeaningfullyOverlapsBlock(range: Range, block: HTMLElement): boolean {
+  if (!range.intersectsNode(block)) return false
+
+  const blockRange = document.createRange()
+  blockRange.selectNodeContents(block)
+
+  const clipped = range.cloneRange()
+  if (range.compareBoundaryPoints(Range.START_TO_START, blockRange) < 0) {
+    clipped.setStart(blockRange.startContainer, blockRange.startOffset)
+  }
+  if (range.compareBoundaryPoints(Range.END_TO_END, blockRange) > 0) {
+    clipped.setEnd(blockRange.endContainer, blockRange.endOffset)
+  }
+  return clipped.toString().trim().length > 0
 }

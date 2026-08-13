@@ -1,6 +1,10 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability"
 
-import { findContentBlock, getContentBlocks } from "../lib/content-blocks"
+import {
+  findContentBlock,
+  getContentBlocks,
+  rangeMeaningfullyOverlapsBlock
+} from "../lib/content-blocks"
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
 import {
@@ -39,7 +43,15 @@ export const config = {
 const STRUGGLE_THRESHOLD_MS = 4000
 const activeTimers = new Map<Element, number>()
 const flaggedParagraphs = new Set<Element>()
-const originalTextByParagraph = new Map<HTMLElement, string>()
+
+// The paragraph's real original markup (links, bold, italic - everything),
+// captured once per paragraph the first time we ever touch it, before any
+// mutation of our own (badge, simplified text, etc.) happens. Simplifying
+// always re-derives from this, never from an already-simplified copy, so
+// re-simplifying after a settings change starts from the true original
+// and reverting restores the real HTML, not a flattened text-only copy.
+const pristineByParagraph = new Map<HTMLElement, { html: string; text: string }>()
+const simplifiedParagraphs = new Set<HTMLElement>()
 
 const tokens = {
   readingBg: "#F5F1E8",
@@ -135,7 +147,10 @@ badge.style.opacity = "0"
 badge.style.pointerEvents = "none"
 badge.style.transition = "opacity 120ms ease"
 
-let currentParagraph: HTMLElement | null = null
+// All paragraphs the current badge applies to - normally just one, but
+// a selection spanning multiple paragraphs puts all of them here (see
+// handleSelectionChange), so a single click simplifies all of them.
+let currentParagraphs: HTMLElement[] | null = null
 let hideTimeoutId: number | null = null
 
 // The target reading level for simplification. Defaults to
@@ -163,17 +178,21 @@ const ICONS = {
   error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
 }
 
-function styleBadge(state: "idle" | "loading" | "done") {
+// count > 1 means the current selection spans multiple paragraphs - the
+// label says so explicitly ("Simplify 3 paragraphs") rather than firing
+// off that many API calls from a click that looked like it would only
+// affect one paragraph.
+function styleBadge(state: "idle" | "loading" | "done", count = 1) {
   if (state === "idle") {
     badgeIcon.innerHTML = ICONS.idle
-    badgeLabel.textContent = "Simplify this paragraph"
+    badgeLabel.textContent = count > 1 ? `Simplify ${count} paragraphs` : "Simplify this paragraph"
     badge.style.backgroundColor = tokens.readingBg
     badge.style.color = tokens.readingText
     badge.classList.remove("arw-expanded")
     badgeIcon.classList.remove("arw-spinning")
   } else if (state === "loading") {
     badgeIcon.innerHTML = ICONS.loading
-    badgeLabel.textContent = "Simplifying..."
+    badgeLabel.textContent = count > 1 ? `Simplifying ${count} paragraphs...` : "Simplifying..."
     badge.style.backgroundColor = tokens.accentTeal
     badge.style.color = "#FFFFFF"
     badge.classList.add("arw-expanded")
@@ -188,30 +207,63 @@ function styleBadge(state: "idle" | "loading" | "done") {
   }
 }
 
-function getTextSpan(paragraph: HTMLElement): HTMLSpanElement {
-  let span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
-  if (!span) {
-    const originalText = paragraph.textContent || ""
-    span = document.createElement("span")
-    span.className = "arw-text"
-    span.textContent = originalText
-    paragraph.textContent = ""
-    paragraph.appendChild(span)
+// Captures the paragraph's real, untouched markup exactly once - the
+// very first time we ever see it, before showing a badge or simplifying
+// ever mutates anything. Safe to call repeatedly; only the first call
+// per paragraph does anything.
+//
+// Always captures from a clone with the badge stripped out, never the
+// live paragraph directly - if this ever runs at a moment the shared
+// badge happens to already be sitting inside this exact paragraph (its
+// own <button> has whatever label text it's currently showing, e.g.
+// "Simplify 4 paragraphs"), reading the live element's innerHTML/
+// textContent would bake that label text into what every future revert
+// and re-simplify treats as "the real original content" - and each
+// subsequent cycle would keep re-injecting it. Stripping first makes
+// that impossible regardless of exactly when this gets called.
+function capturePristine(paragraph: HTMLElement) {
+  if (!pristineByParagraph.has(paragraph)) {
+    const clone = paragraph.cloneNode(true) as HTMLElement
+    clone.querySelectorAll(".arw-badge").forEach((el) => el.remove())
+    pristineByParagraph.set(paragraph, {
+      html: clone.innerHTML,
+      text: clone.textContent || ""
+    })
   }
-  return span
 }
 
-function showBadgeFor(paragraph: HTMLElement) {
+// Moves the shared badge onto a paragraph, but only if it isn't already
+// there - appendChild on a node that's already a child just re-appends
+// it to the end (harmless), but this makes "only ever inserted once per
+// element" an explicit, checkable invariant rather than an incidental
+// side effect of appendChild's move semantics.
+function attachBadgeTo(paragraph: HTMLElement) {
+  if (!paragraph.style.position) paragraph.style.position = "relative"
+  if (badge.parentElement !== paragraph) paragraph.appendChild(badge)
+}
+
+// paragraphs is usually a single-element array (the common case: a
+// small selection or a dwell flag on one paragraph), but can be more
+// than one when a selection spans multiple paragraphs - see
+// handleSelectionChange. The badge is a single shared element, so it's
+// positioned on whichever paragraph comes first in document order, and
+// a click simplifies all of them together.
+function showBadgeFor(paragraphs: HTMLElement[]) {
+  if (paragraphs.length === 0) return
   if (hideTimeoutId) {
     clearTimeout(hideTimeoutId)
     hideTimeoutId = null
   }
-  currentParagraph = paragraph
-  styleBadge("idle")
 
-  getTextSpan(paragraph)
-  if (!paragraph.style.position) paragraph.style.position = "relative"
-  paragraph.appendChild(badge)
+  // Read-only: just remembers what's already there. Nothing about
+  // showing a badge should touch any paragraph's actual content - only
+  // an explicit simplify click does that (see simplifyParagraph below).
+  paragraphs.forEach(capturePristine)
+
+  currentParagraphs = paragraphs
+  styleBadge("idle", paragraphs.length)
+
+  attachBadgeTo(paragraphs[0])
 
   badge.style.opacity = "1"
   badge.style.pointerEvents = "auto"
@@ -220,10 +272,10 @@ function showBadgeFor(paragraph: HTMLElement) {
 function hideBadge() {
   badge.style.opacity = "0"
   badge.style.pointerEvents = "none"
-  currentParagraph = null
+  currentParagraphs = null
 }
 
-function styleRevertButton(el: HTMLElement) {
+function styleControlButton(el: HTMLElement) {
   el.style.display = "inline-flex"
   el.style.alignItems = "center"
   el.style.justifyContent = "center"
@@ -242,50 +294,89 @@ function styleRevertButton(el: HTMLElement) {
   el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.15)"
 }
 
-function addRevertButton(paragraph: HTMLElement) {
+function revertParagraph(paragraph: HTMLElement) {
+  const pristine = pristineByParagraph.get(paragraph)
+  if (!pristine) return
+
+  // Restores the real original markup (links, bold, italic - everything),
+  // not a plain-text copy. This also discards the revert/resimplify
+  // buttons and whatever badge state was sitting in the paragraph, which
+  // is correct - a reverted paragraph goes back to looking untouched.
+  paragraph.innerHTML = pristine.html
+  paragraph.style.borderLeft = ""
+  paragraph.style.paddingLeft = ""
+  simplifiedParagraphs.delete(paragraph)
+}
+
+// Adds the small revert (↺) and re-simplify (↻) controls after a
+// paragraph has been simplified. Re-simplify re-runs simplifyParagraph,
+// which always works from the cached pristine text - so it re-simplifies
+// from the true original at whatever the current grade-level/length
+// settings are, rather than stacking a simplification on top of the
+// last one.
+function addParagraphControls(paragraph: HTMLElement) {
   const revertBtn = document.createElement("button")
   revertBtn.textContent = "↺"
   revertBtn.title = "Revert to original text"
-  styleRevertButton(revertBtn)
-
+  styleControlButton(revertBtn)
   revertBtn.addEventListener("click", (e) => {
     e.stopPropagation()
     logEvent("revert_click", {})
-    const original = originalTextByParagraph.get(paragraph)
-    const span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
-    if (original !== undefined && span) {
-      span.textContent = original
-    }
-    paragraph.style.borderLeft = ""
-    paragraph.style.paddingLeft = ""
-    revertBtn.remove()
-    originalTextByParagraph.delete(paragraph)
+    revertParagraph(paragraph)
+  })
+
+  const resimplifyBtn = document.createElement("button")
+  resimplifyBtn.textContent = "↻"
+  resimplifyBtn.title = "Re-simplify with current settings"
+  styleControlButton(resimplifyBtn)
+  resimplifyBtn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    logEvent("resimplify_click", { targetGradeLevel, targetLength })
+    performSimplify([paragraph])
   })
 
   const span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
   if (span) {
     span.insertAdjacentElement("afterend", revertBtn)
+    revertBtn.insertAdjacentElement("afterend", resimplifyBtn)
   } else {
     paragraph.appendChild(revertBtn)
+    paragraph.appendChild(resimplifyBtn)
   }
 }
 
+// Always simplifies from the true original text (pristineByParagraph),
+// never from whatever's currently showing - so calling this again on an
+// already-simplified paragraph re-simplifies from scratch at the
+// current settings instead of compounding onto the last simplification.
 async function simplifyParagraph(paragraph: HTMLElement) {
-  if (originalTextByParagraph.has(paragraph)) return
+  capturePristine(paragraph)
+  const pristine = pristineByParagraph.get(paragraph)!
+  if (!pristine.text.trim()) return
 
-  const span = getTextSpan(paragraph)
-  const originalText = span.textContent || ""
-  if (!originalText.trim()) return
+  const simplified = await simplifyText(pristine.text, targetGradeLevel, targetLength)
 
-  const simplified = await simplifyText(originalText, targetGradeLevel, targetLength)
-
-  originalTextByParagraph.set(paragraph, originalText)
+  // Rebuilds the paragraph as flattened plain text - unavoidable here,
+  // since the simplified text is a genuinely different rewrite with no
+  // markup of its own to preserve. What matters is that this only
+  // happens on an explicit simplify action, and that revertParagraph()
+  // can always restore the real original from pristineByParagraph.
+  paragraph.innerHTML = ""
+  const span = document.createElement("span")
+  span.className = "arw-text"
   span.textContent = simplified
+  paragraph.appendChild(span)
+
   paragraph.style.position = "relative"
   paragraph.style.borderLeft = `3px solid ${tokens.accentTeal}`
   paragraph.style.paddingLeft = "10px"
 
-  addRevertButton(paragraph)
+  simplifiedParagraphs.add(paragraph)
+  addParagraphControls(paragraph)
+  // paragraph.innerHTML = "" above would have dropped the badge if it
+  // was still sitting in this paragraph - re-attach so the "Simplified"
+  // state stays visible for its usual couple of seconds.
+  attachBadgeTo(paragraph)
 }
 
 // Takes the target grade level as a parameter now - once this becomes
@@ -323,55 +414,102 @@ async function simplifyText(
 // rather than as top-level side effects, so that a page which fails the
 // isProbablyReaderable() check at the bottom of this file genuinely
 // never activates any of it - no observer, no listeners, no menu.
-function activateBadgeClickHandler() {
-  badge.addEventListener("click", async () => {
-    if (!currentParagraph) return
-    const paragraph = currentParagraph
+// Shared by both ways to trigger a simplify: clicking the badge itself,
+// and clicking the small re-simplify (↻) control on an already-
+// simplified paragraph (see addParagraphControls above). Moves the
+// shared badge onto this paragraph and drives it through the same
+// loading/done/error states either way, so the two entry points look
+// and behave identically.
+let simplifyInFlight = false
 
-    logEvent("simplify_click", {
-      textPreview: (paragraph.textContent || "").slice(0, 60),
+async function performSimplify(paragraphs: HTMLElement[]) {
+  // Guards against a re-entrant call (a second click while the first is
+  // still awaiting its API response, or an overlapping dwell/selection
+  // trigger firing mid-flight) starting a second concurrent simplify on
+  // the same paragraph(s) - each independently reads pristine, wipes the
+  // paragraph's innerHTML, and rebuilds it, so two of them racing is a
+  // real correctness gap, not just a wasted API call.
+  if (paragraphs.length === 0 || simplifyInFlight) return
+  simplifyInFlight = true
+  try {
+    await runSimplify(paragraphs)
+  } finally {
+    simplifyInFlight = false
+  }
+}
+
+async function runSimplify(paragraphs: HTMLElement[]) {
+  currentParagraphs = paragraphs
+  const anchor = paragraphs[0]
+  attachBadgeTo(anchor)
+  badge.style.opacity = "1"
+  badge.style.pointerEvents = "auto"
+
+  logEvent("simplify_click", {
+    paragraphCount: paragraphs.length,
+    textPreview: (anchor.textContent || "").slice(0, 60),
+    targetGradeLevel,
+    targetLength
+  })
+
+  styleBadge("loading", paragraphs.length)
+
+  // The Render free tier spins the backend down after inactivity - a
+  // keep-alive workflow (.github/workflows/keep-alive.yml) pings it
+  // every 10 minutes to prevent that, but if a ping window is ever
+  // missed (a redeploy, a delayed Actions run), the first real request
+  // after a cold start can take several seconds longer than usual.
+  // Past that point, "Simplifying..." reads as a stuck/broken
+  // extension rather than what it actually is, so this swaps the label
+  // to something that explains the wait instead.
+  const wakeUpTimeoutId = window.setTimeout(() => {
+    badgeLabel.textContent = "Waking up the server..."
+  }, 5000)
+
+  // Each paragraph is simplified independently (its own API call, its
+  // own revert/resimplify controls afterward) - Promise.allSettled so
+  // one failure among several selected paragraphs doesn't roll back or
+  // block the ones that succeeded.
+  const results = await Promise.allSettled(paragraphs.map((p) => simplifyParagraph(p)))
+  clearTimeout(wakeUpTimeoutId)
+
+  const failures = results.filter(
+    (r): r is PromiseRejectedResult => r.status === "rejected"
+  )
+
+  if (failures.length === 0) {
+    styleBadge("done", paragraphs.length)
+    logEvent("simplify_done", {
+      paragraphCount: paragraphs.length,
+      textPreview: (anchor.textContent || "").slice(0, 60),
       targetGradeLevel,
       targetLength
     })
+  } else {
+    const firstMessage = failures[0].reason instanceof Error ? failures[0].reason.message : "Something went wrong"
+    const message =
+      failures.length === paragraphs.length
+        ? firstMessage
+        : `${failures.length} of ${paragraphs.length} failed`
+    badgeIcon.innerHTML = ICONS.error
+    badgeLabel.textContent = message
+    badge.style.backgroundColor = "#FBEAEA"
+    badge.style.color = "#8A2E2E"
+    badge.classList.add("arw-expanded")
+    logEvent("simplify_error", {
+      paragraphCount: paragraphs.length,
+      failureCount: failures.length,
+      error: firstMessage
+    })
+  }
 
-    styleBadge("loading")
+  hideTimeoutId = window.setTimeout(hideBadge, 2000)
+}
 
-    // The Render free tier spins the backend down after inactivity - a
-    // keep-alive workflow (.github/workflows/keep-alive.yml) pings it
-    // every 10 minutes to prevent that, but if a ping window is ever
-    // missed (a redeploy, a delayed Actions run), the first real request
-    // after a cold start can take several seconds longer than usual.
-    // Past that point, "Simplifying..." reads as a stuck/broken
-    // extension rather than what it actually is, so this swaps the label
-    // to something that explains the wait instead.
-    const wakeUpTimeoutId = window.setTimeout(() => {
-      badgeLabel.textContent = "Waking up the server..."
-    }, 5000)
-
-    try {
-      await simplifyParagraph(paragraph)
-      clearTimeout(wakeUpTimeoutId)
-      styleBadge("done")
-      logEvent("simplify_done", {
-        textPreview: (paragraph.textContent || "").slice(0, 60),
-        targetGradeLevel,
-        targetLength
-      })
-    } catch (err) {
-      clearTimeout(wakeUpTimeoutId)
-      const message = err instanceof Error ? err.message : "Something went wrong"
-      badgeIcon.innerHTML = ICONS.error
-      badgeLabel.textContent = message
-      badge.style.backgroundColor = "#FBEAEA"
-      badge.style.color = "#8A2E2E"
-      badge.classList.add("arw-expanded")
-      logEvent("simplify_error", {
-        textPreview: (paragraph.textContent || "").slice(0, 60),
-        error: message
-      })
-    }
-
-    hideTimeoutId = window.setTimeout(hideBadge, 2000)
+function activateBadgeClickHandler() {
+  badge.addEventListener("click", async () => {
+    if (!currentParagraphs) return
+    await performSimplify(currentParagraphs)
   })
 }
 
@@ -383,13 +521,62 @@ function handleSelectionChange() {
   if (selectionDebounceId) clearTimeout(selectionDebounceId)
   selectionDebounceId = window.setTimeout(() => {
     const selection = window.getSelection()
-    if (!selection || selection.toString().trim().length === 0) return
+    if (!selection || selection.toString().trim().length === 0) {
+      // A genuinely empty selection means there's nothing to badge -
+      // and, critically, means any previously-tracked paragraph(s) are
+      // no longer what's selected. Explicitly clearing here (rather
+      // than just returning) is what makes each new selection fully
+      // replace the last one instead of leaving currentParagraphs
+      // holding a stale reference a later click could act on.
+      hideBadge()
+      return
+    }
+    if (selection.rangeCount === 0) return
 
     const anchorNode = selection.anchorNode
     if (!anchorNode) return
-    const paragraph = findContentBlock(anchorNode)
+    // anchorOffset matters here - see resolveAnchorStart() in
+    // lib/content-blocks.ts for why (block-level selections can report
+    // an element anchor with a child-index offset instead of a text node).
+    const anchorParagraph = findContentBlock(anchorNode, selection.anchorOffset)
+    if (!anchorParagraph) {
+      // No match for the current selection - same reasoning as above:
+      // clear whatever was tracked before rather than silently leaving
+      // it in place. (This used to be reachable simply by re-selecting
+      // whichever paragraph the badge itself was sitting in, since the
+      // badge's own icon was an unfiltered disqualifying descendant -
+      // see hasDisqualifyingDescendant() in lib/content-blocks.ts, now
+      // fixed - but clearing here is the correct behavior regardless of
+      // why a given selection fails to resolve.)
+      hideBadge()
+      return
+    }
 
-    if (paragraph) showBadgeFor(paragraph)
+    // A selection can span multiple paragraphs (drag across paragraph
+    // boundaries) - find every content block the selection's range
+    // actually touches, not just the one containing the anchor, so
+    // "Simplify" acts on everything that's visibly highlighted instead
+    // of silently only the first paragraph. The anchor paragraph is
+    // always included even if the overlap check somehow misses it, so
+    // the single-paragraph case (the overwhelming majority of
+    // selections) is unaffected.
+    //
+    // Uses rangeMeaningfullyOverlapsBlock() rather than a plain
+    // range.intersectsNode() filter - confirmed directly that
+    // intersectsNode alone counts a selection that ends at offset 0 of
+    // the NEXT paragraph (selecting zero of its characters) as
+    // "intersecting" that paragraph, which is an ordinary, common
+    // outcome of a real drag ending at the last character of one
+    // paragraph. Without the stricter check, that silently swept an
+    // unselected paragraph into the simplify batch.
+    const range = selection.getRangeAt(0)
+    const touched = getActiveParagraphs().filter((p) => rangeMeaningfullyOverlapsBlock(range, p))
+    const paragraphs = touched.includes(anchorParagraph) ? touched : [anchorParagraph, ...touched]
+    paragraphs.sort((a, b) =>
+      a === b ? 0 : a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    )
+
+    showBadgeFor(paragraphs)
   }, 150)
 }
 
@@ -407,11 +594,20 @@ function handleIntersection(entries: IntersectionObserverEntry[]) {
   for (const entry of entries) {
     const paragraph = entry.target as HTMLElement
     if (entry.isIntersecting) {
+      // Already flagged (or already simplified via some other trigger,
+      // e.g. a highlight) - scrolling this exact paragraph out of view
+      // and back in should be a no-op, not schedule yet another dwell
+      // timer for a paragraph we've already acted on. Checked here,
+      // before scheduling, rather than only inside the timeout below -
+      // repeated scroll-in/out on an already-flagged paragraph used to
+      // still queue a fresh timer every time (harmless on its own since
+      // the inner check caught it, but wasteful and not a true no-op).
+      if (flaggedParagraphs.has(paragraph) || simplifiedParagraphs.has(paragraph)) continue
       const timerId = window.setTimeout(() => {
-        if (!flaggedParagraphs.has(paragraph)) {
+        if (!flaggedParagraphs.has(paragraph) && !simplifiedParagraphs.has(paragraph)) {
           flaggedParagraphs.add(paragraph)
           logEvent("dwell_flag", { textPreview: (paragraph.textContent || "").slice(0, 60) })
-          showBadgeFor(paragraph)
+          showBadgeFor([paragraph])
         }
       }, STRUGGLE_THRESHOLD_MS)
       activeTimers.set(paragraph, timerId)
@@ -473,11 +669,11 @@ let readingModeOn = false
 // Firefox Reader View), rendered as a full-screen overlay on top of the
 // untouched real page - not a recoloring of Wikipedia's own DOM. The
 // simplify features (badge, dwell detection, highlight-to-simplify,
-// revert) aren't reimplemented for this view: getTextSpan, showBadgeFor,
-// addRevertButton, and the selectionchange handler are all already
-// generic over any <p> element, so once the extracted paragraphs are
-// real elements in the live document and handed to observeParagraph(),
-// everything else just works unmodified.
+// revert) aren't reimplemented for this view: showBadgeFor,
+// simplifyParagraph, addParagraphControls, and the selectionchange
+// handler are all already generic over any <p> element, so once the
+// extracted paragraphs are real elements in the live document and
+// handed to observeParagraph(), everything else just works unmodified.
 
 let readerOverlayEl: HTMLDivElement | null = null
 let readerParagraphs: HTMLElement[] = []
