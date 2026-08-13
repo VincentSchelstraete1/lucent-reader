@@ -1,4 +1,5 @@
 import { logEvent } from "../lib/session-log"
+import { isSensitivePage } from "../lib/sensitive-page"
 
 export const config = {
   matches: ["<all_urls>"]
@@ -15,4 +16,9 @@ function handler(event) {
   logEvent("mouse_move", { x: event.clientX, y: event.clientY })
 }
 
-document.addEventListener("mousemove", handler)
+// Unlike struggle-detector.ts, this ran on <all_urls> with no
+// readability gate at all - so it was tracking mouse position on every
+// site, sensitive pages included, before this check existed.
+if (!isSensitivePage()) {
+  document.addEventListener("mousemove", handler)
+}

@@ -7,6 +7,7 @@ import {
 } from "../lib/content-blocks"
 import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
+import { isSensitivePage } from "../lib/sensitive-page"
 import {
   SIMPLIFY_MESSAGE_TYPE,
   type SimplifyMessage,
@@ -1702,15 +1703,28 @@ async function init() {
   maybeShowOnboardingModal()
 }
 
-// isProbablyReaderable() is the same lightweight heuristic Firefox uses
-// to decide whether to show its own Reader View icon at all - a fast
-// check of text density and node count, not a full Readability.parse().
-// Now that the extension runs on every site (not just Wikipedia), this
-// keeps it genuinely inactive on non-article pages (search results,
-// settings/dashboard UIs, etc.) instead of just hiding the UI: nothing
-// here runs at all - no observer, no selection listener, no menu button -
-// unless the page looks like it actually has article content.
-if (isProbablyReaderable(document)) {
+// isSensitivePage() is checked first and takes priority over
+// isProbablyReaderable() below - confirmed directly on real bank
+// homepages (Bank of America, Wells Fargo) that isProbablyReaderable
+// returns true there: a bank's marketing/disclosure copy is often
+// dense enough to read as "an article" to a pure text-density
+// heuristic, even though the page's real purpose is a login form.
+// isProbablyReaderable answers "does this look like an article" -
+// isSensitivePage answers "is this safe to run on at all" - those are
+// different questions, and passing the first one is never enough on
+// its own to activate anything here.
+if (isSensitivePage()) {
+  logEvent("page_skipped_sensitive_page", {})
+} else if (isProbablyReaderable(document)) {
+  // The same lightweight heuristic Firefox uses to decide whether to
+  // show its own Reader View icon at all - a fast check of text
+  // density and node count, not a full Readability.parse(). Now that
+  // the extension runs on every site (not just Wikipedia), this keeps
+  // it genuinely inactive on non-article pages (search results,
+  // settings/dashboard UIs, etc.) instead of just hiding the UI:
+  // nothing here runs at all - no observer, no selection listener, no
+  // menu button - unless the page looks like it actually has article
+  // content.
   init()
 } else {
   logEvent("page_skipped_not_readerable", {})

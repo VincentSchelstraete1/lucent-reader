@@ -1,4 +1,5 @@
 import { logEvent } from "../lib/session-log"
+import { isSensitivePage } from "../lib/sensitive-page"
 
 export const config = {
   matches: ["<all_urls>"]
@@ -21,4 +22,9 @@ function handleScroll() {
     logEvent("scroll", { y: currentY, speed: scrollSpeed })
 }
 
-document.addEventListener("scroll", handleScroll)
+// Unlike struggle-detector.ts, this ran on <all_urls> with no
+// readability gate at all - so it was tracking scroll position/speed on
+// every site, sensitive pages included, before this check existed.
+if (!isSensitivePage()) {
+  document.addEventListener("scroll", handleScroll)
+}
