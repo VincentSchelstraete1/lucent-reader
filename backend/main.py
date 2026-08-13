@@ -38,7 +38,7 @@ app.add_middleware(
 
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-DAILY_LIMIT = 50
+DAILY_LIMIT = 100
 
 # In-memory usage tracking: { install_id: {"date": "2026-08-07", "count": 3} }
 # Resets on server restart - acceptable for now, see note above.

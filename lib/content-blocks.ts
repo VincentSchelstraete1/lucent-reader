@@ -69,6 +69,7 @@ const NON_CONTENT_CLASS_TOKENS = new Set([
   "navbar",
   "navigation",
   "sidebar",
+  "infobox",
   "menu",
   "submenu",
   "ad",
@@ -84,9 +85,10 @@ const MIN_TEXT_LENGTH = 60
 // (headline + body + tag list all inside one div), or a Wikipedia
 // citation <li> with an embedded <style> block for citation formatting.
 // ownText() deliberately doesn't count text from headings/lists toward
-// the qualification decision, but getTextSpan() (in struggle-detector.ts)
-// reads the matched element's full .textContent to build the simplified
-// span - which includes ALL of that nested content unfiltered. So a
+// the qualification decision, but simplifyParagraph() (in
+// struggle-detector.ts) reads the matched element's full .textContent
+// to build the simplified text - which includes ALL of that nested
+// content unfiltered. So a
 // candidate whose subtree contains any of these is disqualified outright,
 // regardless of how much qualifying text it appears to have: better to
 // show no badge than to flatten a heading/list/table into plain text or
@@ -247,7 +249,7 @@ export function getContentBlocks(root: ParentNode = document): HTMLElement[] {
 
   // ownText() above already keeps a container's own qualification
   // decision independent of any qualifying descendant's text, but the
-  // rest of the app (getTextSpan, simplifyParagraph) reads the full
+  // rest of the app (simplifyParagraph) reads the full
   // .textContent of whatever block it's given - which, for a container,
   // includes its descendants' text too. So if both a container and a
   // descendant independently qualified, simplifying both would run the

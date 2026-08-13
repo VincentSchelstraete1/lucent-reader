@@ -76,8 +76,6 @@ function injectBadgeStyles() {
   style.textContent = `
     .arw-badge {
       position: absolute;
-      top: 2px;
-      left: -40px;
       width: 32px;
       max-width: 32px;
       height: 32px;
@@ -247,34 +245,42 @@ function styleBadge(state: "idle" | "loading" | "done", count = 1) {
 // ever mutates anything. Safe to call repeatedly; only the first call
 // per paragraph does anything.
 //
-// Always captures from a clone with the badge stripped out, never the
-// live paragraph directly - if this ever runs at a moment the shared
-// badge happens to already be sitting inside this exact paragraph (its
-// own <button> has whatever label text it's currently showing, e.g.
-// "Simplify 4 paragraphs"), reading the live element's innerHTML/
-// textContent would bake that label text into what every future revert
-// and re-simplify treats as "the real original content" - and each
-// subsequent cycle would keep re-injecting it. Stripping first makes
-// that impossible regardless of exactly when this gets called.
+// Reads directly from the live paragraph - safe because the shared
+// badge is never a child of any paragraph (see attachBadgeTo below), so
+// there's no risk of its own label text ("Simplify 4 paragraphs" etc.)
+// ever getting baked into what this treats as "the real original
+// content."
 function capturePristine(paragraph: HTMLElement) {
   if (!pristineByParagraph.has(paragraph)) {
-    const clone = paragraph.cloneNode(true) as HTMLElement
-    clone.querySelectorAll(".arw-badge").forEach((el) => el.remove())
     pristineByParagraph.set(paragraph, {
-      html: clone.innerHTML,
-      text: clone.textContent || ""
+      html: paragraph.innerHTML,
+      text: paragraph.textContent || ""
     })
   }
 }
 
-// Moves the shared badge onto a paragraph, but only if it isn't already
-// there - appendChild on a node that's already a child just re-appends
-// it to the end (harmless), but this makes "only ever inserted once per
-// element" an explicit, checkable invariant rather than an incidental
-// side effect of appendChild's move semantics.
+// Positions the shared badge over a paragraph without ever becoming a
+// child of it (or touching its CSS position at all) - deliberately.
+// This used to append the badge into the paragraph and give the
+// paragraph position: relative so the badge's position: absolute
+// resolved against it. Confirmed directly: on a real Wikipedia article,
+// that alone - with no badge even involved - was enough to break clicks
+// on a floated infobox/sidebar elsewhere on the page. Per the CSS
+// spec's default painting order, a positioned element paints above
+// floated content regardless of z-index; a paragraph that shares a
+// containing block with a floated infobox still has a full-width box
+// even where its text visibly wraps around the float, so making that
+// paragraph position: relative silently lets its (invisible) box start
+// intercepting clicks meant for the infobox underneath it. Positioning
+// the badge in page coordinates against document.body instead avoids
+// mutating any paragraph's styling at all, so this can't happen -  and
+// it scrolls with the page the same way a nested absolute element
+// would, since that's how position: absolute against the initial
+// containing block behaves.
 function attachBadgeTo(paragraph: HTMLElement) {
-  if (!paragraph.style.position) paragraph.style.position = "relative"
-  if (badge.parentElement !== paragraph) paragraph.appendChild(badge)
+  const rect = paragraph.getBoundingClientRect()
+  badge.style.top = `${rect.top + window.scrollY + 2}px`
+  badge.style.left = `${rect.left + window.scrollX - 40}px`
 }
 
 // paragraphs is usually a single-element array (the common case: a
@@ -580,15 +586,14 @@ async function simplifyParagraph(paragraph: HTMLElement) {
   renderSimpleMarkdown(textContainer, simplified)
   paragraph.appendChild(textContainer)
 
-  paragraph.style.position = "relative"
   paragraph.style.borderLeft = `3px solid ${tokens.accentTeal}`
   paragraph.style.paddingLeft = "10px"
 
   simplifiedParagraphs.add(paragraph)
   addParagraphControls(paragraph)
-  // paragraph.innerHTML = "" above would have dropped the badge if it
-  // was still sitting in this paragraph - re-attach so the "Simplified"
-  // state stays visible for its usual couple of seconds.
+  // Repositions the badge over this paragraph's current (post-
+  // simplify) layout, since its height may have changed - doesn't
+  // touch the paragraph itself, see attachBadgeTo.
   attachBadgeTo(paragraph)
 }
 
@@ -1183,21 +1188,54 @@ function injectMenu(devModeEnabled: boolean) {
   simplifyAllBtn.style.cursor = "pointer"
   simplifyAllBtn.style.textAlign = "left"
 
+  let simplifyAllInProgress = false
+  let simplifyAllStopRequested = false
+
   simplifyAllBtn.addEventListener("click", async () => {
+    // While a run is already in progress, this same button doubles as
+    // "stop" - the button stays enabled (not disabled) specifically so
+    // this second click can register at all. Setting the flag doesn't
+    // interrupt whatever paragraph is currently mid-request; the loop
+    // below only checks it between paragraphs, so the one in flight
+    // finishes normally and everything queued after it is skipped.
+    if (simplifyAllInProgress) {
+      simplifyAllStopRequested = true
+      logEvent("simplify_all_stopped", { targetGradeLevel, targetLength })
+      return
+    }
+
     logEvent("simplify_all_click", { targetGradeLevel, targetLength })
-    simplifyAllBtn.disabled = true
-    simplifyAllBtn.textContent = "Simplifying page..."
+    simplifyAllInProgress = true
+    simplifyAllStopRequested = false
+    simplifyAllBtn.textContent = "Simplifying page... (click to stop)"
     simplifyAllBtn.style.backgroundColor = tokens.accentTeal
     simplifyAllBtn.style.color = "#FFFFFF"
 
+    // A per-paragraph failure (a rate limit, a transient network error,
+    // a cold-start timeout) must not abort the whole run - caught here
+    // and logged so it's visible, while the loop moves on to the next
+    // paragraph instead of leaving the button permanently stuck on
+    // "Simplifying page..." forever. Confirmed directly: without this,
+    // one uncaught rejection here means simplifyAllInProgress and the
+    // button's label/style below never get reset, since the code that
+    // resets them sits after this loop and never runs.
     for (const p of getActiveParagraphs()) {
-      await simplifyParagraph(p)
+      if (simplifyAllStopRequested) break
+      try {
+        await simplifyParagraph(p)
+      } catch (err) {
+        logEvent("simplify_all_paragraph_error", {
+          error: err instanceof Error ? err.message : "Something went wrong"
+        })
+      }
     }
 
-    simplifyAllBtn.disabled = false
-    simplifyAllBtn.textContent = "✓ Page Simplified"
-    simplifyAllBtn.style.backgroundColor = tokens.badgeDoneBg
-    simplifyAllBtn.style.color = tokens.badgeDoneText
+    simplifyAllInProgress = false
+    const wasStopped = simplifyAllStopRequested
+    simplifyAllStopRequested = false
+    simplifyAllBtn.textContent = wasStopped ? "Simplify Entire Page" : "✓ Page Simplified"
+    simplifyAllBtn.style.backgroundColor = wasStopped ? "#FFFFFF" : tokens.badgeDoneBg
+    simplifyAllBtn.style.color = wasStopped ? tokens.readingText : tokens.badgeDoneText
   })
 
   const row = document.createElement("div")
@@ -1652,6 +1690,10 @@ async function init() {
   injectReaderStyles()
   injectMenu(devModeEnabled)
   injectQuizModal()
+  // Lives here permanently, positioned via attachBadgeTo() rather than
+  // ever being re-parented into whatever paragraph it's currently
+  // pointing at - see attachBadgeTo for why.
+  document.body.appendChild(badge)
 
   activateBadgeClickHandler()
   activateSelectionTrigger()
