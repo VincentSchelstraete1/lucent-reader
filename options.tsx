@@ -84,7 +84,7 @@ function OptionsPage() {
       }}>
       <div style={{ maxWidth: 480, width: "100%" }}>
         <h1 style={{ fontSize: 22, marginBottom: 4 }}>
-          Adaptive Reading Assistant
+          Lucent Reader
         </h1>
         <p style={{ fontSize: 14, color: tokens.captionText, marginBottom: 28 }}>
           Reading level assessment

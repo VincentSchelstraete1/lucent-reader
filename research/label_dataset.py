@@ -1,5 +1,5 @@
 """
-Interactive labeling scaffold for Adaptive Reading Assistant session logs.
+Interactive labeling scaffold for Lucent Reader session logs.
 
 Loads one or more exported session-log JSON files (from the extension's
 "Export Session Log" button), groups events by paragraph, shows you each

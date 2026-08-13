@@ -1,8 +1,8 @@
 {
-  "name": "accessibility-reader",
-  "displayName": "Accessibility reader",
+  "name": "lucent-reader",
+  "displayName": "Lucent Reader",
   "version": "0.0.1",
-  "description": "Adaptive reading assistant",
+  "description": "Lucent Reader",
   "author": "Vincent Schelstraete",
   "scripts": {
     "dev": "plasmo dev",

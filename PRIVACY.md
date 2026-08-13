@@ -1,8 +1,8 @@
-# Privacy Policy — Accessibility Reader
+# Privacy Policy — Lucent Reader
 
 _Last updated: 2026-08-12_
 
-Accessibility Reader ("the extension") is a Chrome extension that helps
+Lucent Reader ("the extension") is a Chrome extension that helps
 people simplify text on webpages to match a reading level they choose.
 This page explains exactly what data the extension collects, what it
 sends off your device, and what stays local.
