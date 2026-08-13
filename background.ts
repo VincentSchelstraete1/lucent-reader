@@ -30,6 +30,19 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
   return { ok: true, simplified: data.simplified }
 }
 
+// Fresh installs start eligible to see the one-time onboarding tooltip
+// (contents/struggle-detector.ts shows it the first time the simplify
+// badge appears). Updates explicitly mark it already-seen instead of
+// leaving the flag unset - unset would read as "not seen yet" and pop
+// the tooltip for people who've already been using the extension.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") {
+    chrome.storage.local.set({ hasSeenOnboarding: false })
+  } else if (details.reason === "update") {
+    chrome.storage.local.set({ hasSeenOnboarding: true })
+  }
+})
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== SIMPLIFY_MESSAGE_TYPE) return false
 

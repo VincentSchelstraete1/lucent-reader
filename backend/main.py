@@ -112,9 +112,18 @@ def simplify(request: SimplifyRequest):
                     f"Rewrite the following paragraph so it reads at approximately "
                     f"a US grade {request.target_grade_level} reading level. "
                     f"{length_instruction} "
-                    f"Keep the meaning accurate. Return only the rewritten "
-                    f"paragraph as plain text - no heading, no title, no "
-                    f"markdown formatting, no preamble.\n\n{request.text}"
+                    f"Keep the meaning accurate. Where it genuinely improves "
+                    f"clarity - a list of items, steps, or comparisons, or a "
+                    f"handful of important terms - use bullet points (lines "
+                    f"starting with \"- \") and **bold** on the key term "
+                    f"itself, sparingly. Don't force bullets or bold onto "
+                    f"text that reads fine as plain prose. If the rewrite "
+                    f"covers more than one distinct idea, separate them into "
+                    f"short paragraphs with a blank line between them rather "
+                    f"than one long block. Return only the rewritten text - "
+                    f"no heading, no title, no preamble, and no markdown "
+                    f"besides the bullet points and bold described "
+                    f"above.\n\n{request.text}"
                 )
             }
         ]

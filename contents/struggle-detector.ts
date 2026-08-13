@@ -35,6 +35,8 @@ import {
   setTargetLength,
   type TextLength
 } from "../lib/text-length"
+import { renderSimpleMarkdown } from "../lib/simple-markdown"
+import { getHasSeenOnboarding, markOnboardingSeen } from "../lib/onboarding"
 
 export const config = {
   matches: ["<all_urls>"]
@@ -132,6 +134,31 @@ function injectBadgeStyles() {
   document.head.appendChild(style)
 }
 
+// Styling for the structured content renderSimpleMarkdown() (see
+// lib/simple-markdown.ts) produces inside a simplified paragraph's
+// .arw-text container - short paragraphs, bullet lists, bolded key
+// terms - instead of one flat block of text.
+function injectSimplifiedContentStyles() {
+  const style = document.createElement("style")
+  style.textContent = `
+    .arw-text p {
+      margin: 0 0 0.6em;
+    }
+    .arw-text ul {
+      margin: 0 0 0.6em;
+      padding-left: 1.3em;
+    }
+    .arw-text li {
+      margin-bottom: 0.3em;
+    }
+    .arw-text p:last-child,
+    .arw-text ul:last-child {
+      margin-bottom: 0;
+    }
+  `
+  document.head.appendChild(style)
+}
+
 const badge = document.createElement("button")
 badge.className = "arw-badge"
 
@@ -164,6 +191,14 @@ let targetGradeLevel = DEFAULT_GRADE_LEVEL
 // Same idea as targetGradeLevel above, but for output length. Loaded from
 // storage in init() and kept in sync with the "Text Length" dropdown.
 let targetLength: TextLength = DEFAULT_TEXT_LENGTH
+
+// Whether the first-run onboarding tooltip has already been shown.
+// Defaults to true (don't show) until init() loads the real stored
+// value - a fresh install explicitly starts this false in
+// chrome.storage.local (see background.ts's onInstalled listener), so
+// only a genuinely new install ever sees maybeShowOnboardingTooltip()
+// actually show anything.
+let hasSeenOnboarding = true
 
 // Reference to the menu's grade-level <select>, set once injectMenu()
 // builds it. The quiz modal needs this so that finishing the quiz updates
@@ -269,6 +304,182 @@ function showBadgeFor(paragraphs: HTMLElement[]) {
   badge.style.pointerEvents = "auto"
 }
 
+// ---- First-run onboarding: a centered, two-slide explainer modal ----
+//
+// An earlier version tried to point a tooltip/spotlight at the real
+// badge - first directly on badge appearance, then via a scroll-into-
+// view-and-point step after a first slide. Both were unreliable in
+// practice (the badge only exists once a real paragraph has been
+// flagged or highlighted, and .arw-badge sits at left: -40px of its
+// anchor so it isn't always even fully on-screen). Two fully static
+// slides, entirely independent of any real page content, sidestep that
+// class of bug outright - and since nothing here depends on a badge
+// having appeared yet, this can run immediately on page load instead of
+// waiting for one.
+type OnboardingSlide = {
+  title: string
+  body: string
+  icon: string
+  mockText: string
+  highlightMockText?: boolean
+}
+
+const ONBOARDING_SLIDES: OnboardingSlide[] = [
+  {
+    title: "How Lucent Reader works",
+    body: "Highlight any text you find hard to read, and a small badge appears right next to it.",
+    icon: ICONS.idle,
+    mockText: "Lorem ipsum dolor sit amet...",
+    highlightMockText: true
+  },
+  {
+    title: "One click, simpler text",
+    body: "Click the badge and that text is instantly rewritten in plain language.",
+    icon: ICONS.done,
+    mockText: "Amet is now easier to read."
+  },
+  {
+    title: "More ways to customize",
+    body: "Tap the Aa button in the bottom-right corner any time to set your reading level, adjust text length, or simplify the whole page at once.",
+    icon: "Aa",
+    mockText: "Reading level, text length, whole page"
+  }
+]
+
+let onboardingModalEl: HTMLDivElement | null = null
+
+function closeOnboardingModal() {
+  if (onboardingModalEl) {
+    onboardingModalEl.remove()
+    onboardingModalEl = null
+  }
+}
+
+// Shown once, immediately when the extension activates on a readable
+// page for the first time after a fresh install (see hasSeenOnboarding
+// above and its call site in init()) - two static slides, not a real
+// tour of the actual page.
+function maybeShowOnboardingModal() {
+  if (hasSeenOnboarding) return
+  hasSeenOnboarding = true
+  markOnboardingSeen()
+
+  let slideIndex = 0
+
+  const backdrop = document.createElement("div")
+  backdrop.style.position = "fixed"
+  backdrop.style.top = "0"
+  backdrop.style.left = "0"
+  backdrop.style.right = "0"
+  backdrop.style.bottom = "0"
+  backdrop.style.backgroundColor = "rgba(0,0,0,0.5)"
+  backdrop.style.zIndex = "1000002"
+  backdrop.style.display = "flex"
+  backdrop.style.alignItems = "center"
+  backdrop.style.justifyContent = "center"
+
+  const modal = document.createElement("div")
+  modal.style.backgroundColor = tokens.readingBg
+  modal.style.borderRadius = "16px"
+  modal.style.padding = "28px"
+  modal.style.maxWidth = "360px"
+  modal.style.width = "90%"
+  modal.style.boxShadow = "0 8px 32px rgba(0,0,0,0.3)"
+  modal.style.fontFamily = "Inter, sans-serif"
+  modal.style.textAlign = "center"
+
+  const progress = document.createElement("div")
+  progress.style.fontSize = "12px"
+  progress.style.color = tokens.captionText
+  progress.style.marginBottom = "8px"
+
+  const title = document.createElement("h2")
+  title.style.fontSize = "18px"
+  title.style.color = tokens.readingText
+  title.style.margin = "0 0 12px"
+
+  const explanation = document.createElement("p")
+  explanation.style.fontSize = "14px"
+  explanation.style.color = tokens.readingText
+  explanation.style.lineHeight = "1.5"
+  explanation.style.margin = "0 0 16px"
+
+  const mockRow = document.createElement("div")
+  mockRow.style.display = "flex"
+  mockRow.style.alignItems = "center"
+  mockRow.style.gap = "10px"
+  mockRow.style.backgroundColor = "#FFFFFF"
+  mockRow.style.border = `1px solid ${tokens.captionText}`
+  mockRow.style.borderRadius = "10px"
+  mockRow.style.padding = "12px 14px"
+  mockRow.style.marginBottom = "20px"
+  mockRow.style.textAlign = "left"
+
+  const mockBadge = document.createElement("div")
+  mockBadge.style.flexShrink = "0"
+  mockBadge.style.width = "28px"
+  mockBadge.style.height = "28px"
+  mockBadge.style.borderRadius = "50%"
+  mockBadge.style.border = `1px solid ${tokens.captionText}`
+  mockBadge.style.display = "flex"
+  mockBadge.style.alignItems = "center"
+  mockBadge.style.justifyContent = "center"
+  mockBadge.style.backgroundColor = tokens.readingBg
+  mockBadge.style.color = tokens.readingText
+  mockBadge.style.fontSize = "11px"
+  mockBadge.style.fontWeight = "600"
+
+  const mockText = document.createElement("div")
+  mockText.style.fontSize = "13px"
+  mockText.style.color = tokens.captionText
+  mockText.style.borderRadius = "3px"
+
+  mockRow.appendChild(mockBadge)
+  mockRow.appendChild(mockText)
+
+  const nextBtn = document.createElement("button")
+  nextBtn.style.padding = "10px 20px"
+  nextBtn.style.borderRadius = "20px"
+  nextBtn.style.border = "none"
+  nextBtn.style.backgroundColor = tokens.accentTeal
+  nextBtn.style.color = "#FFFFFF"
+  nextBtn.style.fontSize = "14px"
+  nextBtn.style.cursor = "pointer"
+
+  function renderSlide() {
+    const slide = ONBOARDING_SLIDES[slideIndex]
+    progress.textContent = `${slideIndex + 1} of ${ONBOARDING_SLIDES.length}`
+    title.textContent = slide.title
+    explanation.textContent = slide.body
+    mockBadge.innerHTML = slide.icon
+    mockText.textContent = slide.mockText
+    mockText.style.backgroundColor = slide.highlightMockText ? "#FFF3B0" : "transparent"
+    mockText.style.padding = slide.highlightMockText ? "2px 4px" : "0"
+    nextBtn.textContent = slideIndex === ONBOARDING_SLIDES.length - 1 ? "Got it" : "Next"
+  }
+
+  nextBtn.addEventListener("click", () => {
+    if (slideIndex < ONBOARDING_SLIDES.length - 1) {
+      slideIndex++
+      renderSlide()
+    } else {
+      closeOnboardingModal()
+    }
+  })
+
+  renderSlide()
+
+  modal.appendChild(progress)
+  modal.appendChild(title)
+  modal.appendChild(explanation)
+  modal.appendChild(mockRow)
+  modal.appendChild(nextBtn)
+  backdrop.appendChild(modal)
+  document.body.appendChild(backdrop)
+
+  onboardingModalEl = backdrop
+}
+
 function hideBadge() {
   badge.style.opacity = "0"
   badge.style.pointerEvents = "none"
@@ -335,9 +546,9 @@ function addParagraphControls(paragraph: HTMLElement) {
     performSimplify([paragraph])
   })
 
-  const span = paragraph.querySelector(":scope > .arw-text") as HTMLSpanElement | null
-  if (span) {
-    span.insertAdjacentElement("afterend", revertBtn)
+  const textEl = paragraph.querySelector(":scope > .arw-text") as HTMLDivElement | null
+  if (textEl) {
+    textEl.insertAdjacentElement("afterend", revertBtn)
     revertBtn.insertAdjacentElement("afterend", resimplifyBtn)
   } else {
     paragraph.appendChild(revertBtn)
@@ -356,16 +567,18 @@ async function simplifyParagraph(paragraph: HTMLElement) {
 
   const simplified = await simplifyText(pristine.text, targetGradeLevel, targetLength)
 
-  // Rebuilds the paragraph as flattened plain text - unavoidable here,
-  // since the simplified text is a genuinely different rewrite with no
-  // markup of its own to preserve. What matters is that this only
-  // happens on an explicit simplify action, and that revertParagraph()
-  // can always restore the real original from pristineByParagraph.
+  // Rebuilds the paragraph as structured content (short paragraphs,
+  // bullet lists, bolded key terms via renderSimpleMarkdown) rather than
+  // one flat text block - unavoidable either way, since the simplified
+  // text is a genuinely different rewrite with no markup of its own to
+  // preserve. What matters is that this only happens on an explicit
+  // simplify action, and that revertParagraph() can always restore the
+  // real original from pristineByParagraph.
   paragraph.innerHTML = ""
-  const span = document.createElement("span")
-  span.className = "arw-text"
-  span.textContent = simplified
-  paragraph.appendChild(span)
+  const textContainer = document.createElement("div")
+  textContainer.className = "arw-text"
+  renderSimpleMarkdown(textContainer, simplified)
+  paragraph.appendChild(textContainer)
 
   paragraph.style.position = "relative"
   paragraph.style.borderLeft = `3px solid ${tokens.accentTeal}`
@@ -1431,9 +1644,11 @@ async function isDevModeEnabled(): Promise<boolean> {
 async function init() {
   targetGradeLevel = await getTargetGradeLevel()
   targetLength = await getTargetLength()
+  hasSeenOnboarding = await getHasSeenOnboarding()
   const devModeEnabled = await isDevModeEnabled()
   loadReadingFont()
   injectBadgeStyles()
+  injectSimplifiedContentStyles()
   injectReaderStyles()
   injectMenu(devModeEnabled)
   injectQuizModal()
@@ -1441,6 +1656,8 @@ async function init() {
   activateBadgeClickHandler()
   activateSelectionTrigger()
   activateDwellDetection()
+
+  maybeShowOnboardingModal()
 }
 
 // isProbablyReaderable() is the same lightweight heuristic Firefox uses
