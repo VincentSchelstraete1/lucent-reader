@@ -1,6 +1,6 @@
 # Privacy Policy — Accessibility Reader
 
-_Last updated: 2026-08-11_
+_Last updated: 2026-08-12_
 
 Accessibility Reader ("the extension") is a Chrome extension that helps
 people simplify text on webpages to match a reading level they choose.
@@ -66,11 +66,40 @@ paragraph text and offer to simplify it wherever you're reading. It does
 not run on Chrome's own internal pages (e.g. `chrome://` pages) or other
 browser extensions.
 
+## Your choices and control over your data
+
+Because the extension doesn't use accounts or collect personal
+identifiers, there's no persistent personal profile to request or
+delete. Specifically:
+
+- **Preferences and install ID** can be cleared at any time by removing
+  the extension, or by clearing its storage through Chrome's own
+  extension settings.
+- **In-page behavioral signals** (mouse, scroll, dwell) are already
+  temporary by design — they clear automatically on page reload or
+  navigation, and are never transmitted unless you personally use the
+  hidden developer export option described above.
+- **Paragraph text sent for simplification** is not retained by our
+  server after the request completes, so there is nothing stored there
+  to request deletion of.
+
+If you have questions about your data or want more detail on how a
+specific feature works, contact us using the information below.
+
+## Children's privacy
+
+The extension is not directed at children under 13, and we do not
+knowingly collect personal information from children. Since the
+extension does not collect names, emails, or other personal identifiers
+from any user, this applies equally regardless of age.
+
 ## Changes to this policy
 
-If what the extension collects or sends changes, this page will be
-updated to reflect that.
+If what the extension collects or sends ever changes, this page will be
+updated to reflect that, and the "Last updated" date at the top will
+change accordingly. We recommend checking back periodically if you want
+to stay current.
 
 ## Contact
 
-[Add a contact email or method here before publishing.]
+Email: vincent.sch2006@gmail.com
