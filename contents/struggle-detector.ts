@@ -9,10 +9,37 @@ import { logEvent, downloadSessionLog } from "../lib/session-log"
 import { getInstallId } from "../lib/install-id"
 import { isSensitivePage } from "../lib/sensitive-page"
 import {
+  TEXT_SPACING_OPTIONS,
+  TEXT_SPACING_STORAGE_KEY,
+  DEFAULT_TEXT_SPACING,
+  getTextSpacing,
+  setTextSpacing,
+  type TextSpacing
+} from "../lib/text-spacing"
+import {
+  FONT_OPTIONS,
+  READING_FONT_STORAGE_KEY,
+  DEFAULT_READING_FONT,
+  getReadingFont,
+  setReadingFont,
+  type ReadingFont
+} from "../lib/reading-font"
+import fontOpenDyslexicRegular from "data-base64:../assets/fonts/opendyslexic-400.woff2"
+import fontOpenDyslexicBold from "data-base64:../assets/fonts/opendyslexic-700.woff2"
+import {
   SIMPLIFY_MESSAGE_TYPE,
   type SimplifyMessage,
-  type SimplifyResponse
+  type SimplifyResponse,
+  MANUAL_ACTIVATE_MESSAGE_TYPE,
+  type ManualActivateResponse
 } from "../lib/messages"
+import {
+  DEFAULT_FONT_OVERRIDE_ENABLED,
+  DEFAULT_AUTO_ACTIVATE_ENABLED,
+  FONT_OVERRIDE_ENABLED_STORAGE_KEY,
+  getFontOverrideEnabled,
+  getAutoActivateEnabled
+} from "../lib/extension-settings"
 import {
   DEFAULT_GRADE_LEVEL,
   MAX_QUIZ_QUESTIONS,
@@ -158,6 +185,126 @@ function injectSimplifiedContentStyles() {
   document.head.appendChild(style)
 }
 
+// ---- Page-wide style overrides: text spacing + reading font ----
+//
+// One shared <style> tag for both, rather than one each - its content
+// is the concatenation of whatever each control currently wants, so
+// changing one never clobbers the other. "off"/"default" clear their
+// own half entirely rather than forcing an explicit "normal" value, so
+// the extension leaves the page's own styling completely untouched
+// until a control is actually turned on.
+let pageStyleEl: HTMLStyleElement | null = null
+let spacingCSSRules = ""
+let fontCSSRules = ""
+
+function getPageStyleEl(): HTMLStyleElement {
+  if (!pageStyleEl) {
+    pageStyleEl = document.createElement("style")
+    pageStyleEl.id = "arw-page-style"
+    document.head.appendChild(pageStyleEl)
+  }
+  return pageStyleEl
+}
+
+function renderPageStyle() {
+  getPageStyleEl().textContent = `${spacingCSSRules}\n${fontCSSRules}`
+}
+
+function applyTextSpacing(spacing: TextSpacing) {
+  if (spacing === "off") {
+    spacingCSSRules = ""
+    renderPageStyle()
+    return
+  }
+
+  const option = TEXT_SPACING_OPTIONS.find((o) => o.value === spacing)
+  if (!option) return
+
+  spacingCSSRules = `
+    body, body * {
+      letter-spacing: ${option.letterSpacing} !important;
+      word-spacing: ${option.wordSpacing} !important;
+      line-height: ${option.lineHeight} !important;
+    }
+  `
+  renderPageStyle()
+}
+
+// Google Fonts are loaded on demand, once per font, via the same kind
+// of stylesheet <link> loadReadingFont() below already uses for Varela
+// Round - just parameterized per-font instead of hardcoded.
+const loadedGoogleFonts = new Set<string>()
+
+function loadGoogleFont(googleFontParam: string) {
+  if (loadedGoogleFonts.has(googleFontParam)) return
+  loadedGoogleFonts.add(googleFontParam)
+  const link = document.createElement("link")
+  link.rel = "stylesheet"
+  link.href = `https://fonts.googleapis.com/css2?family=${googleFontParam}&display=swap`
+  document.head.appendChild(link)
+}
+
+// Master switch, off by default (see lib/extension-settings.ts) -
+// checked first, unconditionally, so turning this off in Settings
+// clears any font override regardless of which font is selected in the
+// Aa menu. Kept in sync live: the chrome.storage.onChanged listener in
+// init() below updates this and re-calls applyReadingFont() whenever
+// the Settings toggle changes, so flipping it takes effect immediately
+// without a page reload.
+let fontOverrideEnabled = DEFAULT_FONT_OVERRIDE_ENABLED
+
+function applyReadingFont(font: ReadingFont) {
+  if (!fontOverrideEnabled) {
+    fontCSSRules = ""
+    renderPageStyle()
+    return
+  }
+
+  const option = FONT_OPTIONS.find((o) => o.value === font)
+  if (!option || option.value === "default") {
+    fontCSSRules = ""
+    renderPageStyle()
+    return
+  }
+
+  if (option.strategy === "google" && "googleFontParam" in option) {
+    loadGoogleFont(option.googleFontParam)
+  }
+
+  // OpenDyslexic isn't on Google Fonts, so it ships inside the
+  // extension itself (assets/fonts/) and gets embedded here as a data:
+  // URI via the data-base64: imports below - no runtime network
+  // request, and not subject to a page's CSP the way an external
+  // stylesheet link can be. Only injected into the page's own <style>
+  // tag when actually selected, so a page that never turns this on
+  // doesn't carry the ~230KB of embedded font data in its CSSOM.
+  const fontFaceBlock =
+    option.value === "opendyslexic"
+      ? `
+        @font-face {
+          font-family: "OpenDyslexic";
+          src: url(${fontOpenDyslexicRegular}) format("woff2");
+          font-weight: 400;
+          font-style: normal;
+        }
+        @font-face {
+          font-family: "OpenDyslexic";
+          src: url(${fontOpenDyslexicBold}) format("woff2");
+          font-weight: 700;
+          font-style: normal;
+        }
+      `
+      : ""
+
+  fontCSSRules = `
+    ${fontFaceBlock}
+    body, body * {
+      font-family: ${option.cssFontFamily} !important;
+    }
+  `
+  renderPageStyle()
+}
+
 const badge = document.createElement("button")
 badge.className = "arw-badge"
 
@@ -190,6 +337,17 @@ let targetGradeLevel = DEFAULT_GRADE_LEVEL
 // Same idea as targetGradeLevel above, but for output length. Loaded from
 // storage in init() and kept in sync with the "Text Length" dropdown.
 let targetLength: TextLength = DEFAULT_TEXT_LENGTH
+
+// Same idea again, but for the Text Spacing control in the Aa menu.
+// Loaded from storage in init(). The menu's click handler updates this,
+// applies the spacing immediately (see applyTextSpacing above), and
+// persists it - the top-level chrome.storage.onChanged listener further
+// down also re-applies it, but that's for other tabs/a later page load,
+// not this one.
+let currentTextSpacing: TextSpacing = DEFAULT_TEXT_SPACING
+
+// Same idea again, but for the Reading Font control in the Aa menu.
+let currentReadingFont: ReadingFont = DEFAULT_READING_FONT
 
 // Whether the first-run onboarding tooltip has already been shown.
 // Defaults to true (don't show) until init() loads the real stored
@@ -350,6 +508,12 @@ const ONBOARDING_SLIDES: OnboardingSlide[] = [
     body: "Tap the Aa button in the bottom-right corner any time to set your reading level, adjust text length, or simplify the whole page at once.",
     icon: "Aa",
     mockText: "Reading level, text length, whole page"
+  },
+  {
+    title: "Settings, in the toolbar icon",
+    body: "Click the Lucent Reader icon in your browser toolbar for a Settings tab - turn on a dyslexia-friendly font (off by default) or turn off auto-activation if you'd rather start it yourself on each page.",
+    icon: "⚙",
+    mockText: "Dyslexia-friendly font: Off  ·  Auto-activate: On"
   }
 ]
 
@@ -1392,6 +1556,102 @@ function injectMenu(devModeEnabled: boolean) {
   textLengthRow.appendChild(textLengthHeader)
   textLengthRow.appendChild(textLengthSlider)
 
+  // ---- New: reading font control ----
+  const fontRow = document.createElement("div")
+  fontRow.style.display = "flex"
+  fontRow.style.alignItems = "center"
+  fontRow.style.justifyContent = "space-between"
+  fontRow.style.gap = "12px"
+  fontRow.style.padding = "4px 2px"
+
+  const fontLabel = document.createElement("span")
+  fontLabel.textContent = "Reading Font"
+  fontLabel.style.fontSize = "14px"
+  fontLabel.style.color = tokens.readingText
+
+  const fontSelect = document.createElement("select")
+  fontSelect.style.padding = "6px 10px"
+  fontSelect.style.borderRadius = "20px"
+  fontSelect.style.border = `1px solid ${tokens.captionText}`
+  fontSelect.style.fontSize = "12px"
+  fontSelect.style.cursor = "pointer"
+  fontSelect.style.backgroundColor = "#FFFFFF"
+  fontSelect.style.color = tokens.readingText
+
+  FONT_OPTIONS.forEach((option) => {
+    const fontOptionEl = document.createElement("option")
+    fontOptionEl.value = option.value
+    fontOptionEl.textContent = option.label
+    if (option.value === currentReadingFont) fontOptionEl.selected = true
+    fontSelect.appendChild(fontOptionEl)
+  })
+
+  fontSelect.addEventListener("change", () => {
+    currentReadingFont = fontSelect.value as ReadingFont
+    applyReadingFont(currentReadingFont)
+    setReadingFont(currentReadingFont)
+    logEvent("reading_font_changed", { readingFont: currentReadingFont })
+  })
+
+  fontRow.appendChild(fontLabel)
+  fontRow.appendChild(fontSelect)
+
+  // ---- New: text spacing control (letter spacing, word spacing, line
+  // height) - four buttons rather than a slider/select, matching how the
+  // toolbar popup version of this control looked before it moved here. ----
+  const spacingRow = document.createElement("div")
+  spacingRow.style.display = "flex"
+  spacingRow.style.flexDirection = "column"
+  spacingRow.style.gap = "6px"
+  spacingRow.style.padding = "4px 2px"
+
+  const spacingLabel = document.createElement("span")
+  spacingLabel.textContent = "Text Spacing"
+  spacingLabel.style.fontSize = "14px"
+  spacingLabel.style.color = tokens.readingText
+
+  const spacingButtonRow = document.createElement("div")
+  spacingButtonRow.style.display = "flex"
+  spacingButtonRow.style.gap = "6px"
+
+  const spacingButtons: HTMLButtonElement[] = []
+
+  function syncSpacingButtons() {
+    spacingButtons.forEach((btn, i) => {
+      const active = TEXT_SPACING_OPTIONS[i].value === currentTextSpacing
+      btn.style.backgroundColor = active ? tokens.accentTeal : "#FFFFFF"
+      btn.style.color = active ? "#FFFFFF" : tokens.readingText
+      btn.style.borderColor = active ? tokens.accentTeal : tokens.captionText
+    })
+  }
+
+  TEXT_SPACING_OPTIONS.forEach((option) => {
+    const spacingBtn = document.createElement("button")
+    spacingBtn.textContent = option.label
+    spacingBtn.style.flex = "1"
+    spacingBtn.style.padding = "6px 0"
+    spacingBtn.style.borderRadius = "14px"
+    spacingBtn.style.border = `1px solid ${tokens.captionText}`
+    spacingBtn.style.backgroundColor = "#FFFFFF"
+    spacingBtn.style.color = tokens.readingText
+    spacingBtn.style.fontSize = "12px"
+    spacingBtn.style.cursor = "pointer"
+    spacingBtn.addEventListener("click", () => {
+      currentTextSpacing = option.value
+      applyTextSpacing(currentTextSpacing)
+      setTextSpacing(currentTextSpacing)
+      syncSpacingButtons()
+      logEvent("text_spacing_changed", { textSpacing: currentTextSpacing })
+    })
+    spacingButtons.push(spacingBtn)
+    spacingButtonRow.appendChild(spacingBtn)
+  })
+
+  syncSpacingButtons()
+
+  spacingRow.appendChild(spacingLabel)
+  spacingRow.appendChild(spacingButtonRow)
+
   const exportBtn = document.createElement("button")
   exportBtn.textContent = "Export Session Log"
   exportBtn.style.padding = "10px 14px"
@@ -1418,6 +1678,8 @@ function injectMenu(devModeEnabled: boolean) {
   panel.appendChild(row)
   panel.appendChild(gradeLevelRow)
   panel.appendChild(textLengthRow)
+  panel.appendChild(fontRow)
+  panel.appendChild(spacingRow)
 
   // Research/dev tool, not something real end users need - only shown
   // when chrome.storage.local has devMode === true, which nothing sets
@@ -1683,6 +1945,9 @@ async function isDevModeEnabled(): Promise<boolean> {
 async function init() {
   targetGradeLevel = await getTargetGradeLevel()
   targetLength = await getTargetLength()
+  currentTextSpacing = await getTextSpacing()
+  currentReadingFont = await getReadingFont()
+  fontOverrideEnabled = await getFontOverrideEnabled()
   hasSeenOnboarding = await getHasSeenOnboarding()
   const devModeEnabled = await isDevModeEnabled()
   loadReadingFont()
@@ -1700,8 +1965,44 @@ async function init() {
   activateSelectionTrigger()
   activateDwellDetection()
 
+  // Text spacing and reading font used to apply from a separate,
+  // independent top-level block gated only by isSensitivePage() - not
+  // isProbablyReaderable(). That meant a font picked in the Aa menu
+  // silently followed the user to every non-sensitive page, including
+  // ones where the Aa menu (and everything else init() sets up) never
+  // even appears, e.g. Google search results. Applying them here
+  // instead means they're on exactly the same footing as the badge:
+  // both only ever run inside init(), and init() only ever runs where
+  // this file's activation gate below decided the page is eligible.
+  applyTextSpacing(currentTextSpacing)
+  applyReadingFont(currentReadingFont)
+
+  // Scoped to this tab's activation, same reasoning as above - a page
+  // that never activated has no listener updating anything on it.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return
+    if (TEXT_SPACING_STORAGE_KEY in changes) {
+      applyTextSpacing(changes[TEXT_SPACING_STORAGE_KEY].newValue ?? DEFAULT_TEXT_SPACING)
+    }
+    if (READING_FONT_STORAGE_KEY in changes) {
+      currentReadingFont = changes[READING_FONT_STORAGE_KEY].newValue ?? DEFAULT_READING_FONT
+      applyReadingFont(currentReadingFont)
+    }
+    if (FONT_OVERRIDE_ENABLED_STORAGE_KEY in changes) {
+      fontOverrideEnabled = changes[FONT_OVERRIDE_ENABLED_STORAGE_KEY].newValue ?? DEFAULT_FONT_OVERRIDE_ENABLED
+      applyReadingFont(currentReadingFont)
+    }
+  })
+
   maybeShowOnboardingModal()
 }
+
+// True once init() has actually run for this page load - via either
+// path below (automatic or manual). Guards against the manual-activate
+// message handler re-running init() a second time on a page that
+// already auto-activated, and against a second manual click doing the
+// same.
+let hasActivated = false
 
 // isSensitivePage() is checked first and takes priority over
 // isProbablyReaderable() below - confirmed directly on real bank
@@ -1713,19 +2014,68 @@ async function init() {
 // isSensitivePage answers "is this safe to run on at all" - those are
 // different questions, and passing the first one is never enough on
 // its own to activate anything here.
-if (isSensitivePage()) {
-  logEvent("page_skipped_sensitive_page", {})
-} else if (isProbablyReaderable(document)) {
-  // The same lightweight heuristic Firefox uses to decide whether to
-  // show its own Reader View icon at all - a fast check of text
-  // density and node count, not a full Readability.parse(). Now that
-  // the extension runs on every site (not just Wikipedia), this keeps
-  // it genuinely inactive on non-article pages (search results,
-  // settings/dashboard UIs, etc.) instead of just hiding the UI:
-  // nothing here runs at all - no observer, no selection listener, no
-  // menu button - unless the page looks like it actually has article
-  // content.
+async function evaluateAutomaticActivation() {
+  if (isSensitivePage()) {
+    logEvent("page_skipped_sensitive_page", {})
+    return
+  }
+
+  if (!isProbablyReaderable(document)) {
+    // The same lightweight heuristic Firefox uses to decide whether to
+    // show its own Reader View icon at all - a fast check of text
+    // density and node count, not a full Readability.parse(). Now that
+    // the extension runs on every site (not just Wikipedia), this
+    // keeps it genuinely inactive on non-article pages (search
+    // results, settings/dashboard UIs, etc.) instead of just hiding
+    // the UI: nothing here runs at all - no observer, no selection
+    // listener, no menu button, no font/spacing override - unless the
+    // page looks like it actually has article content.
+    logEvent("page_skipped_not_readerable", {})
+    return
+  }
+
+  // Settings > "Auto-activate on readable pages" - default on, matching
+  // the only behavior that existed before this setting did. Off means
+  // the page still passed every eligibility check above, but init()
+  // only runs if the user explicitly asks for it via the popup's
+  // manual-activate button (see the message handler below).
+  const autoActivateEnabled = await getAutoActivateEnabled()
+  if (!autoActivateEnabled) {
+    logEvent("page_skipped_auto_activate_disabled", {})
+    return
+  }
+
+  hasActivated = true
   init()
-} else {
-  logEvent("page_skipped_not_readerable", {})
 }
+
+evaluateAutomaticActivation()
+
+// Manual activation from the popup's Home tab (see popup.tsx) - the
+// only way to turn Lucent Reader on for a specific page when
+// auto-activate is off, or when a page failed isProbablyReaderable but
+// the user wants it anyway. isSensitivePage() is still enforced here
+// unconditionally - a manual request is an explicit user action, but
+// it can never override the one hard safety gate in this file.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== MANUAL_ACTIVATE_MESSAGE_TYPE) return false
+
+  if (isSensitivePage()) {
+    const response: ManualActivateResponse = { ok: false, reason: "sensitive_page" }
+    sendResponse(response)
+    return true
+  }
+
+  if (hasActivated) {
+    const response: ManualActivateResponse = { ok: true, alreadyActive: true }
+    sendResponse(response)
+    return true
+  }
+
+  hasActivated = true
+  logEvent("manual_activate", {})
+  init()
+  const response: ManualActivateResponse = { ok: true, alreadyActive: false }
+  sendResponse(response)
+  return true
+})

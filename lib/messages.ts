@@ -22,3 +22,20 @@ export type SimplifyMessage = {
 export type SimplifyResponse =
   | { ok: true; simplified: string }
   | { ok: false; error: string }
+
+// Sent from the popup (chrome.tabs.sendMessage, not the background
+// worker) directly to the active tab's content script, when the user
+// clicks "Activate on this page" - only relevant when the page didn't
+// already auto-activate (auto-activate is off, or the page failed the
+// isProbablyReaderable check). The content script still enforces
+// isSensitivePage() itself before acting on this - a manual request
+// can never override that hard safety gate.
+export const MANUAL_ACTIVATE_MESSAGE_TYPE = "manual_activate" as const
+
+export type ManualActivateMessage = {
+  type: typeof MANUAL_ACTIVATE_MESSAGE_TYPE
+}
+
+export type ManualActivateResponse =
+  | { ok: true; alreadyActive: boolean }
+  | { ok: false; reason: "sensitive_page" }
