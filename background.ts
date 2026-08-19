@@ -4,6 +4,12 @@ import {
   type SimplifyMessage,
   type SimplifyResponse
 } from "./lib/messages"
+import {
+  EXPLAIN_MESSAGE_TYPE,
+  type ExplainMessage,
+  type ExplainResponse
+} from "./lib/messages"
+
 
 async function handleSimplify(message: SimplifyMessage): Promise<SimplifyResponse> {
   const response = await fetch(`${BACKEND_URL}/simplify`, {
@@ -30,6 +36,32 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
   return { ok: true, simplified: data.simplified }
 }
 
+async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> {
+  const response = await fetch(`${BACKEND_URL}/explain`, { //TODO: wire up in backend 
+    method: "POST",
+    headers: {"Content-Type" : "application/json"},
+    body: JSON.stringify({
+      text: message.text,
+      context: message.context, 
+      target_grade_level: message.targetGradeLevel,
+      target_length: message.targetLength,
+      install_id: message.installId
+    })
+  })
+
+  if (response.status === 429) {
+    const errorData = await response.json()
+    return { ok: false, error: errorData.detail}
+  }
+
+  if (!response.ok){
+    return { ok: false, error: "Explanation request failed"}
+  }
+
+  const data = await response.json()
+  return { ok: true, explanation: data.explanation}
+}
+
 // Fresh installs start eligible to see the one-time onboarding tooltip
 // (contents/struggle-detector.ts shows it the first time the simplify
 // badge appears). Updates explicitly mark it already-seen instead of
@@ -44,9 +76,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 })
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== SIMPLIFY_MESSAGE_TYPE) return false
-
-  handleSimplify(message as SimplifyMessage)
+  if (message?.type === SIMPLIFY_MESSAGE_TYPE){
+    handleSimplify(message as SimplifyMessage)
     .then(sendResponse)
     .catch((err) =>
       sendResponse({
@@ -54,6 +85,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         error: err instanceof Error ? err.message : "Something went wrong"
       })
     )
-
+  }
+  else if (message?.type === EXPLAIN_MESSAGE_TYPE){
+    handleExplain(message as ExplainMessage)
+    .then(sendResponse)
+    .catch((err) =>
+      sendResponse({
+        ok: false,
+        error: err instanceof Error ? err.message : "Something went wrong"
+      })
+    )
+  }
+  else {
+    return false
+  }
+  
   return true // keep the message channel open for the async sendResponse
 })

@@ -34,6 +34,11 @@ import {
   type ManualActivateResponse
 } from "../lib/messages"
 import {
+  EXPLAIN_MESSAGE_TYPE,
+  type ExplainMessage,
+  type ExplainResponse
+} from "../lib/messages"
+import {
   DEFAULT_FONT_OVERRIDE_ENABLED,
   DEFAULT_AUTO_ACTIVATE_ENABLED,
   FONT_OVERRIDE_ENABLED_STORAGE_KEY,
@@ -305,6 +310,14 @@ function applyReadingFont(font: ReadingFont) {
   renderPageStyle()
 }
 
+const ICONS = {
+  idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
+  loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
+  done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`,
+  error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  explain: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+}
+
 const badge = document.createElement("button")
 badge.className = "arw-badge"
 
@@ -320,10 +333,101 @@ badge.style.opacity = "0"
 badge.style.pointerEvents = "none"
 badge.style.transition = "opacity 120ms ease"
 
+// Second small pill button, shown alongside the Simplify badge whenever
+// it's shown (see showBadgeFor/hideBadge) - reuses the same .arw-badge
+// styling so it looks like a natural pair, just positioned a bit lower
+// (see attachExplainBadgeTo) so the two don't overlap.
+const explainBadge = document.createElement("button")
+explainBadge.className = "arw-badge"
+
+const explainBadgeIcon = document.createElement("span")
+explainBadgeIcon.className = "arw-icon"
+explainBadgeIcon.innerHTML = ICONS.explain
+
+const explainBadgeLabel = document.createElement("span")
+explainBadgeLabel.className = "arw-label"
+explainBadgeLabel.textContent = "Explain"
+
+explainBadge.appendChild(explainBadgeIcon)
+explainBadge.appendChild(explainBadgeLabel)
+explainBadge.style.opacity = "0"
+explainBadge.style.pointerEvents = "none"
+explainBadge.style.transition = "opacity 120ms ease"
+explainBadge.style.backgroundColor = tokens.readingBg
+explainBadge.style.color = tokens.readingText
+
+// Small card that renders whatever performExplain() returns, positioned
+// just under the paragraph the Explain badge was clicked on. Left in
+// the DOM (display: none) between uses rather than created/destroyed
+// each time, same pattern as the badge itself.
+const explainCard = document.createElement("div")
+explainCard.id = "arw-explain-card"
+explainCard.style.position = "absolute"
+explainCard.style.display = "none"
+explainCard.style.maxWidth = "320px"
+explainCard.style.backgroundColor = tokens.readingBg
+explainCard.style.color = tokens.readingText
+explainCard.style.border = `1px solid ${tokens.captionText}`
+explainCard.style.borderRadius = "12px"
+explainCard.style.boxShadow = "0 4px 16px rgba(0,0,0,0.18)"
+explainCard.style.padding = "12px 14px"
+explainCard.style.fontFamily = "Inter, sans-serif"
+explainCard.style.fontSize = "13px"
+explainCard.style.lineHeight = "1.5"
+explainCard.style.zIndex = "999999"
+
+const explainCardHeader = document.createElement("div")
+explainCardHeader.style.display = "flex"
+explainCardHeader.style.alignItems = "center"
+explainCardHeader.style.justifyContent = "space-between"
+explainCardHeader.style.marginBottom = "6px"
+explainCardHeader.style.gap = "12px"
+
+const explainCardTitle = document.createElement("span")
+explainCardTitle.textContent = "Explanation"
+explainCardTitle.style.fontWeight = "600"
+explainCardTitle.style.fontSize = "12px"
+explainCardTitle.style.color = tokens.captionText
+
+const explainCardClose = document.createElement("button")
+explainCardClose.textContent = "✕"
+explainCardClose.title = "Close"
+explainCardClose.style.border = "none"
+explainCardClose.style.background = "transparent"
+explainCardClose.style.color = tokens.captionText
+explainCardClose.style.cursor = "pointer"
+explainCardClose.style.fontSize = "12px"
+explainCardClose.style.padding = "0"
+explainCardClose.addEventListener("click", () => hideExplanationCard())
+
+explainCardHeader.appendChild(explainCardTitle)
+explainCardHeader.appendChild(explainCardClose)
+
+const explainCardBody = document.createElement("div")
+
+explainCard.appendChild(explainCardHeader)
+explainCard.appendChild(explainCardBody)
+
+// The paragraph the currently-open (or most recently opened) explain
+// card is anchored to - separate from currentParagraphs, since the
+// selection (and so currentParagraphs) can change or clear while the
+// card from a previous explanation is still open on screen.
+let explainAnchorParagraph: HTMLElement | null = null
+
+// A snapshot of the highlighted text, taken in showBadgeFor at the one
+// moment a real (non-empty) selection is confirmed - read there rather
+// than at explainBadge's own click time because clicking a button
+// outside the selected text can itself collapse the browser selection
+// before the click handler runs, so window.getSelection() by then is
+// unreliable.
+let explainSelectedText = ""
+
 // All paragraphs the current badge applies to - normally just one, but
 // a selection spanning multiple paragraphs puts all of them here (see
 // handleSelectionChange), so a single click simplifies all of them.
 let currentParagraphs: HTMLElement[] | null = null
+let currentSelectedText: string | null = null
+let surroundingContext: string | null = null
 let hideTimeoutId: number | null = null
 
 // The target reading level for simplification. Defaults to
@@ -362,13 +466,6 @@ let hasSeenOnboarding = true
 // the dropdown's displayed value immediately, without the two drifting
 // out of sync until the next page load.
 let gradeLevelSelectEl: HTMLSelectElement | null = null
-
-const ICONS = {
-  idle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5L12 2z"/><path d="M19 14l.75 2.25L22 17l-2.25.75L19 20l-.75-2.25L16 17l2.25-.75L19 14z"/></svg>`,
-  loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
-  done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`,
-  error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
-}
 
 // count > 1 means the current selection spans multiple paragraphs - the
 // label says so explicitly ("Simplify 3 paragraphs") rather than firing
@@ -442,6 +539,24 @@ function attachBadgeTo(paragraph: HTMLElement) {
   badge.style.left = `${rect.left + window.scrollX - 40}px`
 }
 
+// Same page-coordinate approach as attachBadgeTo, offset 40px lower so
+// it sits directly beneath the Simplify badge instead of on top of it.
+function attachExplainBadgeTo(paragraph: HTMLElement) {
+  const rect = paragraph.getBoundingClientRect()
+  explainBadge.style.top = `${rect.top + window.scrollY + 2 + 40}px`
+  explainBadge.style.left = `${rect.left + window.scrollX - 40}px`
+}
+
+// Positions the explanation card just under the paragraph it's about,
+// in page coordinates - same reasoning as attachBadgeTo (see its
+// comment) for why this is against document.body rather than nesting
+// inside the paragraph itself.
+function attachExplainCardTo(paragraph: HTMLElement) {
+  const rect = paragraph.getBoundingClientRect()
+  explainCard.style.top = `${rect.bottom + window.scrollY + 8}px`
+  explainCard.style.left = `${rect.left + window.scrollX}px`
+}
+
 // paragraphs is usually a single-element array (the common case: a
 // small selection or a dwell flag on one paragraph), but can be more
 // than one when a selection spans multiple paragraphs - see
@@ -461,12 +576,17 @@ function showBadgeFor(paragraphs: HTMLElement[]) {
   paragraphs.forEach(capturePristine)
 
   currentParagraphs = paragraphs
+  explainSelectedText = (window.getSelection()?.toString() || "").trim()
   styleBadge("idle", paragraphs.length)
 
   attachBadgeTo(paragraphs[0])
 
   badge.style.opacity = "1"
   badge.style.pointerEvents = "auto"
+
+  attachExplainBadgeTo(paragraphs[0])
+  explainBadge.style.opacity = "1"
+  explainBadge.style.pointerEvents = "auto"
 }
 
 // ---- First-run onboarding: a centered, two-slide explainer modal ----
@@ -655,6 +775,38 @@ function hideBadge() {
   badge.style.opacity = "0"
   badge.style.pointerEvents = "none"
   currentParagraphs = null
+
+  explainBadge.style.opacity = "0"
+  explainBadge.style.pointerEvents = "none"
+}
+
+// Separate from hideBadge - the card is left open (if already open)
+// even after the selection that triggered it clears, so the user can
+// finish reading the explanation. Only explicit interactions (its own
+// close button, or opening a new explanation) close it.
+function hideExplanationCard() {
+  explainCard.style.display = "none"
+  explainAnchorParagraph = null
+}
+
+function showExplanation(text: string) {
+  explainCardBody.textContent = text
+  explainCardBody.style.color = tokens.readingText
+  explainCard.style.backgroundColor = tokens.readingBg
+  explainCard.style.borderColor = tokens.captionText
+
+  if (explainAnchorParagraph) attachExplainCardTo(explainAnchorParagraph)
+  explainCard.style.display = "block"
+}
+
+function showExplanationError(error: string) {
+  explainCardBody.textContent = error
+  explainCardBody.style.color = "#8A2E2E"
+  explainCard.style.backgroundColor = "#FBEAEA"
+  explainCard.style.borderColor = "#8A2E2E"
+
+  if (explainAnchorParagraph) attachExplainCardTo(explainAnchorParagraph)
+  explainCard.style.display = "block"
 }
 
 function styleControlButton(el: HTMLElement) {
@@ -791,6 +943,32 @@ async function simplifyText(
   return response.simplified
 }
 
+async function explainText(
+  text:string,
+  context: string,
+  targetLevel: number,
+  length: TextLength,
+): Promise<string> {
+  const installId = await getInstallId()
+
+  const message: ExplainMessage = {
+    type: EXPLAIN_MESSAGE_TYPE,
+    text,
+    context,
+    targetGradeLevel: targetLevel,
+    targetLength: length,
+    installId
+  }
+
+  const response = (await chrome.runtime.sendMessage(message)) as ExplainResponse
+
+  if(response.ok === false) {
+    throw new Error(response.error)
+  }
+
+  return response.explanation
+}
+
 // Registers the badge's click handler, the highlight-to-badge and
 // dwell-detection triggers, and starts observing the page's content
 // blocks. Wired up like this (as one function, called conditionally)
@@ -819,6 +997,30 @@ async function performSimplify(paragraphs: HTMLElement[]) {
   } finally {
     simplifyInFlight = false
   }
+}
+
+let explainInFlight = false
+
+async function performExplain(currentSelectedText: string, surroundingContext: string){
+  if(currentSelectedText.length === 0 || explainInFlight) return 
+  explainInFlight = true
+  
+  try {
+    const explanation = await explainText(
+      currentSelectedText,
+      surroundingContext,
+      targetGradeLevel,
+      targetLength
+    )
+
+    showExplanation(explanation)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Something went wrong"
+    showExplanationError(message)
+  } finally {
+    explainInFlight = false
+  }
+
 }
 
 async function runSimplify(paragraphs: HTMLElement[]) {
@@ -896,6 +1098,32 @@ function activateBadgeClickHandler() {
   })
 }
 
+// performExplain() itself already handles the in-flight guard, the try/
+// catch, and routing the result to showExplanation/showExplanationError
+// - this just anchors the card to the right paragraph first and gives
+// the badge its own loading label while the request is in flight.
+function activateExplainBadgeClickHandler() {
+  explainBadge.addEventListener("click", async () => {
+    if (!currentParagraphs || !explainSelectedText) return
+
+    explainAnchorParagraph = currentParagraphs[0]
+    attachExplainCardTo(explainAnchorParagraph)
+
+    explainBadgeLabel.textContent = "Explaining..."
+    explainBadge.classList.add("arw-expanded")
+
+    logEvent("explain_click", {
+      paragraphCount: currentParagraphs.length,
+      textPreview: explainSelectedText.slice(0, 60)
+    })
+
+    await performExplain(explainSelectedText, explainAnchorParagraph.textContent || "")
+
+    explainBadgeLabel.textContent = "Explain"
+    explainBadge.classList.remove("arw-expanded")
+  })
+}
+
 // ---- Trigger 1: user highlights text themselves ----
 
 let selectionDebounceId: number | null = null
@@ -905,15 +1133,12 @@ function handleSelectionChange() {
   selectionDebounceId = window.setTimeout(() => {
     const selection = window.getSelection()
     if (!selection || selection.toString().trim().length === 0) {
-      // A genuinely empty selection means there's nothing to badge -
-      // and, critically, means any previously-tracked paragraph(s) are
-      // no longer what's selected. Explicitly clearing here (rather
-      // than just returning) is what makes each new selection fully
-      // replace the last one instead of leaving currentParagraphs
-      // holding a stale reference a later click could act on.
+      currentSelectedText = selection.toString().trim()
+      surroundingContext = ""
       hideBadge()
       return
     }
+
     if (selection.rangeCount === 0) return
 
     const anchorNode = selection.anchorNode
@@ -923,16 +1148,11 @@ function handleSelectionChange() {
     // an element anchor with a child-index offset instead of a text node).
     const anchorParagraph = findContentBlock(anchorNode, selection.anchorOffset)
     if (!anchorParagraph) {
-      // No match for the current selection - same reasoning as above:
-      // clear whatever was tracked before rather than silently leaving
-      // it in place. (This used to be reachable simply by re-selecting
-      // whichever paragraph the badge itself was sitting in, since the
-      // badge's own icon was an unfiltered disqualifying descendant -
-      // see hasDisqualifyingDescendant() in lib/content-blocks.ts, now
-      // fixed - but clearing here is the correct behavior regardless of
-      // why a given selection fails to resolve.)
+      currentSelectedText = selection.toString().trim()
+      surroundingContext = ""
       hideBadge()
       return
+      
     }
 
     // A selection can span multiple paragraphs (drag across paragraph
@@ -967,7 +1187,14 @@ function activateSelectionTrigger() {
   document.addEventListener("selectionchange", handleSelectionChange)
 
   document.addEventListener("mousedown", (e) => {
-    if (!badge.contains(e.target as Node)) hideBadge()
+    const target = e.target as Node
+    // explainBadge/explainCard are excluded too - otherwise mousedown on
+    // the Explain button (which fires before its own click handler)
+    // would hideBadge() first, clearing currentParagraphs out from under
+    // that click handler before it ever runs.
+    if (!badge.contains(target) && !explainBadge.contains(target) && !explainCard.contains(target)) {
+      hideBadge()
+    }
   })
 }
 
@@ -1086,10 +1313,41 @@ function injectReaderStyles() {
       max-width: 100%;
       height: auto;
     }
+    /* Explicit color + background, not just layout - Readability strips
+       every class and style attribute during extraction (confirmed: every
+       code/pre/span in the rendered output comes through with no class
+       and no inline style left), so none of a source page's own syntax-
+       highlighting colors survive. Left unset, these would inherit
+       whatever color/background the host page's own unscoped code/pre
+       tag-level CSS resolves to right now - including that page's own
+       dark-mode theme, since this overlay lives in the same document, not
+       an isolated Shadow DOM. Confirmed directly on docs.python.org in
+       its dark theme: code chips computed to our own dark inherited text
+       color on that page's dark-mode code background (rgb(44,44,42) on
+       rgb(66,66,66) - both dark, unreadable), and code blocks to white
+       text on a transparent background sitting on this overlay's cream
+       page (also unreadable). Same class of bug as the table backstop
+       below, just for text color instead of layout. */
     .arw-reader-content pre, .arw-reader-content code {
       white-space: pre-wrap;
       word-break: break-word;
       max-width: 100%;
+      background-color: #EAE6D9 !important;
+      color: ${tokens.readingText} !important;
+    }
+    .arw-reader-content code {
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    .arw-reader-content pre {
+      padding: 1em;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .arw-reader-content pre code {
+      background-color: transparent !important;
+      padding: 0;
     }
     .arw-reader-content blockquote {
       border-left: 3px solid ${tokens.accentTeal};
@@ -1147,17 +1405,92 @@ const NON_ARTICLE_SELECTORS = [
   "#toc"
 ]
 
+// Functional "next/previous page" links (continuing the same article/manual
+// onto another URL) vs. general site navigation: Readability has no concept
+// of the former. It strips both the same way - a "Next"/"Prev" link almost
+// always sits inside a short, link-dense container (a <div class="navfooter">
+// or <div class="pagination">), and that container itself gets removed by
+// _cleanConditionally()/the unlikely-candidates pass in Readability.js
+// well before per-link logic ever runs, taking the links down with it.
+// Confirmed directly against https://www.postgresql.org/docs/17/resources.html -
+// its docbook-generated `<div class="navfooter">` with
+// `<a accesskey="p">Prev</a>` and `<a accesskey="n">Next</a>` is silently
+// gone from Readability's output.
+//
+// Rather than trying to preserve navfooter-like containers wholesale
+// (which would drag the Up/Home links and their surrounding table markup
+// back in too - real site chrome, correctly excluded), this pulls out just
+// the one prev/next anchor of each direction before Readability ever
+// touches the clone, using signals that mean "adjacent document in a
+// series" specifically: rel="next"/rel="prev" are literally the HTML
+// spec's definition of that relationship, and accesskey="n"/accesskey="p"
+// are the long-standing a11y convention docbook (and PostgreSQL's docs)
+// use for the same thing. Bare text like "Next" or "Prev" is only trusted
+// alongside one of those two structural signals, since on its own it's
+// just as likely to be a "next/previous blog post" widget - a different
+// article, not part of this one's own pagination. Without a rel/accesskey
+// signal, only specific, low-ambiguity phrasing counts.
+const PAGINATION_LINK_TEXT: Record<"next" | "prev", RegExp> = {
+  next: /^(next\s*page|next\s*section|next\s*chapter|continue\s*reading)\s*[»›→>]?$/i,
+  prev: /^[«‹<]?\s*(prev(ious)?\s*page|prev(ious)?\s*section|prev(ious)?\s*chapter)$/i
+}
+
+function findPaginationLink(
+  doc: Document,
+  direction: "next" | "prev"
+): { href: string; text: string } | null {
+  const relTokensToMatch = direction === "next" ? ["next"] : ["prev", "previous"]
+  const accessKey = direction === "next" ? "n" : "p"
+  const anchors = Array.from(doc.querySelectorAll("a[href]"))
+  for (const anchor of anchors) {
+    const href = (anchor as HTMLAnchorElement).href
+    if (!href) continue
+    const relTokens = (anchor.getAttribute("rel") || "").toLowerCase().split(/\s+/)
+    const isRelMatch = relTokens.some((token) => relTokensToMatch.includes(token))
+    const isAccessKeyMatch = (anchor.getAttribute("accesskey") || "").toLowerCase() === accessKey
+    const text = (anchor.textContent || "").trim()
+    // Docbook-style nav links (PostgreSQL's docs included) put the actual
+    // next/previous chapter title in the title attribute and leave the
+    // visible text as a bare "Next"/"Prev" - prefer that for the label
+    // when present, since "Continue reading: Bug Reporting Guidelines"
+    // means a lot more than "Continue reading: Next".
+    const displayText = (anchor.getAttribute("title") || "").trim() || text
+    if ((isRelMatch || isAccessKeyMatch) && text) {
+      return { href, text: displayText }
+    }
+    if (PAGINATION_LINK_TEXT[direction].test(text)) {
+      return { href, text: displayText }
+    }
+  }
+  return null
+}
+
 // Runs Readability against a clone of the document, never the live one -
 // Readability mutates the tree it's given as it parses, and doing that
 // to the real page would break it.
-function extractArticle(): { title: string; contentHTML: string } | null {
+function extractArticle(): {
+  title: string
+  contentHTML: string
+  nextLink: { href: string; text: string } | null
+  prevLink: { href: string; text: string } | null
+} | null {
   const clone = document.cloneNode(true) as Document
   NON_ARTICLE_SELECTORS.forEach((selector) => {
     clone.querySelectorAll(selector).forEach((el) => el.remove())
   })
+  // Must run before Readability.parse() mutates/removes nodes from the
+  // clone - by the time parse() returns, the pagination links (along with
+  // the rest of their navfooter-like container) are already gone.
+  const nextLink = findPaginationLink(clone, "next")
+  const prevLink = findPaginationLink(clone, "prev")
   const article = new Readability(clone).parse()
   if (!article || !article.content) return null
-  return { title: article.title || document.title, contentHTML: article.content }
+  return {
+    title: article.title || document.title,
+    contentHTML: article.content,
+    nextLink,
+    prevLink
+  }
 }
 
 // Wraps any table that still made it through extraction in its own
@@ -1173,7 +1506,46 @@ function wrapWideTables(container: HTMLElement) {
   })
 }
 
-function buildReaderOverlay(article: { title: string; contentHTML: string }): {
+// Set right before a Prev/Next click's own default navigation takes the
+// tab to a whole new page load - and with it, a whole new content script
+// instance with no memory of readingModeOn. sessionStorage (not
+// chrome.storage.local) specifically: it's scoped to this one tab, so two
+// tabs each reading their own paginated article via these links can never
+// stomp on each other's flag, and it survives exactly a same-origin
+// navigation within the same tab, which is what a "next page" link always
+// is in practice. Read once at top-level below, on the very next page
+// load, to auto-resume Reading Mode there.
+const READING_MODE_CONTINUE_KEY = "arw-reading-mode-continue"
+
+function buildPaginationLinkEl(
+  link: { href: string; text: string },
+  direction: "next" | "prev"
+): HTMLAnchorElement {
+  const el = document.createElement("a")
+  el.href = link.href
+  el.textContent =
+    direction === "next" ? `Continue reading: ${link.text} →` : `← Previous: ${link.text}`
+  el.style.flex = "1"
+  el.style.padding = "14px 20px"
+  el.style.borderRadius = "10px"
+  el.style.border = `1px solid ${tokens.accentTeal}`
+  el.style.color = tokens.accentTeal
+  el.style.textDecoration = "none"
+  el.style.fontSize = "16px"
+  el.style.fontWeight = "600"
+  el.style.textAlign = direction === "next" ? "right" : "left"
+  el.addEventListener("click", () => {
+    sessionStorage.setItem(READING_MODE_CONTINUE_KEY, "1")
+  })
+  return el
+}
+
+function buildReaderOverlay(article: {
+  title: string
+  contentHTML: string
+  nextLink: { href: string; text: string } | null
+  prevLink: { href: string; text: string } | null
+}): {
   overlay: HTMLDivElement
   contentContainer: HTMLDivElement
 } {
@@ -1229,6 +1601,28 @@ function buildReaderOverlay(article: { title: string; contentHTML: string }): {
 
   wrapper.appendChild(titleEl)
   wrapper.appendChild(contentContainer)
+
+  // Rescued separately from Readability's own output (see
+  // findPaginationLink) since neither survives extraction otherwise -
+  // rendered as their own clearly-separate affordance rather than folded
+  // into contentContainer, so they read as "leave this article to
+  // continue it elsewhere" rather than as part of the article's own prose.
+  if (article.prevLink || article.nextLink) {
+    const paginationRow = document.createElement("div")
+    paginationRow.style.display = "flex"
+    paginationRow.style.gap = "12px"
+    paginationRow.style.marginTop = "2.4em"
+
+    if (article.prevLink) {
+      paginationRow.appendChild(buildPaginationLinkEl(article.prevLink, "prev"))
+    }
+    if (article.nextLink) {
+      paginationRow.appendChild(buildPaginationLinkEl(article.nextLink, "next"))
+    }
+
+    wrapper.appendChild(paginationRow)
+  }
+
   overlay.appendChild(closeBtn)
   overlay.appendChild(wrapper)
 
@@ -1960,8 +2354,11 @@ async function init() {
   // ever being re-parented into whatever paragraph it's currently
   // pointing at - see attachBadgeTo for why.
   document.body.appendChild(badge)
+  document.body.appendChild(explainBadge)
+  document.body.appendChild(explainCard)
 
   activateBadgeClickHandler()
+  activateExplainBadgeClickHandler()
   activateSelectionTrigger()
   activateDwellDetection()
 
@@ -2014,42 +2411,74 @@ let hasActivated = false
 // isSensitivePage answers "is this safe to run on at all" - those are
 // different questions, and passing the first one is never enough on
 // its own to activate anything here.
-async function evaluateAutomaticActivation() {
+//
+// continueReadingMode is true exactly once: on the page load immediately
+// after the user clicked a Prev/Next link inside Reading Mode on the
+// previous page (see buildPaginationLinkEl/READING_MODE_CONTINUE_KEY).
+// Once someone is actually in Reading Mode, staying in it across a
+// "next page" navigation is the whole point of offering that link at
+// all - a plain page load landing back in the ordinary view would make
+// every click feel like it exits Reading Mode. isSensitivePage() still
+// applies unconditionally even here; isProbablyReaderable() and the
+// auto-activate setting don't, since this is a specific continuation of
+// something the user already explicitly turned on, not a fresh page's
+// own automatic activation.
+async function evaluateAutomaticActivation(continueReadingMode: boolean) {
   if (isSensitivePage()) {
     logEvent("page_skipped_sensitive_page", {})
     return
   }
 
-  if (!isProbablyReaderable(document)) {
-    // The same lightweight heuristic Firefox uses to decide whether to
-    // show its own Reader View icon at all - a fast check of text
-    // density and node count, not a full Readability.parse(). Now that
-    // the extension runs on every site (not just Wikipedia), this
-    // keeps it genuinely inactive on non-article pages (search
-    // results, settings/dashboard UIs, etc.) instead of just hiding
-    // the UI: nothing here runs at all - no observer, no selection
-    // listener, no menu button, no font/spacing override - unless the
-    // page looks like it actually has article content.
-    logEvent("page_skipped_not_readerable", {})
-    return
-  }
+  if (!continueReadingMode) {
+    if (!isProbablyReaderable(document)) {
+      // The same lightweight heuristic Firefox uses to decide whether to
+      // show its own Reader View icon at all - a fast check of text
+      // density and node count, not a full Readability.parse(). Now that
+      // the extension runs on every site (not just Wikipedia), this
+      // keeps it genuinely inactive on non-article pages (search
+      // results, settings/dashboard UIs, etc.) instead of just hiding
+      // the UI: nothing here runs at all - no observer, no selection
+      // listener, no menu button, no font/spacing override - unless the
+      // page looks like it actually has article content.
+      logEvent("page_skipped_not_readerable", {})
+      return
+    }
 
-  // Settings > "Auto-activate on readable pages" - default on, matching
-  // the only behavior that existed before this setting did. Off means
-  // the page still passed every eligibility check above, but init()
-  // only runs if the user explicitly asks for it via the popup's
-  // manual-activate button (see the message handler below).
-  const autoActivateEnabled = await getAutoActivateEnabled()
-  if (!autoActivateEnabled) {
-    logEvent("page_skipped_auto_activate_disabled", {})
-    return
+    // Settings > "Auto-activate on readable pages" - default on, matching
+    // the only behavior that existed before this setting did. Off means
+    // the page still passed every eligibility check above, but init()
+    // only runs if the user explicitly asks for it via the popup's
+    // manual-activate button (see the message handler below).
+    const autoActivateEnabled = await getAutoActivateEnabled()
+    if (!autoActivateEnabled) {
+      logEvent("page_skipped_auto_activate_disabled", {})
+      return
+    }
   }
 
   hasActivated = true
-  init()
+  await init()
+
+  if (continueReadingMode) {
+    logEvent("reading_mode_continued", {})
+    // No-ops safely (logs reading_mode_error, leaves the switch off) if
+    // this particular page turns out not to be extractable after all -
+    // isProbablyReaderable was skipped above specifically to let Reading
+    // Mode keep going across a "next page" click, but extraction can
+    // still fail on a genuinely unreadable destination.
+    setReadingMode(true)
+  }
 }
 
-evaluateAutomaticActivation()
+// Read (and immediately clear) exactly once per page load, before any
+// activation gate runs - so a destination page that turns out not to
+// activate at all (isSensitivePage, fails isProbablyReaderable with no
+// continuation in play, etc.) never leaves this flag sitting around to
+// wrongly auto-resume Reading Mode on some later, unrelated navigation.
+const shouldContinueReadingMode = sessionStorage.getItem(READING_MODE_CONTINUE_KEY) === "1"
+sessionStorage.removeItem(READING_MODE_CONTINUE_KEY)
+
+evaluateAutomaticActivation(shouldContinueReadingMode)
 
 // Manual activation from the popup's Home tab (see popup.tsx) - the
 // only way to turn Lucent Reader on for a specific page when

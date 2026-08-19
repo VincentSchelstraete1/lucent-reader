@@ -51,6 +51,12 @@ class SimplifyRequest(BaseModel):
     target_length: str = "same"
     install_id: str
 
+class ExplanationRequest(BaseModel):
+    text: str 
+    context: str 
+    target_grade_level: int
+    target_length: str = "same"
+    install_id: str 
 
 LENGTH_INSTRUCTIONS = {
     "much_shorter": "Condense it significantly - cut anything that isn't essential to the main point.",
@@ -129,5 +135,52 @@ def simplify(request: SimplifyRequest):
         ]
     )
 
+
     simplified = strip_markdown_heading(message.content[0].text)
     return {"simplified": simplified}
+
+@app.post("/explain")
+def explain(request: ExplanationRequest):
+    check_and_increment(request.install_id)
+
+    length_instruction = LENGTH_INSTRUCTIONS.get(
+        request.target_length, LENGTH_INSTRUCTIONS["same"]
+    )
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=450,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Explain the selected text below so it is understandable to "
+                    f"someone reading at approximately a US grade "
+                    f"{request.target_grade_level} level. "
+                    f"Use the surrounding context to understand what the selected "
+                    f"text means, but focus your explanation only on the selected text. "
+                    f"Define unfamiliar terms when helpful and explain the idea clearly "
+                    f"rather than simply rewording it. "
+                    f"For the length and level of detail of your explanation: "
+                    f"{length_instruction} "
+                    f"Apply this length instruction to the explanation you produce, "
+                    f"not to the length of the selected text. "
+                    f"Return only the explanation with no heading or preamble.\n\n"
+                    f"Selected text:\n{request.text}\n\n"
+                    f"Surrounding context:\n{request.context}"
+                )
+            }
+        ]
+    )
+
+    explanation = strip_markdown_heading(message.content[0].text)
+    return {"explanation" : explanation}
+
+
+        
+
+
+
+    
+
+

@@ -39,3 +39,21 @@ export type ManualActivateMessage = {
 export type ManualActivateResponse =
   | { ok: true; alreadyActive: boolean }
   | { ok: false; reason: "sensitive_page" }
+
+
+  export const EXPLAIN_MESSAGE_TYPE = "explain" as const 
+
+  export type ExplainMessage = {
+    type: typeof EXPLAIN_MESSAGE_TYPE
+    text: string 
+    context: string 
+    targetGradeLevel: number
+    targetLength: TextLength
+    installId: string
+  }
+
+  export type ExplainResponse = 
+    | {ok: true; explanation: string}
+    | {ok: false; error: string}
+
+
