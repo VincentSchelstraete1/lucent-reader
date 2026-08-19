@@ -612,6 +612,11 @@ type OnboardingSlide = {
   title: string
   body: string
   icon: string
+  // Only slide 1 sets this - shows a second mock badge next to the
+  // first, so the tour visually matches the real product (Simplify and
+  // Explain badges appear together on a highlight, not one at a time -
+  // see showBadgeFor/attachExplainBadgeTo).
+  secondIcon?: string
   mockText: string
   highlightMockText?: boolean
 }
@@ -619,14 +624,15 @@ type OnboardingSlide = {
 const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     title: "How Lucent Reader works",
-    body: "Highlight any text you find hard to read, and a small badge appears right next to it.",
+    body: "Highlight any text you find hard to read, and two small badges appear right next to it: Simplify and Explain.",
     icon: ICONS.idle,
+    secondIcon: ICONS.explain,
     mockText: "Lorem ipsum dolor sit amet...",
     highlightMockText: true
   },
   {
-    title: "One click, simpler text",
-    body: "Click the badge and that text is instantly rewritten in plain language.",
+    title: "One click, simpler or clearer",
+    body: "Click Simplify to instantly rewrite that text in plain language, or click Explain to get a short explanation of what it means.",
     icon: ICONS.done,
     mockText: "Amet is now easier to read."
   },
@@ -735,12 +741,28 @@ function maybeShowOnboardingModal() {
   mockBadge.style.fontSize = "11px"
   mockBadge.style.fontWeight = "600"
 
+  // Same styling as mockBadge - only shown for slides that set
+  // secondIcon (currently just slide 1), see renderSlide().
+  const mockBadge2 = document.createElement("div")
+  mockBadge2.style.flexShrink = "0"
+  mockBadge2.style.width = "28px"
+  mockBadge2.style.height = "28px"
+  mockBadge2.style.borderRadius = "50%"
+  mockBadge2.style.border = `1px solid ${tokens.captionText}`
+  mockBadge2.style.alignItems = "center"
+  mockBadge2.style.justifyContent = "center"
+  mockBadge2.style.backgroundColor = tokens.readingBg
+  mockBadge2.style.color = tokens.readingText
+  mockBadge2.style.fontSize = "11px"
+  mockBadge2.style.fontWeight = "600"
+
   const mockText = document.createElement("div")
   mockText.style.fontSize = "13px"
   mockText.style.color = tokens.captionText
   mockText.style.borderRadius = "3px"
 
   mockRow.appendChild(mockBadge)
+  mockRow.appendChild(mockBadge2)
   mockRow.appendChild(mockText)
 
   const nextBtn = document.createElement("button")
@@ -758,6 +780,8 @@ function maybeShowOnboardingModal() {
     title.textContent = slide.title
     explanation.textContent = slide.body
     mockBadge.innerHTML = slide.icon
+    mockBadge2.style.display = slide.secondIcon ? "flex" : "none"
+    if (slide.secondIcon) mockBadge2.innerHTML = slide.secondIcon
     mockText.textContent = slide.mockText
     mockText.style.backgroundColor = slide.highlightMockText ? "#FFF3B0" : "transparent"
     mockText.style.padding = slide.highlightMockText ? "2px 4px" : "0"
