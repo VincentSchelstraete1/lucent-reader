@@ -195,8 +195,9 @@ function IndexPopup() {
                 lineHeight: 1.4
               }}>
               Lucent Reader activates automatically on pages it detects as
-              readable. If it didn't on this page - or auto-activate is
-              turned off in Settings - you can start it manually here.
+              readable. If it didn't activate on this page, or if
+              auto-activate is turned off in Settings, you can start it
+              manually below.
             </p>
             <button
               onClick={handleActivateClick}
@@ -231,8 +232,8 @@ function IndexPopup() {
         {tab === "settings" && (
           <div>
             <ToggleRow
-              label="Dyslexia-friendly font"
-              description="Applies the font chosen in the Aa menu (OpenDyslexic and others) to page text. Off by default - the Aa menu's font choice is remembered either way, it just won't render until this is on."
+              label="Apply chosen font"
+              description="Applies the font you picked in the Aa menu to the page's text. Off by default. Your font choice is remembered either way, it just won't display on the page until this is turned on."
               enabled={fontOverrideEnabled}
               onChange={handleFontOverrideChange}
             />

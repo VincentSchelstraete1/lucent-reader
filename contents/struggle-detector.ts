@@ -123,7 +123,14 @@ function injectBadgeStyles() {
       border: 1px solid ${tokens.captionText};
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
       transition: max-width 200ms ease, border-radius 200ms ease, justify-content 0ms 200ms;
-      z-index: 999999;
+      /* 2147483647 (2^31 - 1) is the actual max z-index a browser honors,
+         not just "a big number" - used here instead of 999999 because
+         cookie-consent banners (OneTrust and similar) commonly set
+         themselves to this same ceiling, and 999999 loses that fight
+         outright. Confirmed on PBS NewsHour: its cookie banner rendered
+         on top of and swallowed clicks on this badge/the Aa button
+         (same z-index tier) when both landed in the same corner. */
+      z-index: 2147483647;
     }
    .arw-badge:hover,
     .arw-badge.arw-expanded {
@@ -374,7 +381,7 @@ explainCard.style.padding = "12px 14px"
 explainCard.style.fontFamily = "Inter, sans-serif"
 explainCard.style.fontSize = "13px"
 explainCard.style.lineHeight = "1.5"
-explainCard.style.zIndex = "999999"
+explainCard.style.zIndex = "2147483647"
 
 const explainCardHeader = document.createElement("div")
 explainCardHeader.style.display = "flex"
@@ -664,7 +671,15 @@ function maybeShowOnboardingModal() {
   backdrop.style.right = "0"
   backdrop.style.bottom = "0"
   backdrop.style.backgroundColor = "rgba(0,0,0,0.5)"
-  backdrop.style.zIndex = "1000002"
+  // Needs to stay above the Aa button/panel/badge (all now 2147483647,
+  // see the comment on .arw-badge's z-index) or this dimmed backdrop
+  // stops actually covering them - confirmed directly: with a lower
+  // value here, the Aa button rendered fully bright on top of the dim
+  // overlay instead of being hidden under it. Tied at the same max
+  // value, the tiebreak is DOM order, and this backdrop is only created
+  // here at runtime - well after injectMenu() has already appended the
+  // button/panel during init() - so it naturally paints on top.
+  backdrop.style.zIndex = "2147483647"
   backdrop.style.display = "flex"
   backdrop.style.alignItems = "center"
   backdrop.style.justifyContent = "center"
@@ -1198,6 +1213,39 @@ function activateSelectionTrigger() {
   })
 }
 
+// Badge/explain-card position is computed once, in page coordinates
+// (getBoundingClientRect + window.scrollX/Y - see attachBadgeTo), on the
+// assumption that scrolling means the whole document scrolls. That's
+// true on a normal page, but Reading Mode's overlay is its own
+// position: fixed, overflow-y: auto container (see buildReaderOverlay) -
+// scrolling through reader content moves the overlay's scrollTop, not
+// window.scrollY, so anything positioned that way silently stops
+// tracking its paragraph and just sits still while the text scrolls
+// underneath it. "scroll" events don't bubble, but a capturing listener
+// on document still sees them fire on the overlay (or any other
+// scrollable ancestor), so this one listener covers both cases without
+// needing a direct reference to the overlay element.
+let scrollRepositionScheduled = false
+
+function repositionAnchoredUI() {
+  if (scrollRepositionScheduled) return
+  scrollRepositionScheduled = true
+  requestAnimationFrame(() => {
+    scrollRepositionScheduled = false
+    if (currentParagraphs && currentParagraphs.length > 0) {
+      attachBadgeTo(currentParagraphs[0])
+      attachExplainBadgeTo(currentParagraphs[0])
+    }
+    if (explainAnchorParagraph && explainCard.style.display === "block") {
+      attachExplainCardTo(explainAnchorParagraph)
+    }
+  })
+}
+
+function activateScrollReposition() {
+  document.addEventListener("scroll", repositionAnchoredUI, { capture: true, passive: true })
+}
+
 // ---- Trigger 2: dwell time (struggle detection) ----
 
 function handleIntersection(entries: IntersectionObserverEntry[]) {
@@ -1561,6 +1609,19 @@ function buildReaderOverlay(article: {
   overlay.style.overflowY = "auto"
   overlay.style.overflowX = "hidden"
   overlay.style.boxSizing = "border-box"
+  // Without this, scrolling the overlay to its top/bottom edge lets the
+  // wheel/trackpad gesture's remaining delta "chain" through to the real
+  // page underneath (position: fixed doesn't stop scroll chaining on its
+  // own) - invisibly scrolling the hidden page behind this full-screen
+  // overlay. That silently changes window.scrollY, which is exactly what
+  // attachBadgeTo/attachExplainCardTo add to a paragraph's
+  // getBoundingClientRect() to place UI in page coordinates (see
+  // repositionAnchoredUI) - so the Explain card/badges would drift out
+  // of sync with the visibly-scrolling overlay content even though their
+  // own reposition-on-scroll logic was firing correctly. Confirmed
+  // directly: programmatic overlay.scrollBy() alone (no chaining) kept
+  // the card perfectly anchored; only real chained scroll broke it.
+  overlay.style.overscrollBehavior = "contain"
 
   const closeBtn = document.createElement("button")
   closeBtn.textContent = "✕ Exit Reading Mode"
@@ -1708,7 +1769,10 @@ function injectMenu(devModeEnabled: boolean) {
   menuButton.style.position = "fixed"
   menuButton.style.bottom = "20px"
   menuButton.style.right = "20px"
-  menuButton.style.zIndex = "999999"
+  // See the matching comment on .arw-badge's z-index above - same fix,
+  // same reason (this button sits in the same bottom-right corner a lot
+  // of cookie-consent banners claim for themselves).
+  menuButton.style.zIndex = "2147483647"
   menuButton.style.width = "48px"
   menuButton.style.height = "48px"
   menuButton.style.borderRadius = "50%"
@@ -1724,7 +1788,7 @@ function injectMenu(devModeEnabled: boolean) {
   panel.style.position = "fixed"
   panel.style.bottom = "76px"
   panel.style.right = "20px"
-  panel.style.zIndex = "999999"
+  panel.style.zIndex = "2147483647"
   panel.style.backgroundColor = tokens.readingBg
   panel.style.border = `1px solid ${tokens.captionText}`
   panel.style.borderRadius = "12px"
@@ -2261,7 +2325,11 @@ function injectQuizModal() {
   backdrop.style.right = "0"
   backdrop.style.bottom = "0"
   backdrop.style.backgroundColor = "rgba(0,0,0,0.5)"
-  backdrop.style.zIndex = "1000000"
+  // Same reasoning as the onboarding modal's backdrop - needs to stay
+  // above the Aa button/panel (2147483647) or it stops covering them.
+  // injectQuizModal() runs after injectMenu() in init(), so this
+  // backdrop is appended later in the DOM and wins the max-z-index tie.
+  backdrop.style.zIndex = "2147483647"
   backdrop.style.display = "none"
   backdrop.style.alignItems = "center"
   backdrop.style.justifyContent = "center"
@@ -2360,6 +2428,7 @@ async function init() {
   activateBadgeClickHandler()
   activateExplainBadgeClickHandler()
   activateSelectionTrigger()
+  activateScrollReposition()
   activateDwellDetection()
 
   // Text spacing and reading font used to apply from a separate,
