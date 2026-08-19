@@ -1,7 +1,7 @@
 {
   "name": "lucent-reader",
   "displayName": "Lucent Reader",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "An assistive reading companion that simplifies difficult text so you can read and understand more comfortably",
   "author": "Vincent Schelstraete",
   "scripts": {
