@@ -2,8 +2,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-
 load_dotenv()
+from app.routers.ai import router as ai_router
+
 
 app = FastAPI()
 
@@ -35,6 +36,9 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "backend is alive"}
+
+app.include_router(ai_router, tags=["AI"])
+
 
 
 
