@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas.note import NoteCreateRequest, NoteResponse
+from app.schemas.note import NoteCreateRequest, NoteResponse, NoteUpdateRequest
 from app.database import get_db
 from app.models.note import Note
 from sqlalchemy import select
@@ -25,6 +25,13 @@ def get_notes(db = Depends(get_db)):
     notes = result.scalars().all()
     return notes    
 
+@router.get("/notes/{note_id}", response_model=NoteResponse)
+def get_note(note_id: int, db = Depends(get_db)):
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return note
+
 @router.delete("/notes/{note_id}", response_model=NoteResponse)
 def delete_note(note_id: int, db = Depends(get_db)):
     note = db.get(Note, note_id)
@@ -35,14 +42,13 @@ def delete_note(note_id: int, db = Depends(get_db)):
     return note
 
 @router.patch("/notes/{note_id}", response_model=NoteResponse)
-def update_note(note_id: int, note_request: NoteCreateRequest, db = Depends(get_db)):
+def update_note(note_id: int, note_request: NoteUpdateRequest, db = Depends(get_db)):
     note = db.get(Note, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    note.title = note_request.title
-    note.content = note_request.content
-    note.content_type = note_request.content_type
-    note.source_url = note_request.source_url
+    updates = note_request.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(note, key, value)
     db.commit()
     db.refresh(note)
     return note
