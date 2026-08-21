@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 load_dotenv()
 from app.routers.ai import router as ai_router
+from app.routers.notes import router as notes_router
 from app.database import Base, engine
 from app.models.note import Note
 
@@ -42,6 +43,8 @@ def read_root():
     return {"status": "backend is alive"}
 
 app.include_router(ai_router, tags=["AI"])
+app.include_router(notes_router, tags=["Notes"])
+
 
 
 
