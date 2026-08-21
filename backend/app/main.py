@@ -4,9 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 load_dotenv()
 from app.routers.ai import router as ai_router
+from app.database import Base, engine
+from app.models.note import Note
 
 
 app = FastAPI()
+
+Base.metadata.create_all(bind=engine)
 
 # Chrome extension IDs differ between "Load unpacked" (local dev) and the
 # Web Store's published copy, so both need to be listed explicitly here -
