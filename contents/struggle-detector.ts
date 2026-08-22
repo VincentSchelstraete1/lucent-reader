@@ -39,6 +39,15 @@ import {
   type ExplainResponse
 } from "../lib/messages"
 import {
+  ENSURE_DOCUMENT_MESSAGE_TYPE,
+  type EnsureDocumentMessage,
+  type EnsureDocumentResponse,
+  SAVE_NOTE_MESSAGE_TYPE,
+  type SaveNoteMessage,
+  type SaveNoteResponse,
+  type SaveContentType
+} from "../lib/messages"
+import {
   DEFAULT_FONT_OVERRIDE_ENABLED,
   DEFAULT_AUTO_ACTIVATE_ENABLED,
   FONT_OVERRIDE_ENABLED_STORAGE_KEY,
@@ -363,6 +372,22 @@ explainBadge.style.transition = "opacity 120ms ease"
 explainBadge.style.backgroundColor = tokens.readingBg
 explainBadge.style.color = tokens.readingText
 
+// Third small pill button, shown alongside Simplify/Explain - saves the
+// raw highlighted text as-is (no AI transform), unlike the other two.
+const saveBadge = document.createElement("button")
+saveBadge.className = "arw-badge"
+
+const saveBadgeLabel = document.createElement("span")
+saveBadgeLabel.className = "arw-label"
+saveBadgeLabel.textContent = "Save highlight"
+
+saveBadge.appendChild(saveBadgeLabel)
+saveBadge.style.opacity = "0"
+saveBadge.style.pointerEvents = "none"
+saveBadge.style.transition = "opacity 120ms ease"
+saveBadge.style.backgroundColor = tokens.readingBg
+saveBadge.style.color = tokens.readingText
+
 // Small card that renders whatever performExplain() returns, positioned
 // just under the paragraph the Explain badge was clicked on. Left in
 // the DOM (display: none) between uses rather than created/destroyed
@@ -396,6 +421,25 @@ explainCardTitle.style.fontWeight = "600"
 explainCardTitle.style.fontSize = "12px"
 explainCardTitle.style.color = tokens.captionText
 
+const explainCardActions = document.createElement("div")
+explainCardActions.style.display = "flex"
+explainCardActions.style.alignItems = "center"
+explainCardActions.style.gap = "8px"
+
+// Hidden whenever the card is showing an error instead of a real
+// explanation (see showExplanationError) - there's nothing meaningful to
+// save in that case.
+const explainCardSave = document.createElement("button")
+explainCardSave.textContent = "Save"
+explainCardSave.title = "Save this explanation"
+explainCardSave.style.border = `1px solid ${tokens.captionText}`
+explainCardSave.style.background = "transparent"
+explainCardSave.style.color = tokens.readingText
+explainCardSave.style.cursor = "pointer"
+explainCardSave.style.fontSize = "11px"
+explainCardSave.style.borderRadius = "10px"
+explainCardSave.style.padding = "2px 8px"
+
 const explainCardClose = document.createElement("button")
 explainCardClose.textContent = "✕"
 explainCardClose.title = "Close"
@@ -407,8 +451,41 @@ explainCardClose.style.fontSize = "12px"
 explainCardClose.style.padding = "0"
 explainCardClose.addEventListener("click", () => hideExplanationCard())
 
+let saveExplanationInFlight = false
+
+explainCardSave.addEventListener("click", async () => {
+  if (saveExplanationInFlight) return
+  const text = explainCardBody.textContent || ""
+  if (!text) return
+
+  saveExplanationInFlight = true
+  explainCardSave.disabled = true
+  explainCardSave.style.opacity = "0.7"
+  explainCardSave.textContent = "Saving..."
+  try {
+    const result = await saveNote("explanation", text)
+    explainCardSave.textContent = result.ok ? "Saved" : "Error"
+    styleSaveFeedback(explainCardSave, result.ok ? "saved" : "error")
+  } catch {
+    explainCardSave.textContent = "Error"
+    styleSaveFeedback(explainCardSave, "error")
+  } finally {
+    saveExplanationInFlight = false
+    explainCardSave.disabled = false
+    explainCardSave.style.opacity = "1"
+    window.setTimeout(() => {
+      explainCardSave.textContent = "Save"
+      explainCardSave.style.backgroundColor = "transparent"
+      explainCardSave.style.color = tokens.readingText
+    }, 2000)
+  }
+})
+
+explainCardActions.appendChild(explainCardSave)
+explainCardActions.appendChild(explainCardClose)
+
 explainCardHeader.appendChild(explainCardTitle)
-explainCardHeader.appendChild(explainCardClose)
+explainCardHeader.appendChild(explainCardActions)
 
 const explainCardBody = document.createElement("div")
 
@@ -554,6 +631,14 @@ function attachExplainBadgeTo(paragraph: HTMLElement) {
   explainBadge.style.left = `${rect.left + window.scrollX - 40}px`
 }
 
+// Same page-coordinate approach, another 40px lower so it sits beneath
+// the Explain badge.
+function attachSaveBadgeTo(paragraph: HTMLElement) {
+  const rect = paragraph.getBoundingClientRect()
+  saveBadge.style.top = `${rect.top + window.scrollY + 2 + 80}px`
+  saveBadge.style.left = `${rect.left + window.scrollX - 40}px`
+}
+
 // Positions the explanation card just under the paragraph it's about,
 // in page coordinates - same reasoning as attachBadgeTo (see its
 // comment) for why this is against document.body rather than nesting
@@ -594,6 +679,12 @@ function showBadgeFor(paragraphs: HTMLElement[]) {
   attachExplainBadgeTo(paragraphs[0])
   explainBadge.style.opacity = "1"
   explainBadge.style.pointerEvents = "auto"
+
+  saveBadgeLabel.textContent = "Save highlight"
+  styleSaveFeedback(saveBadge, "idle")
+  attachSaveBadgeTo(paragraphs[0])
+  saveBadge.style.opacity = "1"
+  saveBadge.style.pointerEvents = "auto"
 }
 
 // ---- First-run onboarding: a centered, two-slide explainer modal ----
@@ -817,6 +908,9 @@ function hideBadge() {
 
   explainBadge.style.opacity = "0"
   explainBadge.style.pointerEvents = "none"
+
+  saveBadge.style.opacity = "0"
+  saveBadge.style.pointerEvents = "none"
 }
 
 // Separate from hideBadge - the card is left open (if already open)
@@ -834,6 +928,11 @@ function showExplanation(text: string) {
   explainCard.style.backgroundColor = tokens.readingBg
   explainCard.style.borderColor = tokens.captionText
 
+  explainCardSave.style.display = "inline-flex"
+  explainCardSave.textContent = "Save"
+  explainCardSave.style.backgroundColor = "transparent"
+  explainCardSave.style.color = tokens.readingText
+
   if (explainAnchorParagraph) attachExplainCardTo(explainAnchorParagraph)
   explainCard.style.display = "block"
 }
@@ -843,6 +942,8 @@ function showExplanationError(error: string) {
   explainCardBody.style.color = "#8A2E2E"
   explainCard.style.backgroundColor = "#FBEAEA"
   explainCard.style.borderColor = "#8A2E2E"
+
+  explainCardSave.style.display = "none"
 
   if (explainAnchorParagraph) attachExplainCardTo(explainAnchorParagraph)
   explainCard.style.display = "block"
@@ -908,13 +1009,52 @@ function addParagraphControls(paragraph: HTMLElement) {
     performSimplify([paragraph])
   })
 
+  let saveSimplificationInFlight = false
+  const saveBtn = document.createElement("button")
+  saveBtn.textContent = "💾"
+  saveBtn.title = "Save this simplification"
+  styleControlButton(saveBtn)
+  saveBtn.addEventListener("click", async (e) => {
+    e.stopPropagation()
+    if (saveSimplificationInFlight) return
+
+    const textEl = paragraph.querySelector(":scope > .arw-text") as HTMLElement | null
+    const text = textEl?.textContent || ""
+    if (!text) return
+
+    saveSimplificationInFlight = true
+    saveBtn.disabled = true
+    saveBtn.style.opacity = "0.6"
+    const originalLabel = saveBtn.textContent
+    saveBtn.textContent = "…"
+    try {
+      const result = await saveNote("simplification", text)
+      saveBtn.textContent = result.ok ? "✓" : "!"
+      styleSaveFeedback(saveBtn, result.ok ? "saved" : "error")
+    } catch {
+      saveBtn.textContent = "!"
+      styleSaveFeedback(saveBtn, "error")
+    } finally {
+      saveSimplificationInFlight = false
+      saveBtn.disabled = false
+      saveBtn.style.opacity = "1"
+      window.setTimeout(() => {
+        saveBtn.textContent = originalLabel
+        saveBtn.style.backgroundColor = "#FFFFFF"
+        saveBtn.style.color = tokens.readingText
+      }, 2000)
+    }
+  })
+
   const textEl = paragraph.querySelector(":scope > .arw-text") as HTMLDivElement | null
   if (textEl) {
     textEl.insertAdjacentElement("afterend", revertBtn)
     revertBtn.insertAdjacentElement("afterend", resimplifyBtn)
+    resimplifyBtn.insertAdjacentElement("afterend", saveBtn)
   } else {
     paragraph.appendChild(revertBtn)
     paragraph.appendChild(resimplifyBtn)
+    paragraph.appendChild(saveBtn)
   }
 }
 
@@ -1006,6 +1146,49 @@ async function explainText(
   }
 
   return response.explanation
+}
+
+// Memoized per page load: the first save on a page creates a Source +
+// Document for it (via the background worker, same reasoning as
+// simplifyText/explainText above for why the fetch itself can't happen
+// here), then every later save on the same page reuses that same
+// document id instead of creating a new one each time.
+let documentIdPromise: Promise<number | null> | null = null
+
+async function ensureDocumentId(): Promise<number | null> {
+  if (!documentIdPromise) {
+    documentIdPromise = (async () => {
+      const article = extractArticle()
+      const message: EnsureDocumentMessage = {
+        type: ENSURE_DOCUMENT_MESSAGE_TYPE,
+        url: location.href,
+        title: article?.title || document.title,
+        content: article?.textContent || document.body.innerText
+      }
+      const response = (await chrome.runtime.sendMessage(message)) as EnsureDocumentResponse
+      return response.ok ? response.documentId : null
+    })()
+  }
+  return documentIdPromise
+}
+
+// Shared by the highlight/explanation/simplification Save actions below -
+// always includes source_url for backwards compatibility, and attaches
+// document_id when a Document could be created/found for this page.
+async function saveNote(contentType: SaveContentType, content: string): Promise<SaveNoteResponse> {
+  const documentId = await ensureDocumentId()
+  const title = content.length > 80 ? `${content.slice(0, 80)}…` : content
+
+  const message: SaveNoteMessage = {
+    type: SAVE_NOTE_MESSAGE_TYPE,
+    title,
+    content,
+    contentType,
+    sourceUrl: location.href,
+    documentId: documentId ?? undefined
+  }
+
+  return (await chrome.runtime.sendMessage(message)) as SaveNoteResponse
 }
 
 // Registers the badge's click handler, the highlight-to-badge and
@@ -1163,6 +1346,50 @@ function activateExplainBadgeClickHandler() {
   })
 }
 
+let saveHighlightInFlight = false
+
+// Shared by all three Save controls (this badge, the explain card's Save
+// button, and the per-paragraph save button) so "Saved"/"Error" always
+// look the same, reusing the exact tokens showExplanationError already
+// uses rather than inventing a second error color.
+function styleSaveFeedback(el: HTMLElement, state: "idle" | "saved" | "error") {
+  if (state === "idle") {
+    el.style.backgroundColor = tokens.readingBg
+    el.style.color = tokens.readingText
+  } else if (state === "saved") {
+    el.style.backgroundColor = tokens.accentTeal
+    el.style.color = "#FFFFFF"
+  } else {
+    el.style.backgroundColor = "#FBEAEA"
+    el.style.color = "#8A2E2E"
+  }
+}
+
+function activateSaveBadgeClickHandler() {
+  saveBadge.addEventListener("click", async () => {
+    if (!explainSelectedText || saveHighlightInFlight) return
+    saveHighlightInFlight = true
+    saveBadge.style.opacity = "0.7"
+
+    saveBadgeLabel.textContent = "Saving..."
+    try {
+      const result = await saveNote("highlight", explainSelectedText)
+      saveBadgeLabel.textContent = result.ok ? "Saved" : "Error"
+      styleSaveFeedback(saveBadge, result.ok ? "saved" : "error")
+    } catch {
+      saveBadgeLabel.textContent = "Error"
+      styleSaveFeedback(saveBadge, "error")
+    } finally {
+      saveHighlightInFlight = false
+      saveBadge.style.opacity = "1"
+      window.setTimeout(() => {
+        saveBadgeLabel.textContent = "Save highlight"
+        styleSaveFeedback(saveBadge, "idle")
+      }, 2000)
+    }
+  })
+}
+
 // ---- Trigger 1: user highlights text themselves ----
 
 let selectionDebounceId: number | null = null
@@ -1227,11 +1454,17 @@ function activateSelectionTrigger() {
 
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node
-    // explainBadge/explainCard are excluded too - otherwise mousedown on
-    // the Explain button (which fires before its own click handler)
-    // would hideBadge() first, clearing currentParagraphs out from under
-    // that click handler before it ever runs.
-    if (!badge.contains(target) && !explainBadge.contains(target) && !explainCard.contains(target)) {
+    // explainBadge/explainCard/saveBadge are excluded too - otherwise
+    // mousedown on one of these buttons (which fires before its own
+    // click handler) would hideBadge() first, clearing currentParagraphs
+    // (or explainSelectedText) out from under that click handler before
+    // it ever runs.
+    if (
+      !badge.contains(target) &&
+      !explainBadge.contains(target) &&
+      !explainCard.contains(target) &&
+      !saveBadge.contains(target)
+    ) {
       hideBadge()
     }
   })
@@ -1543,6 +1776,7 @@ function findPaginationLink(
 function extractArticle(): {
   title: string
   contentHTML: string
+  textContent: string
   nextLink: { href: string; text: string } | null
   prevLink: { href: string; text: string } | null
 } | null {
@@ -1560,6 +1794,7 @@ function extractArticle(): {
   return {
     title: article.title || document.title,
     contentHTML: article.content,
+    textContent: article.textContent || "",
     nextLink,
     prevLink
   }
@@ -2447,10 +2682,12 @@ async function init() {
   // pointing at - see attachBadgeTo for why.
   document.body.appendChild(badge)
   document.body.appendChild(explainBadge)
+  document.body.appendChild(saveBadge)
   document.body.appendChild(explainCard)
 
   activateBadgeClickHandler()
   activateExplainBadgeClickHandler()
+  activateSaveBadgeClickHandler()
   activateSelectionTrigger()
   activateScrollReposition()
   activateDwellDetection()

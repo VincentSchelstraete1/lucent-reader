@@ -3,6 +3,7 @@
 
 # dependencies
 /node_modules
+/web/node_modules
 /.pnp
 .pnp.js
 
@@ -31,3 +32,4 @@ dist/
 
 # typescript
 .tsbuildinfo
+/web/tsconfig.tsbuildinfo

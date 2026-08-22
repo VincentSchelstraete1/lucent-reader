@@ -5,8 +5,14 @@ from dotenv import load_dotenv
 load_dotenv()
 from app.routers.ai import router as ai_router
 from app.routers.notes import router as notes_router
+from app.routers.sources import router as sources_router
+from app.routers.documents import router as documents_router
+from app.routers.quizzes import router as quizzes_router
 from app.database import Base, engine
 from app.models.note import Note
+from app.models.source import Source
+from app.models.document import Document
+from app.models.quiz import Quiz, QuizAttempt
 
 
 app = FastAPI()
@@ -44,6 +50,9 @@ def read_root():
 
 app.include_router(ai_router, tags=["AI"])
 app.include_router(notes_router, tags=["Notes"])
+app.include_router(sources_router, tags=["Sources"])
+app.include_router(documents_router, tags=["Documents"])
+app.include_router(quizzes_router, tags=["Quizzes"])
 
 
 

@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "4.1.1",
-    "@types/chrome": "0.0.258",
+    "@types/chrome": "0.0.251",
     "@types/node": "20.11.5",
     "@types/react": "18.2.48",
     "@types/react-dom": "18.2.18",
@@ -29,7 +29,8 @@
       "storage"
     ],
     "host_permissions": [
-      "https://adaptive-reader.onrender.com/*"
+      "https://adaptive-reader.onrender.com/*",
+      "http://127.0.0.1:8000/*"
     ]
   }
 }

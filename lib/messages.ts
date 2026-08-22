@@ -52,8 +52,43 @@ export type ManualActivateResponse =
     installId: string
   }
 
-  export type ExplainResponse = 
+  export type ExplainResponse =
     | {ok: true; explanation: string}
     | {ok: false; error: string}
 
+
+// Saved-note plumbing: a content script first ensures a Document exists
+// for the current page (creating its Source + Document on first save,
+// see ensureDocumentId in struggle-detector.ts), then saves the actual
+// note. Same background-worker-does-the-fetch split as Simplify/Explain
+// above, for the same CORS reason.
+export const ENSURE_DOCUMENT_MESSAGE_TYPE = "ensure_document" as const
+
+export type EnsureDocumentMessage = {
+  type: typeof ENSURE_DOCUMENT_MESSAGE_TYPE
+  url: string
+  title: string
+  content: string
+}
+
+export type EnsureDocumentResponse =
+  | { ok: true; documentId: number }
+  | { ok: false; error: string }
+
+export type SaveContentType = "highlight" | "explanation" | "simplification"
+
+export const SAVE_NOTE_MESSAGE_TYPE = "save_note" as const
+
+export type SaveNoteMessage = {
+  type: typeof SAVE_NOTE_MESSAGE_TYPE
+  title: string
+  content: string
+  contentType: SaveContentType
+  sourceUrl: string
+  documentId?: number
+}
+
+export type SaveNoteResponse =
+  | { ok: true }
+  | { ok: false; error: string }
 
