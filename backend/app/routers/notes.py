@@ -12,7 +12,8 @@ def create_note(note_request: NoteCreateRequest, db = Depends(get_db)):
         content=note_request.content,
         content_type=note_request.content_type,
         source_url=note_request.source_url,
-        document_id=note_request.document_id
+        document_id=note_request.document_id,
+        tags=note_request.tags
     )
     db.add(note)
     db.commit()

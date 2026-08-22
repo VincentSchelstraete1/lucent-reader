@@ -26,7 +26,8 @@
   },
   "manifest": {
     "permissions": [
-      "storage"
+      "storage",
+      "sidePanel"
     ],
     "host_permissions": [
       "https://adaptive-reader.onrender.com/*",

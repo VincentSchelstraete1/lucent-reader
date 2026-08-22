@@ -7,6 +7,7 @@ class NoteCreateRequest(BaseModel):
     content_type: str
     source_url: str | None = None
     document_id: int | None = None
+    tags: list[str] | None = None
 
 class NoteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -16,6 +17,7 @@ class NoteResponse(BaseModel):
     content_type: str
     source_url: str | None = None
     document_id: int | None = None
+    tags: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -25,3 +27,4 @@ class NoteUpdateRequest(BaseModel):
     content_type: str | None = None
     source_url: str | None = None
     document_id: int | None = None
+    tags: list[str] | None = None

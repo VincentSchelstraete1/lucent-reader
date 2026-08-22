@@ -7,8 +7,14 @@ class SimplifyRequest(BaseModel):
     install_id: str
 
 class ExplanationRequest(BaseModel):
-    text: str 
-    context: str 
+    text: str
+    context: str
     target_grade_level: int
     target_length: str = "same"
-    install_id: str 
+    install_id: str
+
+class SummarizeRequest(BaseModel):
+    text: str
+    target_grade_level: int
+    target_length: str = "same"
+    install_id: str

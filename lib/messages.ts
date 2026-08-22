@@ -56,6 +56,20 @@ export type ManualActivateResponse =
     | {ok: true; explanation: string}
     | {ok: false; error: string}
 
+export const SUMMARIZE_MESSAGE_TYPE = "summarize" as const
+
+export type SummarizeMessage = {
+  type: typeof SUMMARIZE_MESSAGE_TYPE
+  text: string
+  targetGradeLevel: number
+  targetLength: TextLength
+  installId: string
+}
+
+export type SummarizeResponse =
+  | { ok: true; summary: string }
+  | { ok: false; error: string }
+
 
 // Saved-note plumbing: a content script first ensures a Document exists
 // for the current page (creating its Source + Document on first save,
@@ -75,7 +89,7 @@ export type EnsureDocumentResponse =
   | { ok: true; documentId: number }
   | { ok: false; error: string }
 
-export type SaveContentType = "highlight" | "explanation" | "simplification"
+export type SaveContentType = "highlight" | "explanation" | "simplification" | "note" | "summary"
 
 export const SAVE_NOTE_MESSAGE_TYPE = "save_note" as const
 
@@ -86,9 +100,46 @@ export type SaveNoteMessage = {
   contentType: SaveContentType
   sourceUrl: string
   documentId?: number
+  tags?: string[]
 }
 
 export type SaveNoteResponse =
   | { ok: true }
   | { ok: false; error: string }
+
+// Side panel <-> content script, for the Assist tab's Simplify/Explain/
+// Summarize actions to operate on whatever's currently selected on the
+// page. Sent with chrome.tabs.sendMessage(tabId, ...) directly to the
+// active tab, same as MANUAL_ACTIVATE_MESSAGE_TYPE above - not routed
+// through the background worker, since no backend fetch is involved here.
+export const GET_SELECTION_MESSAGE_TYPE = "get_selection" as const
+
+export type GetSelectionMessage = {
+  type: typeof GET_SELECTION_MESSAGE_TYPE
+}
+
+export type GetSelectionResponse =
+  | { ok: true; text: string; context: string; pageTitle: string }
+  | { ok: false; reason: "no_selection" }
+
+export const REPLACE_SELECTION_MESSAGE_TYPE = "replace_selection" as const
+
+export type ReplaceSelectionMessage = {
+  type: typeof REPLACE_SELECTION_MESSAGE_TYPE
+  text: string
+}
+
+export type ReplaceSelectionResponse =
+  | { ok: true }
+  | { ok: false; reason: "no_selection" }
+
+// On-page toggle (top-right corner) that opens the side panel - content
+// scripts can't call chrome.sidePanel.open() directly (that API isn't
+// exposed to content scripts), so this asks the background worker to do
+// it for the sender's tab/window instead.
+export const OPEN_SIDE_PANEL_MESSAGE_TYPE = "open_side_panel" as const
+
+export type OpenSidePanelMessage = {
+  type: typeof OPEN_SIDE_PANEL_MESSAGE_TYPE
+}
 

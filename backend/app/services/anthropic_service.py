@@ -93,6 +93,34 @@ def explain_text(text: str, context: str, target_grade_level: int, target_length
     explanation = strip_markdown_heading(message.content[0].text)
     return explanation
 
+def summarize_text(text: str, target_grade_level: int, target_length: str):
+    length_instruction = LENGTH_INSTRUCTIONS.get(
+            target_length, LENGTH_INSTRUCTIONS["same"]
+        )
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=450,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Summarize the following section so it reads at approximately "
+                    f"a US grade {target_grade_level} reading level. "
+                    f"{length_instruction} "
+                    f"Capture only the main point(s) - this is a summary, not a "
+                    f"rewrite, so it should be noticeably more condensed than the "
+                    f"original regardless of the length instruction above. "
+                    f"Return only the summary - no heading, no title, no preamble, "
+                    f"and no markdown.\n\n{text}"
+                )
+            }
+        ]
+    )
+
+    summary = strip_markdown_heading(message.content[0].text)
+    return summary
+
 
 # ---- Structured output (generated notes, quizzes) ----
 #

@@ -48,6 +48,52 @@ import {
   type SaveContentType
 } from "../lib/messages"
 import {
+  SUMMARIZE_MESSAGE_TYPE,
+  type SummarizeMessage,
+  type SummarizeResponse,
+  OPEN_SIDE_PANEL_MESSAGE_TYPE,
+  type OpenSidePanelMessage,
+  GET_SELECTION_MESSAGE_TYPE,
+  type GetSelectionMessage,
+  type GetSelectionResponse,
+  REPLACE_SELECTION_MESSAGE_TYPE,
+  type ReplaceSelectionMessage,
+  type ReplaceSelectionResponse
+} from "../lib/messages"
+import {
+  getReadingTheme,
+  setReadingTheme,
+  getThemeTokens,
+  READING_THEME_OPTIONS,
+  READING_THEME_STORAGE_KEY,
+  DEFAULT_READING_THEME,
+  type ReadingTheme
+} from "../lib/theme"
+import {
+  getTextSizePercent,
+  setTextSizePercent,
+  TEXT_SIZE_STORAGE_KEY,
+  TEXT_SIZE_PRESETS,
+  DEFAULT_TEXT_SIZE_PERCENT,
+  MIN_TEXT_SIZE_PERCENT,
+  MAX_TEXT_SIZE_PERCENT,
+  TEXT_SIZE_STEP
+} from "../lib/text-size"
+import {
+  getPageWidth,
+  setPageWidth,
+  PAGE_WIDTH_OPTIONS,
+  PAGE_WIDTH_STORAGE_KEY,
+  DEFAULT_PAGE_WIDTH,
+  type PageWidth
+} from "../lib/page-width"
+import {
+  getFocusLineEnabled,
+  setFocusLineEnabled,
+  FOCUS_LINE_STORAGE_KEY,
+  DEFAULT_FOCUS_LINE_ENABLED
+} from "../lib/focus-line"
+import {
   DEFAULT_FONT_OVERRIDE_ENABLED,
   DEFAULT_AUTO_ACTIVATE_ENABLED,
   FONT_OVERRIDE_ENABLED_STORAGE_KEY,
@@ -116,59 +162,61 @@ function loadReadingFont() {
 function injectBadgeStyles() {
   const style = document.createElement("style")
   style.textContent = `
-    .arw-badge {
+    /* One pill-shaped bar (Simplify | Explain | Note | Save | more),
+       anchored over the selection by attachSelectionBarTo() - replaces
+       three separately-positioned floating badges from an earlier
+       version of this file. Individual buttons are plain flex children;
+       only the bar itself is positioned/faded in and out. */
+    .arw-selection-bar {
       position: absolute;
-      width: 32px;
-      max-width: 32px;
-      height: 32px;
-      border-radius: 50%;
       display: flex;
       align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      white-space: nowrap;
-      cursor: pointer;
-      padding: 0;
+      gap: 2px;
+      background-color: ${tokens.readingBg};
       border: 1px solid ${tokens.captionText};
+      border-radius: 24px;
+      padding: 4px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      transition: max-width 200ms ease, border-radius 200ms ease, justify-content 0ms 200ms;
+      transition: opacity 120ms ease;
       /* 2147483647 (2^31 - 1) is the actual max z-index a browser honors,
          not just "a big number" - used here instead of 999999 because
          cookie-consent banners (OneTrust and similar) commonly set
          themselves to this same ceiling, and 999999 loses that fight
          outright. Confirmed on PBS NewsHour: its cookie banner rendered
-         on top of and swallowed clicks on this badge/the Aa button
-         (same z-index tier) when both landed in the same corner. */
+         on top of and swallowed clicks on this bar/the Reading Controls
+         bar (same z-index tier) when both landed in the same corner. */
       z-index: 2147483647;
     }
-   .arw-badge:hover,
-    .arw-badge.arw-expanded {
-      width: auto;
-      max-width: 400px;
+    .arw-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      background: transparent;
       border-radius: 20px;
-      justify-content: flex-start;
-      padding: 0 12px 0 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: Inter, sans-serif;
+      color: ${tokens.readingText};
+    }
+    .arw-badge:hover {
+      background-color: rgba(0,0,0,0.06);
+    }
+    .arw-badge.arw-expanded {
+      background-color: rgba(0,0,0,0.06);
     }
     .arw-badge .arw-icon {
       flex-shrink: 0;
       font-size: 14px;
-      width: 20px;
+      width: 16px;
       text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .arw-badge .arw-label {
-      opacity: 0;
-      max-width: 0;
-      overflow: hidden;
-      margin-left: 0;
-      font-family: Inter, sans-serif;
       font-size: 13px;
-      transition: opacity 150ms ease 80ms, margin-left 150ms ease 80ms, max-width 200ms ease;
-    }
-    .arw-badge:hover .arw-label,
-    .arw-badge.arw-expanded .arw-label {
-      opacity: 1;
-      max-width: 350px;
-      margin-left: 6px;
     }
     @keyframes arw-spin {
       from { transform: rotate(0deg); }
@@ -331,8 +379,22 @@ const ICONS = {
   loading: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-9-9"/></svg>`,
   done: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 6"/></svg>`,
   error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
-  explain: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+  explain: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.7"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  note: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`,
+  save: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>`
 }
+
+// One shared pill bar (Simplify | Explain | Note | Save | more), shown
+// over the current selection - see showSelectionBarFor/hideSelectionBar
+// and attachSelectionBarTo. Individual buttons stay as their own
+// variables (badge, explainBadge, ...) since each one's click handler
+// and state-styling logic (styleBadge, styleSaveFeedback) is unchanged
+// from when they were three separate floating badges - only the
+// container/positioning changed.
+const selectionBar = document.createElement("div")
+selectionBar.className = "arw-selection-bar"
+selectionBar.style.opacity = "0"
+selectionBar.style.pointerEvents = "none"
 
 const badge = document.createElement("button")
 badge.className = "arw-badge"
@@ -342,17 +404,11 @@ badgeIcon.className = "arw-icon"
 
 const badgeLabel = document.createElement("span")
 badgeLabel.className = "arw-label"
+badgeLabel.textContent = "Simplify"
 
 badge.appendChild(badgeIcon)
 badge.appendChild(badgeLabel)
-badge.style.opacity = "0"
-badge.style.pointerEvents = "none"
-badge.style.transition = "opacity 120ms ease"
 
-// Second small pill button, shown alongside the Simplify badge whenever
-// it's shown (see showBadgeFor/hideBadge) - reuses the same .arw-badge
-// styling so it looks like a natural pair, just positioned a bit lower
-// (see attachExplainBadgeTo) so the two don't overlap.
 const explainBadge = document.createElement("button")
 explainBadge.className = "arw-badge"
 
@@ -366,27 +422,66 @@ explainBadgeLabel.textContent = "Explain"
 
 explainBadge.appendChild(explainBadgeIcon)
 explainBadge.appendChild(explainBadgeLabel)
-explainBadge.style.opacity = "0"
-explainBadge.style.pointerEvents = "none"
-explainBadge.style.transition = "opacity 120ms ease"
-explainBadge.style.backgroundColor = tokens.readingBg
-explainBadge.style.color = tokens.readingText
 
-// Third small pill button, shown alongside Simplify/Explain - saves the
-// raw highlighted text as-is (no AI transform), unlike the other two.
+// Opens the note editor modal (title/tags/free-form textarea) - see
+// openNoteModal.
+const noteBadge = document.createElement("button")
+noteBadge.className = "arw-badge"
+
+const noteBadgeIcon = document.createElement("span")
+noteBadgeIcon.className = "arw-icon"
+noteBadgeIcon.innerHTML = ICONS.note
+
+const noteBadgeLabel = document.createElement("span")
+noteBadgeLabel.className = "arw-label"
+noteBadgeLabel.textContent = "Note"
+
+noteBadge.appendChild(noteBadgeIcon)
+noteBadge.appendChild(noteBadgeLabel)
+noteBadge.addEventListener("click", () => openNoteModal())
+
+// Opens the Save to Lucent modal (tags, current document) - saves the
+// raw highlighted text as-is (no AI transform), unlike Simplify/Explain.
 const saveBadge = document.createElement("button")
 saveBadge.className = "arw-badge"
 
+const saveBadgeIcon = document.createElement("span")
+saveBadgeIcon.className = "arw-icon"
+saveBadgeIcon.innerHTML = ICONS.save
+
 const saveBadgeLabel = document.createElement("span")
 saveBadgeLabel.className = "arw-label"
-saveBadgeLabel.textContent = "Save highlight"
+saveBadgeLabel.textContent = "Save"
 
+saveBadge.appendChild(saveBadgeIcon)
 saveBadge.appendChild(saveBadgeLabel)
-saveBadge.style.opacity = "0"
-saveBadge.style.pointerEvents = "none"
-saveBadge.style.transition = "opacity 120ms ease"
-saveBadge.style.backgroundColor = tokens.readingBg
-saveBadge.style.color = tokens.readingText
+saveBadge.addEventListener("click", () => openSaveModal())
+
+// Overflow menu - just "copy selection" for now rather than a full
+// dropdown, kept honest about what's actually implemented here.
+const moreBadge = document.createElement("button")
+moreBadge.className = "arw-badge"
+moreBadge.title = "Copy selection"
+moreBadge.textContent = "⋯"
+
+moreBadge.addEventListener("click", async () => {
+  if (!explainSelectedText) return
+  try {
+    await navigator.clipboard.writeText(explainSelectedText)
+    moreBadge.textContent = "✓"
+  } catch {
+    moreBadge.textContent = "!"
+  }
+  window.setTimeout(() => {
+    moreBadge.textContent = "⋯"
+  }, 1200)
+})
+
+selectionBar.appendChild(badge)
+selectionBar.appendChild(explainBadge)
+selectionBar.appendChild(noteBadge)
+selectionBar.appendChild(saveBadge)
+selectionBar.appendChild(moreBadge)
 
 // Small card that renders whatever performExplain() returns, positioned
 // just under the paragraph the Explain badge was clicked on. Left in
@@ -415,11 +510,32 @@ explainCardHeader.style.justifyContent = "space-between"
 explainCardHeader.style.marginBottom = "6px"
 explainCardHeader.style.gap = "12px"
 
-const explainCardTitle = document.createElement("span")
-explainCardTitle.textContent = "Explanation"
-explainCardTitle.style.fontWeight = "600"
-explainCardTitle.style.fontSize = "12px"
-explainCardTitle.style.color = tokens.captionText
+// "Explain This" card, tabbed: Explain (performExplain's result) and
+// Summary (performSummarize's result, fetched lazily the first time that
+// tab is opened for the current selection - see setActiveExplainTab).
+function styleExplainTab(btn: HTMLButtonElement, active: boolean) {
+  btn.style.border = "none"
+  btn.style.background = "transparent"
+  btn.style.fontSize = "12px"
+  btn.style.fontWeight = active ? "600" : "400"
+  btn.style.color = active ? tokens.readingText : tokens.captionText
+  btn.style.borderBottom = active ? `2px solid ${tokens.accentTeal}` : "2px solid transparent"
+  btn.style.padding = "2px 0"
+  btn.style.marginRight = "12px"
+  btn.style.cursor = "pointer"
+}
+
+const explainCardTabs = document.createElement("div")
+explainCardTabs.style.display = "flex"
+
+const explainTabBtn = document.createElement("button")
+explainTabBtn.textContent = "Explain"
+
+const summaryTabBtn = document.createElement("button")
+summaryTabBtn.textContent = "Summary"
+
+explainCardTabs.appendChild(explainTabBtn)
+explainCardTabs.appendChild(summaryTabBtn)
 
 const explainCardActions = document.createElement("div")
 explainCardActions.style.display = "flex"
@@ -455,7 +571,8 @@ let saveExplanationInFlight = false
 
 explainCardSave.addEventListener("click", async () => {
   if (saveExplanationInFlight) return
-  const text = explainCardBody.textContent || ""
+  const activeBody = activeExplainTab === "summary" ? summaryCardBody : explainCardBody
+  const text = activeBody.textContent || ""
   if (!text) return
 
   saveExplanationInFlight = true
@@ -463,7 +580,7 @@ explainCardSave.addEventListener("click", async () => {
   explainCardSave.style.opacity = "0.7"
   explainCardSave.textContent = "Saving..."
   try {
-    const result = await saveNote("explanation", text)
+    const result = await saveNote(activeExplainTab === "summary" ? "summary" : "explanation", text)
     explainCardSave.textContent = result.ok ? "Saved" : "Error"
     styleSaveFeedback(explainCardSave, result.ok ? "saved" : "error")
   } catch {
@@ -484,13 +601,36 @@ explainCardSave.addEventListener("click", async () => {
 explainCardActions.appendChild(explainCardSave)
 explainCardActions.appendChild(explainCardClose)
 
-explainCardHeader.appendChild(explainCardTitle)
+explainCardHeader.appendChild(explainCardTabs)
 explainCardHeader.appendChild(explainCardActions)
 
 const explainCardBody = document.createElement("div")
+const summaryCardBody = document.createElement("div")
+summaryCardBody.style.display = "none"
+
+let activeExplainTab: "explain" | "summary" = "explain"
+
+function setActiveExplainTab(tab: "explain" | "summary") {
+  activeExplainTab = tab
+  styleExplainTab(explainTabBtn, tab === "explain")
+  styleExplainTab(summaryTabBtn, tab === "summary")
+  explainCardBody.style.display = tab === "explain" ? "block" : "none"
+  summaryCardBody.style.display = tab === "summary" ? "block" : "none"
+}
+
+setActiveExplainTab("explain")
+
+explainTabBtn.addEventListener("click", () => setActiveExplainTab("explain"))
+summaryTabBtn.addEventListener("click", () => {
+  setActiveExplainTab("summary")
+  if (!summaryCardBody.textContent) {
+    performSummarize(explainSelectedText, explainAnchorParagraph?.textContent || "")
+  }
+})
 
 explainCard.appendChild(explainCardHeader)
 explainCard.appendChild(explainCardBody)
+explainCard.appendChild(summaryCardBody)
 
 // The paragraph the currently-open (or most recently opened) explain
 // card is anchored to - separate from currentParagraphs, since the
@@ -536,6 +676,15 @@ let currentTextSpacing: TextSpacing = DEFAULT_TEXT_SPACING
 
 // Same idea again, but for the Reading Font control in the Aa menu.
 let currentReadingFont: ReadingFont = DEFAULT_READING_FONT
+
+// Reading Mode's color theme, text size, content width, and focus-line -
+// same load-in-init/persist-on-change pattern as currentTextSpacing/
+// currentReadingFont above, applied inside buildReaderOverlay rather
+// than to the live page (see injectReadingControlsBar).
+let currentReadingTheme: ReadingTheme = DEFAULT_READING_THEME
+let currentTextSizePercent = DEFAULT_TEXT_SIZE_PERCENT
+let currentPageWidth: PageWidth = DEFAULT_PAGE_WIDTH
+let focusLineEnabled = DEFAULT_FOCUS_LINE_ENABLED
 
 // Whether the first-run onboarding tooltip has already been shown.
 // Defaults to true (don't show) until init() loads the real stored
@@ -617,26 +766,10 @@ function capturePristine(paragraph: HTMLElement) {
 // it scrolls with the page the same way a nested absolute element
 // would, since that's how position: absolute against the initial
 // containing block behaves.
-function attachBadgeTo(paragraph: HTMLElement) {
+function attachSelectionBarTo(paragraph: HTMLElement) {
   const rect = paragraph.getBoundingClientRect()
-  badge.style.top = `${rect.top + window.scrollY + 2}px`
-  badge.style.left = `${rect.left + window.scrollX - 40}px`
-}
-
-// Same page-coordinate approach as attachBadgeTo, offset 40px lower so
-// it sits directly beneath the Simplify badge instead of on top of it.
-function attachExplainBadgeTo(paragraph: HTMLElement) {
-  const rect = paragraph.getBoundingClientRect()
-  explainBadge.style.top = `${rect.top + window.scrollY + 2 + 40}px`
-  explainBadge.style.left = `${rect.left + window.scrollX - 40}px`
-}
-
-// Same page-coordinate approach, another 40px lower so it sits beneath
-// the Explain badge.
-function attachSaveBadgeTo(paragraph: HTMLElement) {
-  const rect = paragraph.getBoundingClientRect()
-  saveBadge.style.top = `${rect.top + window.scrollY + 2 + 80}px`
-  saveBadge.style.left = `${rect.left + window.scrollX - 40}px`
+  selectionBar.style.top = `${rect.top + window.scrollY - 44}px`
+  selectionBar.style.left = `${rect.left + window.scrollX}px`
 }
 
 // Positions the explanation card just under the paragraph it's about,
@@ -663,28 +796,19 @@ function showBadgeFor(paragraphs: HTMLElement[]) {
   }
 
   // Read-only: just remembers what's already there. Nothing about
-  // showing a badge should touch any paragraph's actual content - only
+  // showing the bar should touch any paragraph's actual content - only
   // an explicit simplify click does that (see simplifyParagraph below).
   paragraphs.forEach(capturePristine)
 
   currentParagraphs = paragraphs
   explainSelectedText = (window.getSelection()?.toString() || "").trim()
   styleBadge("idle", paragraphs.length)
-
-  attachBadgeTo(paragraphs[0])
-
-  badge.style.opacity = "1"
-  badge.style.pointerEvents = "auto"
-
-  attachExplainBadgeTo(paragraphs[0])
-  explainBadge.style.opacity = "1"
-  explainBadge.style.pointerEvents = "auto"
-
-  saveBadgeLabel.textContent = "Save highlight"
+  saveBadgeLabel.textContent = "Save"
   styleSaveFeedback(saveBadge, "idle")
-  attachSaveBadgeTo(paragraphs[0])
-  saveBadge.style.opacity = "1"
-  saveBadge.style.pointerEvents = "auto"
+
+  attachSelectionBarTo(paragraphs[0])
+  selectionBar.style.opacity = "1"
+  selectionBar.style.pointerEvents = "auto"
 }
 
 // ---- First-run onboarding: a centered, two-slide explainer modal ----
@@ -902,15 +1026,9 @@ function maybeShowOnboardingModal() {
 }
 
 function hideBadge() {
-  badge.style.opacity = "0"
-  badge.style.pointerEvents = "none"
+  selectionBar.style.opacity = "0"
+  selectionBar.style.pointerEvents = "none"
   currentParagraphs = null
-
-  explainBadge.style.opacity = "0"
-  explainBadge.style.pointerEvents = "none"
-
-  saveBadge.style.opacity = "0"
-  saveBadge.style.pointerEvents = "none"
 }
 
 // Separate from hideBadge - the card is left open (if already open)
@@ -947,6 +1065,21 @@ function showExplanationError(error: string) {
 
   if (explainAnchorParagraph) attachExplainCardTo(explainAnchorParagraph)
   explainCard.style.display = "block"
+}
+
+function showSummary(text: string) {
+  summaryCardBody.textContent = text
+  summaryCardBody.style.color = tokens.readingText
+  explainCardSave.style.display = "inline-flex"
+  explainCardSave.textContent = "Save"
+  explainCardSave.style.backgroundColor = "transparent"
+  explainCardSave.style.color = tokens.readingText
+}
+
+function showSummaryError(error: string) {
+  summaryCardBody.textContent = error
+  summaryCardBody.style.color = "#8A2E2E"
+  explainCardSave.style.display = "none"
 }
 
 function styleControlButton(el: HTMLElement) {
@@ -1011,7 +1144,7 @@ function addParagraphControls(paragraph: HTMLElement) {
 
   let saveSimplificationInFlight = false
   const saveBtn = document.createElement("button")
-  saveBtn.textContent = "💾"
+  saveBtn.innerHTML = ICONS.save
   saveBtn.title = "Save this simplification"
   styleControlButton(saveBtn)
   saveBtn.addEventListener("click", async (e) => {
@@ -1025,21 +1158,20 @@ function addParagraphControls(paragraph: HTMLElement) {
     saveSimplificationInFlight = true
     saveBtn.disabled = true
     saveBtn.style.opacity = "0.6"
-    const originalLabel = saveBtn.textContent
-    saveBtn.textContent = "…"
+    saveBtn.innerHTML = ICONS.loading
     try {
       const result = await saveNote("simplification", text)
-      saveBtn.textContent = result.ok ? "✓" : "!"
+      saveBtn.innerHTML = result.ok ? ICONS.done : ICONS.error
       styleSaveFeedback(saveBtn, result.ok ? "saved" : "error")
     } catch {
-      saveBtn.textContent = "!"
+      saveBtn.innerHTML = ICONS.error
       styleSaveFeedback(saveBtn, "error")
     } finally {
       saveSimplificationInFlight = false
       saveBtn.disabled = false
       saveBtn.style.opacity = "1"
       window.setTimeout(() => {
-        saveBtn.textContent = originalLabel
+        saveBtn.innerHTML = ICONS.save
         saveBtn.style.backgroundColor = "#FFFFFF"
         saveBtn.style.color = tokens.readingText
       }, 2000)
@@ -1087,10 +1219,10 @@ async function simplifyParagraph(paragraph: HTMLElement) {
 
   simplifiedParagraphs.add(paragraph)
   addParagraphControls(paragraph)
-  // Repositions the badge over this paragraph's current (post-
-  // simplify) layout, since its height may have changed - doesn't
-  // touch the paragraph itself, see attachBadgeTo.
-  attachBadgeTo(paragraph)
+  // Repositions the bar over this paragraph's current (post-simplify)
+  // layout, since its height may have changed - doesn't touch the
+  // paragraph itself, see attachSelectionBarTo.
+  attachSelectionBarTo(paragraph)
 }
 
 // Takes the target grade level as a parameter now - once this becomes
@@ -1148,6 +1280,26 @@ async function explainText(
   return response.explanation
 }
 
+async function summarizeText(text: string, targetLevel: number, length: TextLength): Promise<string> {
+  const installId = await getInstallId()
+
+  const message: SummarizeMessage = {
+    type: SUMMARIZE_MESSAGE_TYPE,
+    text,
+    targetGradeLevel: targetLevel,
+    targetLength: length,
+    installId
+  }
+
+  const response = (await chrome.runtime.sendMessage(message)) as SummarizeResponse
+
+  if (response.ok === false) {
+    throw new Error(response.error)
+  }
+
+  return response.summary
+}
+
 // Memoized per page load: the first save on a page creates a Source +
 // Document for it (via the background worker, same reasoning as
 // simplifyText/explainText above for why the fetch itself can't happen
@@ -1175,9 +1327,13 @@ async function ensureDocumentId(): Promise<number | null> {
 // Shared by the highlight/explanation/simplification Save actions below -
 // always includes source_url for backwards compatibility, and attaches
 // document_id when a Document could be created/found for this page.
-async function saveNote(contentType: SaveContentType, content: string): Promise<SaveNoteResponse> {
+async function saveNote(
+  contentType: SaveContentType,
+  content: string,
+  options?: { title?: string; tags?: string[] }
+): Promise<SaveNoteResponse> {
   const documentId = await ensureDocumentId()
-  const title = content.length > 80 ? `${content.slice(0, 80)}…` : content
+  const title = options?.title ?? (content.length > 80 ? `${content.slice(0, 80)}…` : content)
 
   const message: SaveNoteMessage = {
     type: SAVE_NOTE_MESSAGE_TYPE,
@@ -1185,10 +1341,266 @@ async function saveNote(contentType: SaveContentType, content: string): Promise<
     content,
     contentType,
     sourceUrl: location.href,
-    documentId: documentId ?? undefined
+    documentId: documentId ?? undefined,
+    tags: options?.tags
   }
 
   return (await chrome.runtime.sendMessage(message)) as SaveNoteResponse
+}
+
+function parseTagsInput(value: string): string[] | undefined {
+  const tags = value
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+  return tags.length > 0 ? tags : undefined
+}
+
+// Small centered modal shell shared by the Note editor and Save to
+// Lucent dialogs - same backdrop/close-on-outside-click pattern as
+// maybeShowOnboardingModal, just reused as a general-purpose container
+// instead of a one-off.
+function createModal(title: string): {
+  backdrop: HTMLDivElement
+  body: HTMLDivElement
+  close: () => void
+} {
+  const backdrop = document.createElement("div")
+  backdrop.style.position = "fixed"
+  backdrop.style.inset = "0"
+  backdrop.style.backgroundColor = "rgba(0,0,0,0.4)"
+  backdrop.style.zIndex = "2147483647"
+  backdrop.style.display = "flex"
+  backdrop.style.alignItems = "center"
+  backdrop.style.justifyContent = "center"
+
+  const modal = document.createElement("div")
+  modal.style.backgroundColor = tokens.readingBg
+  modal.style.color = tokens.readingText
+  modal.style.borderRadius = "16px"
+  modal.style.padding = "20px"
+  modal.style.width = "320px"
+  modal.style.maxWidth = "90%"
+  modal.style.boxShadow = "0 8px 32px rgba(0,0,0,0.3)"
+  modal.style.fontFamily = "Inter, sans-serif"
+
+  const header = document.createElement("div")
+  header.style.display = "flex"
+  header.style.justifyContent = "space-between"
+  header.style.alignItems = "center"
+  header.style.marginBottom = "14px"
+
+  const titleEl = document.createElement("span")
+  titleEl.textContent = title
+  titleEl.style.fontWeight = "600"
+  titleEl.style.fontSize = "15px"
+
+  const closeBtn = document.createElement("button")
+  closeBtn.textContent = "✕"
+  closeBtn.title = "Close"
+  closeBtn.style.border = "none"
+  closeBtn.style.background = "transparent"
+  closeBtn.style.color = tokens.captionText
+  closeBtn.style.cursor = "pointer"
+  closeBtn.style.fontSize = "14px"
+  closeBtn.style.padding = "0"
+
+  function close() {
+    backdrop.remove()
+  }
+
+  closeBtn.addEventListener("click", close)
+  backdrop.addEventListener("mousedown", (e) => {
+    if (e.target === backdrop) close()
+  })
+
+  header.appendChild(titleEl)
+  header.appendChild(closeBtn)
+
+  const body = document.createElement("div")
+
+  modal.appendChild(header)
+  modal.appendChild(body)
+  backdrop.appendChild(modal)
+
+  return { backdrop, body, close }
+}
+
+function createLabeledField(
+  labelText: string,
+  placeholder: string
+): { row: HTMLDivElement; input: HTMLInputElement } {
+  const row = document.createElement("div")
+  row.style.marginBottom = "12px"
+
+  const label = document.createElement("label")
+  label.textContent = labelText
+  label.style.display = "block"
+  label.style.fontSize = "12px"
+  label.style.color = tokens.captionText
+  label.style.marginBottom = "4px"
+
+  const input = document.createElement("input")
+  input.type = "text"
+  input.placeholder = placeholder
+  input.style.width = "100%"
+  input.style.boxSizing = "border-box"
+  input.style.padding = "8px 10px"
+  input.style.borderRadius = "8px"
+  input.style.border = `1px solid ${tokens.captionText}`
+  input.style.fontSize = "13px"
+  input.style.fontFamily = "Inter, sans-serif"
+  input.style.backgroundColor = "#FFFFFF"
+  input.style.color = tokens.readingText
+
+  row.appendChild(label)
+  row.appendChild(input)
+  return { row, input }
+}
+
+function styleModalPrimaryButton(btn: HTMLButtonElement) {
+  btn.style.width = "100%"
+  btn.style.padding = "10px"
+  btn.style.borderRadius = "20px"
+  btn.style.border = "none"
+  btn.style.backgroundColor = tokens.accentTeal
+  btn.style.color = "#FFFFFF"
+  btn.style.fontSize = "14px"
+  btn.style.fontWeight = "600"
+  btn.style.cursor = "pointer"
+}
+
+// "Note" action - a free-form note the user writes themselves, distinct
+// from Save (which stores the highlighted text as-is). Seeds the title
+// from the page title and the textarea from whatever's selected, but
+// both are just starting points the user can replace.
+function openNoteModal() {
+  const seedTitle = document.title.slice(0, 80)
+  const { backdrop, body, close } = createModal("New Note")
+
+  const { row: titleRow, input: titleInput } = createLabeledField("Title", "Note title")
+  titleInput.value = seedTitle
+
+  const { row: tagsRow, input: tagsInput } = createLabeledField("Add tags...", "e.g. biology, exam")
+
+  const textarea = document.createElement("textarea")
+  textarea.placeholder = "Write your note here..."
+  textarea.value = explainSelectedText
+  textarea.style.width = "100%"
+  textarea.style.boxSizing = "border-box"
+  textarea.style.minHeight = "90px"
+  textarea.style.padding = "8px 10px"
+  textarea.style.borderRadius = "8px"
+  textarea.style.border = `1px solid ${tokens.captionText}`
+  textarea.style.fontSize = "13px"
+  textarea.style.fontFamily = "Inter, sans-serif"
+  textarea.style.marginBottom = "14px"
+  textarea.style.resize = "vertical"
+
+  const saveBtn = document.createElement("button")
+  saveBtn.textContent = "Save"
+  styleModalPrimaryButton(saveBtn)
+
+  let saving = false
+  saveBtn.addEventListener("click", async () => {
+    if (saving) return
+    const content = textarea.value.trim()
+    if (!content) return
+
+    saving = true
+    saveBtn.disabled = true
+    saveBtn.textContent = "Saving..."
+    try {
+      const result = await saveNote("note", content, {
+        title: titleInput.value.trim() || seedTitle,
+        tags: parseTagsInput(tagsInput.value)
+      })
+      if (result.ok === false) {
+        throw new Error(result.error)
+      }
+      saveBtn.textContent = "Saved"
+      window.setTimeout(close, 700)
+    } catch {
+      saveBtn.textContent = "Error - try again"
+      saving = false
+      saveBtn.disabled = false
+    }
+  })
+
+  body.appendChild(titleRow)
+  body.appendChild(tagsRow)
+  body.appendChild(textarea)
+  body.appendChild(saveBtn)
+
+  document.body.appendChild(backdrop)
+  titleInput.focus()
+}
+
+// "Save" action - stores the raw highlighted text as-is. Only offers the
+// current page's document as the save target for now (see the plan doc -
+// no cross-document reassignment UI yet).
+function openSaveModal() {
+  if (!explainSelectedText) return
+  const { backdrop, body, close } = createModal("Save to Lucent")
+
+  const addToRow = document.createElement("div")
+  addToRow.style.marginBottom = "12px"
+
+  const addToLabel = document.createElement("label")
+  addToLabel.textContent = "Add to"
+  addToLabel.style.display = "block"
+  addToLabel.style.fontSize = "12px"
+  addToLabel.style.color = tokens.captionText
+  addToLabel.style.marginBottom = "4px"
+
+  const addToValue = document.createElement("div")
+  addToValue.textContent = document.title.slice(0, 60) || location.hostname
+  addToValue.style.fontSize = "13px"
+  addToValue.style.padding = "8px 10px"
+  addToValue.style.borderRadius = "8px"
+  addToValue.style.border = `1px solid ${tokens.captionText}`
+  addToValue.style.backgroundColor = "#FFFFFF"
+  addToValue.style.color = tokens.readingText
+
+  addToRow.appendChild(addToLabel)
+  addToRow.appendChild(addToValue)
+
+  const { row: tagsRow, input: tagsInput } = createLabeledField(
+    "Add tags...",
+    "e.g. important, review-later"
+  )
+
+  const saveBtn = document.createElement("button")
+  saveBtn.textContent = "Save"
+  styleModalPrimaryButton(saveBtn)
+
+  let saving = false
+  saveBtn.addEventListener("click", async () => {
+    if (saving) return
+    saving = true
+    saveBtn.disabled = true
+    saveBtn.textContent = "Saving..."
+    try {
+      const result = await saveNote("highlight", explainSelectedText, {
+        tags: parseTagsInput(tagsInput.value)
+      })
+      if (result.ok === false) {
+        throw new Error(result.error)
+      }
+      saveBtn.textContent = "Saved"
+      window.setTimeout(close, 700)
+    } catch {
+      saveBtn.textContent = "Error - try again"
+      saving = false
+      saveBtn.disabled = false
+    }
+  })
+
+  body.appendChild(addToRow)
+  body.appendChild(tagsRow)
+  body.appendChild(saveBtn)
+
+  document.body.appendChild(backdrop)
 }
 
 // Registers the badge's click handler, the highlight-to-badge and
@@ -1224,9 +1636,9 @@ async function performSimplify(paragraphs: HTMLElement[]) {
 let explainInFlight = false
 
 async function performExplain(currentSelectedText: string, surroundingContext: string){
-  if(currentSelectedText.length === 0 || explainInFlight) return 
+  if(currentSelectedText.length === 0 || explainInFlight) return
   explainInFlight = true
-  
+
   try {
     const explanation = await explainText(
       currentSelectedText,
@@ -1245,12 +1657,33 @@ async function performExplain(currentSelectedText: string, surroundingContext: s
 
 }
 
+let summarizeInFlight = false
+
+async function performSummarize(currentSelectedText: string, surroundingContext: string) {
+  if (currentSelectedText.length === 0 || summarizeInFlight) return
+  summarizeInFlight = true
+
+  try {
+    const summary = await summarizeText(
+      surroundingContext || currentSelectedText,
+      targetGradeLevel,
+      targetLength
+    )
+    showSummary(summary)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Something went wrong"
+    showSummaryError(message)
+  } finally {
+    summarizeInFlight = false
+  }
+}
+
 async function runSimplify(paragraphs: HTMLElement[]) {
   currentParagraphs = paragraphs
   const anchor = paragraphs[0]
-  attachBadgeTo(anchor)
-  badge.style.opacity = "1"
-  badge.style.pointerEvents = "auto"
+  attachSelectionBarTo(anchor)
+  selectionBar.style.opacity = "1"
+  selectionBar.style.pointerEvents = "auto"
 
   logEvent("simplify_click", {
     paragraphCount: paragraphs.length,
@@ -1330,6 +1763,8 @@ function activateExplainBadgeClickHandler() {
 
     explainAnchorParagraph = currentParagraphs[0]
     attachExplainCardTo(explainAnchorParagraph)
+    summaryCardBody.textContent = ""
+    setActiveExplainTab("explain")
 
     explainBadgeLabel.textContent = "Explaining..."
     explainBadge.classList.add("arw-expanded")
@@ -1346,12 +1781,11 @@ function activateExplainBadgeClickHandler() {
   })
 }
 
-let saveHighlightInFlight = false
-
-// Shared by all three Save controls (this badge, the explain card's Save
-// button, and the per-paragraph save button) so "Saved"/"Error" always
-// look the same, reusing the exact tokens showExplanationError already
-// uses rather than inventing a second error color.
+// Shared by every Save-flavored control (the modal Save buttons, the
+// explain card's Save button, the per-paragraph save button) so "Saved"/
+// "Error" always look the same, reusing the exact tokens
+// showExplanationError already uses rather than inventing a second error
+// color.
 function styleSaveFeedback(el: HTMLElement, state: "idle" | "saved" | "error") {
   if (state === "idle") {
     el.style.backgroundColor = tokens.readingBg
@@ -1363,31 +1797,6 @@ function styleSaveFeedback(el: HTMLElement, state: "idle" | "saved" | "error") {
     el.style.backgroundColor = "#FBEAEA"
     el.style.color = "#8A2E2E"
   }
-}
-
-function activateSaveBadgeClickHandler() {
-  saveBadge.addEventListener("click", async () => {
-    if (!explainSelectedText || saveHighlightInFlight) return
-    saveHighlightInFlight = true
-    saveBadge.style.opacity = "0.7"
-
-    saveBadgeLabel.textContent = "Saving..."
-    try {
-      const result = await saveNote("highlight", explainSelectedText)
-      saveBadgeLabel.textContent = result.ok ? "Saved" : "Error"
-      styleSaveFeedback(saveBadge, result.ok ? "saved" : "error")
-    } catch {
-      saveBadgeLabel.textContent = "Error"
-      styleSaveFeedback(saveBadge, "error")
-    } finally {
-      saveHighlightInFlight = false
-      saveBadge.style.opacity = "1"
-      window.setTimeout(() => {
-        saveBadgeLabel.textContent = "Save highlight"
-        styleSaveFeedback(saveBadge, "idle")
-      }, 2000)
-    }
-  })
 }
 
 // ---- Trigger 1: user highlights text themselves ----
@@ -1454,17 +1863,12 @@ function activateSelectionTrigger() {
 
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Node
-    // explainBadge/explainCard/saveBadge are excluded too - otherwise
-    // mousedown on one of these buttons (which fires before its own
-    // click handler) would hideBadge() first, clearing currentParagraphs
-    // (or explainSelectedText) out from under that click handler before
-    // it ever runs.
-    if (
-      !badge.contains(target) &&
-      !explainBadge.contains(target) &&
-      !explainCard.contains(target) &&
-      !saveBadge.contains(target)
-    ) {
+    // explainCard is excluded too - otherwise mousedown on one of the
+    // bar's buttons (which fires before its own click handler) would
+    // hideBadge() first, clearing currentParagraphs (or
+    // explainSelectedText) out from under that click handler before it
+    // ever runs.
+    if (!selectionBar.contains(target) && !explainCard.contains(target)) {
       hideBadge()
     }
   })
@@ -1490,8 +1894,7 @@ function repositionAnchoredUI() {
   requestAnimationFrame(() => {
     scrollRepositionScheduled = false
     if (currentParagraphs && currentParagraphs.length > 0) {
-      attachBadgeTo(currentParagraphs[0])
-      attachExplainBadgeTo(currentParagraphs[0])
+      attachSelectionBarTo(currentParagraphs[0])
     }
     if (explainAnchorParagraph && explainCard.style.display === "block") {
       attachExplainCardTo(explainAnchorParagraph)
@@ -1592,6 +1995,10 @@ let readingModeOn = false
 
 let readerOverlayEl: HTMLDivElement | null = null
 let readerParagraphs: HTMLElement[] = []
+let readerWrapperEl: HTMLDivElement | null = null
+let readerContentContainerEl: HTMLDivElement | null = null
+let readerTitleEl: HTMLHeadingElement | null = null
+let focusLineEl: HTMLDivElement | null = null
 let switchBtnEl: HTMLButtonElement | null = null
 
 function injectReaderStyles() {
@@ -1601,15 +2008,15 @@ function injectReaderStyles() {
       margin: 0 0 1.3em;
       font-size: 19px;
       line-height: 1.8;
-      color: ${tokens.readingText};
+      color: var(--arw-reader-text, ${tokens.readingText});
     }
     .arw-reader-content h1, .arw-reader-content h2, .arw-reader-content h3 {
-      color: ${tokens.readingText};
+      color: var(--arw-reader-text, ${tokens.readingText});
       line-height: 1.4;
       margin: 1.4em 0 0.6em;
     }
     .arw-reader-content ul, .arw-reader-content ol {
-      color: ${tokens.readingText};
+      color: var(--arw-reader-text, ${tokens.readingText});
       font-size: 19px;
       line-height: 1.8;
       padding-left: 1.4em;
@@ -1637,8 +2044,8 @@ function injectReaderStyles() {
       white-space: pre-wrap;
       word-break: break-word;
       max-width: 100%;
-      background-color: #EAE6D9 !important;
-      color: ${tokens.readingText} !important;
+      background-color: var(--arw-reader-code-bg, #EAE6D9) !important;
+      color: var(--arw-reader-text, ${tokens.readingText}) !important;
     }
     .arw-reader-content code {
       padding: 0.15em 0.4em;
@@ -1658,7 +2065,7 @@ function injectReaderStyles() {
       border-left: 3px solid ${tokens.accentTeal};
       margin: 1em 0;
       padding-left: 1em;
-      color: ${tokens.captionText};
+      color: var(--arw-reader-caption, ${tokens.captionText});
     }
     .arw-reader-content a {
       color: ${tokens.accentTeal};
@@ -1900,7 +2307,6 @@ function buildReaderOverlay(article: {
   closeBtn.addEventListener("click", () => setReadingMode(false))
 
   const wrapper = document.createElement("div")
-  wrapper.style.maxWidth = "680px"
   wrapper.style.width = "100%"
   wrapper.style.boxSizing = "border-box"
   wrapper.style.margin = "0 auto"
@@ -1911,7 +2317,6 @@ function buildReaderOverlay(article: {
   titleEl.textContent = article.title
   titleEl.style.fontSize = "28px"
   titleEl.style.lineHeight = "1.3"
-  titleEl.style.color = tokens.readingText
   titleEl.style.marginBottom = "24px"
 
   const contentContainer = document.createElement("div")
@@ -1921,6 +2326,32 @@ function buildReaderOverlay(article: {
 
   wrapper.appendChild(titleEl)
   wrapper.appendChild(contentContainer)
+
+  // Thin band that follows the cursor while reading, when Focus Line is
+  // enabled (see applyFocusLine) - fixed position so it tracks the
+  // viewport, not the scrolling content underneath it.
+  const focusLine = document.createElement("div")
+  focusLine.style.position = "fixed"
+  focusLine.style.left = "0"
+  focusLine.style.right = "0"
+  focusLine.style.height = "2.2em"
+  focusLine.style.pointerEvents = "none"
+  focusLine.style.backgroundColor = "rgba(0,0,0,0.06)"
+  focusLine.style.zIndex = "499999"
+  focusLine.style.display = "none"
+  overlay.addEventListener("mousemove", (e) => {
+    focusLine.style.top = `${e.clientY - 18}px`
+  })
+
+  // Assigned here (not just by enterReaderMode after this returns) so
+  // the apply* calls below - which all guard on these refs - take effect
+  // immediately on this very first render, not just on later live
+  // changes from the Reading Controls bar.
+  readerOverlayEl = overlay
+  readerWrapperEl = wrapper
+  readerContentContainerEl = contentContainer
+  readerTitleEl = titleEl
+  focusLineEl = focusLine
 
   // Rescued separately from Readability's own output (see
   // findPaginationLink) since neither survives extraction otherwise -
@@ -1945,8 +2376,56 @@ function buildReaderOverlay(article: {
 
   overlay.appendChild(closeBtn)
   overlay.appendChild(wrapper)
+  overlay.appendChild(focusLine)
+
+  applyReaderTheme()
+  applyReaderTextSize()
+  applyReaderPageWidth()
+  applyFocusLine()
 
   return { overlay, contentContainer }
+}
+
+// Live-updatable while Reading Mode is open (called both here at
+// creation and from the Reading Controls bar's Theme/Text Size/Page
+// Width/Focus Line controls) - each no-ops safely if Reading Mode isn't
+// currently open, same guard style as applyTextSpacing/applyReadingFont.
+function applyReaderTheme() {
+  if (!readerOverlayEl) return
+  const themeTokens = getThemeTokens(currentReadingTheme)
+  readerOverlayEl.style.backgroundColor = themeTokens.bg
+  if (readerTitleEl) readerTitleEl.style.color = themeTokens.text
+
+  // injectReaderStyles() sets every .arw-reader-content descendant's
+  // color from these custom properties (var(--arw-reader-text) etc.)
+  // instead of a hardcoded light-theme color - a plain inline
+  // `.style.color` on the container alone isn't enough here, because
+  // Readability-extracted paragraphs/headings/code blocks have their own
+  // explicit color rules (see injectReaderStyles) that would otherwise
+  // just override inheritance and stay the light theme's near-black,
+  // which is exactly the "dark mode with invisible black text" bug this
+  // fixes. Setting these on the overlay (not just contentContainer) so
+  // they're in scope for the title too.
+  readerOverlayEl.style.setProperty("--arw-reader-text", themeTokens.text)
+  readerOverlayEl.style.setProperty("--arw-reader-caption", themeTokens.caption)
+  readerOverlayEl.style.setProperty("--arw-reader-code-bg", themeTokens.codeBg)
+
+  if (readerContentContainerEl) readerContentContainerEl.style.color = themeTokens.text
+}
+
+function applyReaderTextSize() {
+  if (readerContentContainerEl) readerContentContainerEl.style.fontSize = `${currentTextSizePercent}%`
+}
+
+function applyReaderPageWidth() {
+  if (!readerWrapperEl) return
+  const option = PAGE_WIDTH_OPTIONS.find((o) => o.value === currentPageWidth) ?? PAGE_WIDTH_OPTIONS[1]
+  readerWrapperEl.style.maxWidth = option.maxWidth
+}
+
+function applyFocusLine() {
+  if (!focusLineEl) return
+  focusLineEl.style.display = focusLineEnabled ? "block" : "none"
 }
 
 // Builds a fresh overlay from a fresh extraction every time Reading Mode
@@ -1975,6 +2454,10 @@ function exitReaderMode() {
     readerOverlayEl = null
   }
   readerParagraphs = []
+  readerWrapperEl = null
+  readerContentContainerEl = null
+  readerTitleEl = null
+  focusLineEl = null
 
   unobserveAllParagraphs()
   getContentBlocks().forEach(observeParagraph)
@@ -2022,31 +2505,183 @@ function createDivider(): HTMLDivElement {
   return divider
 }
 
-function injectMenu(devModeEnabled: boolean) {
-  const menuButton = document.createElement("button")
-  menuButton.textContent = "Aa"
-  menuButton.style.position = "fixed"
-  menuButton.style.bottom = "20px"
-  menuButton.style.right = "20px"
+// Persistent bottom Reading Controls bar (replaces an earlier version's
+// floating "Aa" corner button) - a slim always-visible strip with the
+// Reading Mode toggle and an expand chevron, plus the same expandable
+// panel of preferences the "Aa" menu used to show, just anchored above
+// the bar instead of above a corner button. Every control inside the
+// panel keeps its original variable name/handler from that version -
+// only the outer bar/panel shell changed.
+// Small top-right toggle that opens the side panel (sidepanel.tsx) -
+// content scripts can't call chrome.sidePanel.open() themselves, so this
+// just asks the background worker to do it (see OPEN_SIDE_PANEL_MESSAGE_TYPE
+// in background.ts).
+function injectSidePanelToggle() {
+  const toggle = document.createElement("button")
+  toggle.title = "Open Lucent"
+  toggle.style.position = "fixed"
+  // 64px, not 16px - Reading Mode's "Exit Reading Mode" button
+  // (buildReaderOverlay's closeBtn) is also anchored top:16px/right:16px,
+  // and this toggle is always present (not just outside Reading Mode),
+  // so sharing that corner made them overlap directly.
+  toggle.style.top = "64px"
+  toggle.style.right = "16px"
+  toggle.style.width = "36px"
+  toggle.style.height = "36px"
+  toggle.style.borderRadius = "50%"
+  toggle.style.border = `1px solid ${tokens.captionText}`
+  toggle.style.backgroundColor = tokens.readingBg
+  toggle.style.color = tokens.readingText
+  toggle.style.display = "flex"
+  toggle.style.alignItems = "center"
+  toggle.style.justifyContent = "center"
+  toggle.style.cursor = "pointer"
+  toggle.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"
+  // Same reasoning as the other max-z-index comments in this file.
+  toggle.style.zIndex = "2147483647"
+  toggle.innerHTML =
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="15" y1="3" x2="15" y2="21"/></svg>'
+
+  toggle.addEventListener("click", () => {
+    console.log("[Lucent] side panel toggle clicked, sending OPEN_SIDE_PANEL_MESSAGE_TYPE")
+    const message: OpenSidePanelMessage = { type: OPEN_SIDE_PANEL_MESSAGE_TYPE }
+    chrome.runtime.sendMessage(message).catch((err) =>
+      console.error("[Lucent] sendMessage for OPEN_SIDE_PANEL_MESSAGE_TYPE failed", err)
+    )
+  })
+
+  document.body.appendChild(toggle)
+}
+
+// Small helper for the compact dropdowns in the expanded pill bar (Font/
+// Text Size/Spacing/Theme) - a caption above a native <select>, styled to
+// look like a plain label+value rather than a boxed form control.
+function createCompactDropdown<T extends string>(
+  labelText: string,
+  options: readonly { value: T; label: string }[],
+  currentValue: T,
+  onChange: (value: T) => void
+): { wrap: HTMLDivElement; select: HTMLSelectElement } {
+  const wrap = document.createElement("div")
+  wrap.style.display = "flex"
+  wrap.style.flexDirection = "column"
+  wrap.style.gap = "1px"
+  wrap.style.padding = "0 10px"
+
+  const labelEl = document.createElement("span")
+  labelEl.textContent = labelText
+  labelEl.style.fontSize = "10px"
+  labelEl.style.color = tokens.captionText
+  labelEl.style.textTransform = "uppercase"
+  labelEl.style.letterSpacing = "0.04em"
+
+  const select = document.createElement("select")
+  select.style.border = "none"
+  select.style.background = "transparent"
+  select.style.color = tokens.readingText
+  select.style.fontSize = "13px"
+  select.style.fontFamily = "Inter, sans-serif"
+  select.style.cursor = "pointer"
+  select.style.padding = "0"
+
+  options.forEach((option) => {
+    const optionEl = document.createElement("option")
+    optionEl.value = option.value
+    optionEl.textContent = option.label
+    if (option.value === currentValue) optionEl.selected = true
+    select.appendChild(optionEl)
+  })
+
+  select.addEventListener("change", () => onChange(select.value as T))
+
+  wrap.appendChild(labelEl)
+  wrap.appendChild(select)
+  return { wrap, select }
+}
+
+function injectReadingControlsBar(devModeEnabled: boolean) {
+  // Collapsed state: just a small floating circle, not attached to any
+  // viewport edge - clicking it reveals expandedBar in its place.
+  const collapsedToggle = document.createElement("button")
+  collapsedToggle.textContent = "L"
+  collapsedToggle.style.position = "fixed"
+  collapsedToggle.style.bottom = "20px"
+  collapsedToggle.style.left = "20px"
+  collapsedToggle.style.width = "40px"
+  collapsedToggle.style.height = "40px"
+  collapsedToggle.style.borderRadius = "50%"
+  collapsedToggle.style.border = `1px solid ${tokens.captionText}`
+  collapsedToggle.style.backgroundColor = tokens.readingBg
+  collapsedToggle.style.color = tokens.accentTeal
+  collapsedToggle.style.fontFamily = "Inter, sans-serif"
+  collapsedToggle.style.fontWeight = "700"
+  collapsedToggle.style.fontSize = "16px"
+  collapsedToggle.style.cursor = "pointer"
+  collapsedToggle.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)"
+  collapsedToggle.style.display = "flex"
+  collapsedToggle.style.alignItems = "center"
+  collapsedToggle.style.justifyContent = "center"
+  collapsedToggle.style.padding = "0"
   // See the matching comment on .arw-badge's z-index above - same fix,
-  // same reason (this button sits in the same bottom-right corner a lot
-  // of cookie-consent banners claim for themselves).
-  menuButton.style.zIndex = "2147483647"
-  menuButton.style.width = "48px"
-  menuButton.style.height = "48px"
-  menuButton.style.borderRadius = "50%"
+  // same reason (this floats in a corner a lot of cookie-consent banners
+  // claim for themselves).
+  collapsedToggle.style.zIndex = "2147483647"
+
+  // Expanded state: a floating pill (not stretched across the viewport),
+  // anchored at the same corner the circle sits in.
+  const expandedBar = document.createElement("div")
+  expandedBar.style.position = "fixed"
+  expandedBar.style.bottom = "20px"
+  expandedBar.style.left = "20px"
+  expandedBar.style.display = "none"
+  expandedBar.style.alignItems = "center"
+  expandedBar.style.backgroundColor = tokens.readingBg
+  expandedBar.style.border = `1px solid ${tokens.captionText}`
+  expandedBar.style.borderRadius = "24px"
+  expandedBar.style.padding = "6px 10px"
+  expandedBar.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"
+  expandedBar.style.fontFamily = "Inter, sans-serif"
+  expandedBar.style.zIndex = "2147483647"
+
+  const brandLabel = document.createElement("button")
+  brandLabel.textContent = "L"
+  brandLabel.title = "Collapse"
+  brandLabel.style.border = "none"
+  brandLabel.style.background = "transparent"
+  brandLabel.style.fontWeight = "700"
+  brandLabel.style.color = tokens.accentTeal
+  brandLabel.style.fontSize = "15px"
+  brandLabel.style.cursor = "pointer"
+  brandLabel.style.padding = "0 8px"
+
+  function collapseBar() {
+    expandedBar.style.display = "none"
+    collapsedToggle.style.display = "flex"
+  }
+
+  function expandBar() {
+    collapsedToggle.style.display = "none"
+    expandedBar.style.display = "flex"
+  }
+
+  collapsedToggle.addEventListener("click", expandBar)
+  brandLabel.addEventListener("click", collapseBar)
+
+  const menuButton = document.createElement("button")
+  menuButton.textContent = "▾"
+  menuButton.title = "More reading controls"
   menuButton.style.border = "none"
-  menuButton.style.backgroundColor = tokens.readingText
-  menuButton.style.color = tokens.readingBg
+  menuButton.style.background = "transparent"
+  menuButton.style.color = tokens.readingText
   menuButton.style.fontFamily = "Inter, sans-serif"
-  menuButton.style.fontSize = "16px"
+  menuButton.style.fontSize = "14px"
   menuButton.style.cursor = "pointer"
-  menuButton.style.boxShadow = "0 2px 8px rgba(0,0,0,0.25)"
+  menuButton.style.padding = "0 8px"
 
   const panel = document.createElement("div")
   panel.style.position = "fixed"
-  panel.style.bottom = "76px"
-  panel.style.right = "20px"
+  panel.style.bottom = "72px"
+  panel.style.left = "20px"
   panel.style.zIndex = "2147483647"
   panel.style.backgroundColor = tokens.readingBg
   panel.style.border = `1px solid ${tokens.captionText}`
@@ -2123,13 +2758,14 @@ function injectMenu(devModeEnabled: boolean) {
   const row = document.createElement("div")
   row.style.display = "flex"
   row.style.alignItems = "center"
-  row.style.justifyContent = "space-between"
-  row.style.padding = "4px 2px"
+  row.style.gap = "8px"
+  row.style.padding = "0 10px"
 
   const label = document.createElement("span")
   label.textContent = "Reading Mode"
-  label.style.fontSize = "14px"
+  label.style.fontSize = "13px"
   label.style.color = tokens.readingText
+  label.style.whiteSpace = "nowrap"
 
   const switchBtn = document.createElement("button")
   switchBtn.textContent = "Off"
@@ -2358,6 +2994,7 @@ function injectMenu(devModeEnabled: boolean) {
       applyTextSpacing(currentTextSpacing)
       setTextSpacing(currentTextSpacing)
       syncSpacingButtons()
+      compactSpacingSelect.value = currentTextSpacing
       logEvent("text_spacing_changed", { textSpacing: currentTextSpacing })
     })
     spacingButtons.push(spacingBtn)
@@ -2368,6 +3005,293 @@ function injectMenu(devModeEnabled: boolean) {
 
   spacingRow.appendChild(spacingLabel)
   spacingRow.appendChild(spacingButtonRow)
+
+  // ---- New: text size (Reading Mode font size, A-/100%/A+) ----
+  const textSizeRow = document.createElement("div")
+  textSizeRow.style.display = "flex"
+  textSizeRow.style.alignItems = "center"
+  textSizeRow.style.justifyContent = "space-between"
+  textSizeRow.style.gap = "12px"
+  textSizeRow.style.padding = "4px 2px"
+
+  const textSizeLabel = document.createElement("span")
+  textSizeLabel.textContent = "Text Size"
+  textSizeLabel.style.fontSize = "14px"
+  textSizeLabel.style.color = tokens.readingText
+
+  const textSizeControls = document.createElement("div")
+  textSizeControls.style.display = "flex"
+  textSizeControls.style.alignItems = "center"
+  textSizeControls.style.gap = "8px"
+
+  function textSizeStepButton(label: string, delta: number): HTMLButtonElement {
+    const btn = document.createElement("button")
+    btn.textContent = label
+    btn.style.width = "26px"
+    btn.style.height = "26px"
+    btn.style.borderRadius = "50%"
+    btn.style.border = `1px solid ${tokens.captionText}`
+    btn.style.backgroundColor = "#FFFFFF"
+    btn.style.color = tokens.readingText
+    btn.style.fontSize = "13px"
+    btn.style.cursor = "pointer"
+    btn.addEventListener("click", () => {
+      currentTextSizePercent = Math.min(
+        MAX_TEXT_SIZE_PERCENT,
+        Math.max(MIN_TEXT_SIZE_PERCENT, currentTextSizePercent + delta)
+      )
+      syncTextSizeDisplay()
+      applyReaderTextSize()
+      setTextSizePercent(currentTextSizePercent)
+      syncCompactTextSize()
+      logEvent("text_size_changed", { textSizePercent: currentTextSizePercent })
+    })
+    return btn
+  }
+
+  const textSizeValue = document.createElement("span")
+  textSizeValue.style.fontSize = "12px"
+  textSizeValue.style.color = tokens.captionText
+  textSizeValue.style.minWidth = "38px"
+  textSizeValue.style.textAlign = "center"
+
+  function syncTextSizeDisplay() {
+    textSizeValue.textContent = `${currentTextSizePercent}%`
+  }
+  syncTextSizeDisplay()
+
+  const textSizeMinusBtn = textSizeStepButton("A-", -TEXT_SIZE_STEP)
+  const textSizePlusBtn = textSizeStepButton("A+", TEXT_SIZE_STEP)
+
+  textSizeControls.appendChild(textSizeMinusBtn)
+  textSizeControls.appendChild(textSizeValue)
+  textSizeControls.appendChild(textSizePlusBtn)
+
+  textSizeRow.appendChild(textSizeLabel)
+  textSizeRow.appendChild(textSizeControls)
+
+  // ---- New: reading theme (light/dark) ----
+  const themeRow = document.createElement("div")
+  themeRow.style.display = "flex"
+  themeRow.style.alignItems = "center"
+  themeRow.style.justifyContent = "space-between"
+  themeRow.style.gap = "12px"
+  themeRow.style.padding = "4px 2px"
+
+  const themeLabel = document.createElement("span")
+  themeLabel.textContent = "Theme"
+  themeLabel.style.fontSize = "14px"
+  themeLabel.style.color = tokens.readingText
+
+  const themeButtonRow = document.createElement("div")
+  themeButtonRow.style.display = "flex"
+  themeButtonRow.style.gap = "6px"
+
+  const themeButtons: HTMLButtonElement[] = []
+
+  function syncThemeButtons() {
+    themeButtons.forEach((btn, i) => {
+      const active = READING_THEME_OPTIONS[i].value === currentReadingTheme
+      btn.style.backgroundColor = active ? tokens.accentTeal : "#FFFFFF"
+      btn.style.color = active ? "#FFFFFF" : tokens.readingText
+      btn.style.borderColor = active ? tokens.accentTeal : tokens.captionText
+    })
+  }
+
+  READING_THEME_OPTIONS.forEach((option) => {
+    const themeBtn = document.createElement("button")
+    themeBtn.textContent = option.label
+    themeBtn.style.padding = "6px 12px"
+    themeBtn.style.borderRadius = "14px"
+    themeBtn.style.border = `1px solid ${tokens.captionText}`
+    themeBtn.style.backgroundColor = "#FFFFFF"
+    themeBtn.style.color = tokens.readingText
+    themeBtn.style.fontSize = "12px"
+    themeBtn.style.cursor = "pointer"
+    themeBtn.addEventListener("click", () => {
+      currentReadingTheme = option.value
+      applyReaderTheme()
+      setReadingTheme(currentReadingTheme)
+      syncThemeButtons()
+      compactThemeSelect.value = currentReadingTheme
+      logEvent("reading_theme_changed", { readingTheme: currentReadingTheme })
+    })
+    themeButtons.push(themeBtn)
+    themeButtonRow.appendChild(themeBtn)
+  })
+
+  syncThemeButtons()
+
+  themeRow.appendChild(themeLabel)
+  themeRow.appendChild(themeButtonRow)
+
+  // ---- Compact dropdown versions of Font/Text Size/Spacing/Theme for
+  // the expanded pill bar (see injectReadingControlsBar's outer shell) -
+  // same underlying state/apply/persist as the detailed controls above,
+  // just a quicker-access "label: value" dropdown. Kept in sync both
+  // ways: each one's onChange also updates its detailed counterpart, and
+  // each detailed control's onChange (added above) also updates its
+  // compact counterpart here.
+  const { wrap: compactFontWrap, select: compactFontSelect } = createCompactDropdown(
+    "Font",
+    FONT_OPTIONS,
+    currentReadingFont,
+    (value) => {
+      currentReadingFont = value
+      fontSelect.value = value
+      applyReadingFont(currentReadingFont)
+      setReadingFont(currentReadingFont)
+      logEvent("reading_font_changed", { readingFont: currentReadingFont })
+    }
+  )
+  fontSelect.addEventListener("change", () => {
+    compactFontSelect.value = fontSelect.value
+  })
+
+  const textSizePresetOptions = TEXT_SIZE_PRESETS.map((percent) => ({
+    value: String(percent),
+    label: `${percent}%`
+  }))
+  const { wrap: compactTextSizeWrap, select: compactTextSizeSelect } = createCompactDropdown(
+    "Text Size",
+    textSizePresetOptions,
+    String(currentTextSizePercent),
+    (value) => {
+      currentTextSizePercent = Number(value)
+      syncTextSizeDisplay()
+      applyReaderTextSize()
+      setTextSizePercent(currentTextSizePercent)
+      logEvent("text_size_changed", { textSizePercent: currentTextSizePercent })
+    }
+  )
+  function syncCompactTextSize() {
+    const closest = TEXT_SIZE_PRESETS.reduce((best, p) =>
+      Math.abs(p - currentTextSizePercent) < Math.abs(best - currentTextSizePercent) ? p : best
+    )
+    compactTextSizeSelect.value = String(closest)
+  }
+  syncCompactTextSize()
+
+  const { wrap: compactSpacingWrap, select: compactSpacingSelect } = createCompactDropdown(
+    "Spacing",
+    TEXT_SPACING_OPTIONS,
+    currentTextSpacing,
+    (value) => {
+      currentTextSpacing = value
+      applyTextSpacing(currentTextSpacing)
+      setTextSpacing(currentTextSpacing)
+      syncSpacingButtons()
+      logEvent("text_spacing_changed", { textSpacing: currentTextSpacing })
+    }
+  )
+
+  const themeSelectOptions = READING_THEME_OPTIONS.map((option) => ({
+    value: option.value,
+    label: `${option.value === "dark" ? "🌙" : "☀"} ${option.label}`
+  }))
+  const { wrap: compactThemeWrap, select: compactThemeSelect } = createCompactDropdown(
+    "Theme",
+    themeSelectOptions,
+    currentReadingTheme,
+    (value) => {
+      currentReadingTheme = value
+      applyReaderTheme()
+      setReadingTheme(currentReadingTheme)
+      syncThemeButtons()
+      logEvent("reading_theme_changed", { readingTheme: currentReadingTheme })
+    }
+  )
+
+  // ---- New: page width (Reading Mode content column width) ----
+  const pageWidthRow = document.createElement("div")
+  pageWidthRow.style.display = "flex"
+  pageWidthRow.style.flexDirection = "column"
+  pageWidthRow.style.gap = "6px"
+  pageWidthRow.style.padding = "4px 2px"
+
+  const pageWidthLabel = document.createElement("span")
+  pageWidthLabel.textContent = "Page Width"
+  pageWidthLabel.style.fontSize = "14px"
+  pageWidthLabel.style.color = tokens.readingText
+
+  const pageWidthButtonRow = document.createElement("div")
+  pageWidthButtonRow.style.display = "flex"
+  pageWidthButtonRow.style.gap = "6px"
+
+  const pageWidthButtons: HTMLButtonElement[] = []
+
+  function syncPageWidthButtons() {
+    pageWidthButtons.forEach((btn, i) => {
+      const active = PAGE_WIDTH_OPTIONS[i].value === currentPageWidth
+      btn.style.backgroundColor = active ? tokens.accentTeal : "#FFFFFF"
+      btn.style.color = active ? "#FFFFFF" : tokens.readingText
+      btn.style.borderColor = active ? tokens.accentTeal : tokens.captionText
+    })
+  }
+
+  PAGE_WIDTH_OPTIONS.forEach((option) => {
+    const widthBtn = document.createElement("button")
+    widthBtn.textContent = option.label
+    widthBtn.style.flex = "1"
+    widthBtn.style.padding = "6px 0"
+    widthBtn.style.borderRadius = "14px"
+    widthBtn.style.border = `1px solid ${tokens.captionText}`
+    widthBtn.style.backgroundColor = "#FFFFFF"
+    widthBtn.style.color = tokens.readingText
+    widthBtn.style.fontSize = "12px"
+    widthBtn.style.cursor = "pointer"
+    widthBtn.addEventListener("click", () => {
+      currentPageWidth = option.value
+      applyReaderPageWidth()
+      setPageWidth(currentPageWidth)
+      syncPageWidthButtons()
+      logEvent("page_width_changed", { pageWidth: currentPageWidth })
+    })
+    pageWidthButtons.push(widthBtn)
+    pageWidthButtonRow.appendChild(widthBtn)
+  })
+
+  syncPageWidthButtons()
+
+  pageWidthRow.appendChild(pageWidthLabel)
+  pageWidthRow.appendChild(pageWidthButtonRow)
+
+  // ---- New: focus line toggle ----
+  const focusLineRow = document.createElement("div")
+  focusLineRow.style.display = "flex"
+  focusLineRow.style.alignItems = "center"
+  focusLineRow.style.justifyContent = "space-between"
+  focusLineRow.style.padding = "4px 2px"
+
+  const focusLineLabel = document.createElement("span")
+  focusLineLabel.textContent = "Focus Line"
+  focusLineLabel.style.fontSize = "14px"
+  focusLineLabel.style.color = tokens.readingText
+
+  const focusLineBtn = document.createElement("button")
+  focusLineBtn.style.padding = "6px 12px"
+  focusLineBtn.style.borderRadius = "20px"
+  focusLineBtn.style.border = "none"
+  focusLineBtn.style.fontSize = "12px"
+  focusLineBtn.style.cursor = "pointer"
+
+  function syncFocusLineButton() {
+    focusLineBtn.textContent = focusLineEnabled ? "On" : "Off"
+    focusLineBtn.style.backgroundColor = focusLineEnabled ? tokens.accentTeal : tokens.captionText
+    focusLineBtn.style.color = "#FFFFFF"
+  }
+  syncFocusLineButton()
+
+  focusLineBtn.addEventListener("click", () => {
+    focusLineEnabled = !focusLineEnabled
+    applyFocusLine()
+    setFocusLineEnabled(focusLineEnabled)
+    syncFocusLineButton()
+    logEvent("focus_line_changed", { focusLineEnabled })
+  })
+
+  focusLineRow.appendChild(focusLineLabel)
+  focusLineRow.appendChild(focusLineBtn)
 
   const exportBtn = document.createElement("button")
   exportBtn.textContent = "Export Session Log"
@@ -2391,12 +3315,23 @@ function injectMenu(devModeEnabled: boolean) {
   panel.appendChild(createDivider())
 
   // ---- Preferences ----
+  // Reading Mode itself (row) lives in the expanded pill bar now, not
+  // here - see the assembly at the bottom of this function.
   panel.appendChild(createSectionLabel("Preferences"))
-  panel.appendChild(row)
   panel.appendChild(gradeLevelRow)
   panel.appendChild(textLengthRow)
   panel.appendChild(fontRow)
   panel.appendChild(spacingRow)
+  panel.appendChild(textSizeRow)
+
+  panel.appendChild(createDivider())
+  panel.appendChild(createSectionLabel("Display"))
+  panel.appendChild(themeRow)
+  panel.appendChild(pageWidthRow)
+
+  panel.appendChild(createDivider())
+  panel.appendChild(createSectionLabel("Focus"))
+  panel.appendChild(focusLineRow)
 
   // Research/dev tool, not something real end users need - only shown
   // when chrome.storage.local has devMode === true, which nothing sets
@@ -2411,7 +3346,30 @@ function injectMenu(devModeEnabled: boolean) {
     panel.style.display = panel.style.display === "none" ? "flex" : "none"
   })
 
-  document.body.appendChild(menuButton)
+  function compactDivider(): HTMLDivElement {
+    const divider = document.createElement("div")
+    divider.style.width = "1px"
+    divider.style.alignSelf = "stretch"
+    divider.style.backgroundColor = tokens.captionText
+    divider.style.opacity = "0.25"
+    return divider
+  }
+
+  expandedBar.appendChild(brandLabel)
+  expandedBar.appendChild(compactDivider())
+  expandedBar.appendChild(row)
+  expandedBar.appendChild(compactDivider())
+  expandedBar.appendChild(compactFontWrap)
+  expandedBar.appendChild(compactDivider())
+  expandedBar.appendChild(compactTextSizeWrap)
+  expandedBar.appendChild(compactDivider())
+  expandedBar.appendChild(compactSpacingWrap)
+  expandedBar.appendChild(compactDivider())
+  expandedBar.appendChild(compactThemeWrap)
+  expandedBar.appendChild(menuButton)
+
+  document.body.appendChild(collapsedToggle)
+  document.body.appendChild(expandedBar)
   document.body.appendChild(panel)
 }
 
@@ -2669,25 +3627,27 @@ async function init() {
   currentTextSpacing = await getTextSpacing()
   currentReadingFont = await getReadingFont()
   fontOverrideEnabled = await getFontOverrideEnabled()
+  currentReadingTheme = await getReadingTheme()
+  currentTextSizePercent = await getTextSizePercent()
+  currentPageWidth = await getPageWidth()
+  focusLineEnabled = await getFocusLineEnabled()
   hasSeenOnboarding = await getHasSeenOnboarding()
   const devModeEnabled = await isDevModeEnabled()
   loadReadingFont()
   injectBadgeStyles()
   injectSimplifiedContentStyles()
   injectReaderStyles()
-  injectMenu(devModeEnabled)
+  injectReadingControlsBar(devModeEnabled)
+  injectSidePanelToggle()
   injectQuizModal()
-  // Lives here permanently, positioned via attachBadgeTo() rather than
-  // ever being re-parented into whatever paragraph it's currently
-  // pointing at - see attachBadgeTo for why.
-  document.body.appendChild(badge)
-  document.body.appendChild(explainBadge)
-  document.body.appendChild(saveBadge)
+  // Lives here permanently, positioned via attachSelectionBarTo() rather
+  // than ever being re-parented into whatever paragraph it's currently
+  // pointing at - see attachSelectionBarTo for why.
+  document.body.appendChild(selectionBar)
   document.body.appendChild(explainCard)
 
   activateBadgeClickHandler()
   activateExplainBadgeClickHandler()
-  activateSaveBadgeClickHandler()
   activateSelectionTrigger()
   activateScrollReposition()
   activateDwellDetection()
@@ -2718,6 +3678,25 @@ async function init() {
     if (FONT_OVERRIDE_ENABLED_STORAGE_KEY in changes) {
       fontOverrideEnabled = changes[FONT_OVERRIDE_ENABLED_STORAGE_KEY].newValue ?? DEFAULT_FONT_OVERRIDE_ENABLED
       applyReadingFont(currentReadingFont)
+    }
+    // Lets the side panel's Reading Preferences controls (sidepanel.tsx)
+    // take effect immediately on a page with Reading Mode already open,
+    // same live-update reasoning as the three keys above.
+    if (READING_THEME_STORAGE_KEY in changes) {
+      currentReadingTheme = changes[READING_THEME_STORAGE_KEY].newValue ?? DEFAULT_READING_THEME
+      applyReaderTheme()
+    }
+    if (TEXT_SIZE_STORAGE_KEY in changes) {
+      currentTextSizePercent = changes[TEXT_SIZE_STORAGE_KEY].newValue ?? DEFAULT_TEXT_SIZE_PERCENT
+      applyReaderTextSize()
+    }
+    if (PAGE_WIDTH_STORAGE_KEY in changes) {
+      currentPageWidth = changes[PAGE_WIDTH_STORAGE_KEY].newValue ?? DEFAULT_PAGE_WIDTH
+      applyReaderPageWidth()
+    }
+    if (FOCUS_LINE_STORAGE_KEY in changes) {
+      focusLineEnabled = changes[FOCUS_LINE_STORAGE_KEY].newValue ?? DEFAULT_FOCUS_LINE_ENABLED
+      applyFocusLine()
     }
   })
 
@@ -2810,12 +3789,13 @@ sessionStorage.removeItem(READING_MODE_CONTINUE_KEY)
 
 evaluateAutomaticActivation(shouldContinueReadingMode)
 
-// Manual activation from the popup's Home tab (see popup.tsx) - the
-// only way to turn Lucent Reader on for a specific page when
-// auto-activate is off, or when a page failed isProbablyReaderable but
-// the user wants it anyway. isSensitivePage() is still enforced here
-// unconditionally - a manual request is an explicit user action, but
-// it can never override the one hard safety gate in this file.
+// Manual activation from the side panel's Settings tab (see
+// sidepanel.tsx) - the only way to turn Lucent Reader on for a specific
+// page when auto-activate is off, or when a page failed
+// isProbablyReaderable but the user wants it anyway. isSensitivePage() is
+// still enforced here unconditionally - a manual request is an explicit
+// user action, but it can never override the one hard safety gate in
+// this file.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== MANUAL_ACTIVATE_MESSAGE_TYPE) return false
 
@@ -2837,4 +3817,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const response: ManualActivateResponse = { ok: true, alreadyActive: false }
   sendResponse(response)
   return true
+})
+
+// Side panel's Assist tab operating on the page's current selection -
+// same chrome.tabs.sendMessage-direct-to-tab delivery as
+// MANUAL_ACTIVATE_MESSAGE_TYPE above (sent by sidepanel.tsx, not routed
+// through the background worker, since no backend fetch is involved
+// here). isSensitivePage() gates this too, same reasoning as above.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === GET_SELECTION_MESSAGE_TYPE) {
+    if (isSensitivePage()) {
+      const response: GetSelectionResponse = { ok: false, reason: "no_selection" }
+      sendResponse(response)
+      return true
+    }
+
+    const text = (window.getSelection()?.toString() || "").trim()
+    if (!text) {
+      const response: GetSelectionResponse = { ok: false, reason: "no_selection" }
+      sendResponse(response)
+      return true
+    }
+
+    const anchorNode = window.getSelection()?.anchorNode
+    const contextParagraph = anchorNode
+      ? findContentBlock(anchorNode, window.getSelection()?.anchorOffset || 0)
+      : null
+
+    const response: GetSelectionResponse = {
+      ok: true,
+      text,
+      context: contextParagraph?.textContent || text,
+      pageTitle: document.title
+    }
+    sendResponse(response)
+    return true
+  }
+
+  if (message?.type === REPLACE_SELECTION_MESSAGE_TYPE) {
+    const replaceMessage = message as ReplaceSelectionMessage
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0 || selection.toString().trim().length === 0) {
+      const response: ReplaceSelectionResponse = { ok: false, reason: "no_selection" }
+      sendResponse(response)
+      return true
+    }
+
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+    range.insertNode(document.createTextNode(replaceMessage.text))
+    selection.collapseToEnd()
+
+    const response: ReplaceSelectionResponse = { ok: true }
+    sendResponse(response)
+    return true
+  }
+
+  return false
 })

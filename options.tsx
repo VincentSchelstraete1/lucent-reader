@@ -14,6 +14,11 @@ import {
   setTargetGradeLevel,
   startQuizState
 } from "~lib/reading-level"
+import {
+  DEFAULT_USE_POPUP_FALLBACK,
+  getUsePopupFallback,
+  setUsePopupFallback
+} from "~lib/side-panel-mode"
 
 const tokens = {
   readingBg: "#F5F1E8",
@@ -38,10 +43,17 @@ function OptionsPage() {
   const [questionCount, setQuestionCount] = useState(0)
   const [quizState, setQuizState] = useState<QuizState>(startQuizState())
   const [passage, setPassage] = useState<AssessmentPassage | null>(null)
+  const [usePopupFallback, setUsePopupFallbackState] = useState(DEFAULT_USE_POPUP_FALLBACK)
 
   useEffect(() => {
     getTargetGradeLevel().then(setCurrentLevel)
+    getUsePopupFallback().then(setUsePopupFallbackState)
   }, [])
+
+  async function handleUsePopupFallbackChange(next: boolean) {
+    setUsePopupFallbackState(next)
+    await setUsePopupFallback(next)
+  }
 
   function startAssessment() {
     const initialState = startQuizState()
@@ -89,6 +101,42 @@ function OptionsPage() {
         <p style={{ fontSize: 14, color: tokens.captionText, marginBottom: 28 }}>
           Reading level assessment
         </p>
+
+        <div
+          style={{
+            border: `1px solid ${tokens.captionText}`,
+            borderRadius: 12,
+            padding: "14px 16px",
+            marginBottom: 28
+          }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12
+            }}>
+            <span style={{ fontSize: 14 }}>Toolbar icon opens a popup window</span>
+            <button
+              onClick={() => handleUsePopupFallbackChange(!usePopupFallback)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 20,
+                border: "none",
+                fontSize: 12,
+                cursor: "pointer",
+                backgroundColor: usePopupFallback ? tokens.accentTeal : tokens.captionText,
+                color: "#FFFFFF"
+              }}>
+              {usePopupFallback ? "On" : "Off"}
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: tokens.captionText, margin: "6px 0 0", lineHeight: 1.4 }}>
+            Turn this on if clicking the Lucent icon (or the on-page panel toggle) doesn't
+            open anything - some browsers don't support the native side panel Lucent uses by
+            default, even though they don't report an error when it fails.
+          </p>
+        </div>
 
         {view === "intro" && (
           <div>
