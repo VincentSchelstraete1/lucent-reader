@@ -43,7 +43,7 @@ export function SourceDetail() {
   return (
     <div className="page">
       <nav className="breadcrumbs">
-        <Link to="/">Library</Link>
+        <Link to="/app">Library</Link>
         <span> / </span>
         <span>{state.status === "loaded" ? state.source.type : "Source"}</span>
       </nav>

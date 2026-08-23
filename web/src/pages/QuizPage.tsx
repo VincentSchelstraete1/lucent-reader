@@ -36,7 +36,7 @@ export function QuizPage() {
   return (
     <div className="page">
       <nav className="breadcrumbs">
-        <Link to="/">Library</Link>
+        <Link to="/app">Library</Link>
         {state.status === "loaded" && (
           <>
             <span> / </span>

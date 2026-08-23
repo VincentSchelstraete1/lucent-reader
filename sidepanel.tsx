@@ -476,7 +476,7 @@ function SidePanel() {
               your Library.
             </p>
             <button
-              onClick={() => chrome.tabs.create({ url: WEB_APP_URL })}
+              onClick={() => chrome.tabs.create({ url: `${WEB_APP_URL}/app` })}
               style={{ ...primaryButtonStyle(false), width: "100%" }}>
               Open Library
             </button>
