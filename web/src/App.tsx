@@ -6,6 +6,7 @@ import { QuizPage } from "./pages/QuizPage"
 import { LandingPage } from "./pages/LandingPage"
 import { AuthPage } from "./pages/AuthPage"
 import { OnboardingPage } from "./pages/OnboardingPage"
+import { AppWalkthrough } from "./components/walkthrough/AppWalkthrough"
 
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
@@ -13,13 +14,14 @@ function AppLayout() {
   return (
     <>
       <header className="app-header">
-        <Link to="/app" className="brand">
+        <Link to="/app" className="brand" data-tour="app-brand">
           Lucent Library
         </Link>
       </header>
       <main>
         <Outlet />
       </main>
+      <AppWalkthrough />
     </>
   )
 }

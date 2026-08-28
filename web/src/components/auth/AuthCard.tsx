@@ -1,27 +1,25 @@
 import { useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
+import { authAdapter } from "../../lib/authAdapter"
 import styles from "./auth.module.css"
 
 export function AuthCard({ mode }: { mode: "login" | "signup" }) {
-  const navigate = useNavigate()
   const [showEmailForm, setShowEmailForm] = useState(false)
+  const [notice, setNotice] = useState("")
 
-  // TODO(auth): no backend authentication exists yet. Both "Continue with
-  // Google" and the email form below are visual placeholders - wire them to
-  // a real OAuth/session flow here once the backend supports it, instead of
-  // navigating straight to onboarding.
-  function handlePlaceholderAuth(e?: FormEvent) {
+  async function handleAuth(provider: "google" | "email", e?: FormEvent) {
     e?.preventDefault()
-    navigate("/onboarding")
+    const result = provider === "google" ? await authAdapter.continueWithGoogle() : await authAdapter.continueWithEmail()
+    setNotice(result.message)
   }
 
   return (
     <div className={styles.card}>
-      <p className={styles.cardWordmark}>Lucent</p>
+      <p className={styles.cardWordmark}>Your Lucent learner card</p>
       <h1 className={styles.cardTitle}>{mode === "login" ? "Welcome back." : "Create your account."}</h1>
 
-      <button className={styles.googleBtn} onClick={() => handlePlaceholderAuth()}>
-        Continue with Google
+      <button className={styles.googleBtn} onClick={() => handleAuth("google")}>
+        <span aria-hidden="true">G</span> Continue with Google
       </button>
 
       {!showEmailForm ? (
@@ -32,7 +30,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
           </button>
         </>
       ) : (
-        <form className={styles.emailForm} onSubmit={handlePlaceholderAuth} style={{ marginTop: 16 }}>
+        <form className={styles.emailForm} onSubmit={(event) => handleAuth("email", event)} style={{ marginTop: 16 }}>
           <input className={styles.input} type="email" placeholder="Email address" required />
           {mode === "signup" && <input className={styles.input} type="password" placeholder="Password" required />}
           <button type="submit" className={styles.submitBtn}>
@@ -40,6 +38,8 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
           </button>
         </form>
       )}
+
+      {notice && <p className={styles.authNotice} role="status">{notice}</p>}
 
       <p className={styles.switchMode}>
         {mode === "login" ? (

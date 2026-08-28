@@ -35,16 +35,18 @@ export function Library() {
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header" data-tour="library-heading">
         <h1>Your Library</h1>
         <p className="page-subtitle">Everything you've saved from the web, organized by source.</p>
       </div>
 
+      <div data-tour="library-content">
       {state.status === "loading" && <Skeleton rows={3} />}
 
       {state.status === "error" && (
         <p className="error">Failed to load your library: {state.message}</p>
       )}
+      </div>
 
       {state.status === "loaded" && (
         state.sources.length === 0 ? (

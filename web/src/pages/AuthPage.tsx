@@ -33,6 +33,11 @@ export function AuthPage({ mode }: { mode: "login" | "signup" }) {
       </nav>
 
       <div className={styles.stage}>
+        <div className={styles.authIntro}>
+          <p>KEEP WHAT CLICKS</p>
+          <h2>A place for ideas to take root.</h2>
+          <span>Drag the learner card and let it settle.</span>
+        </div>
         <div className={styles.lanyardColumn}>
           <LanyardErrorBoundary>
             <Suspense fallback={<LanyardLoadingPlaceholder />}>

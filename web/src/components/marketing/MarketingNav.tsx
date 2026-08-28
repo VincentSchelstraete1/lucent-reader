@@ -11,8 +11,8 @@ export function MarketingNav() {
         <a href="#features" className={styles.navLink}>
           Product
         </a>
-        <a href="#features" className={styles.navLink}>
-          How it works
+        <a href="#reading-mode" className={styles.navLink}>
+          Reading Mode
         </a>
       </div>
       <div className={styles.navActions}>

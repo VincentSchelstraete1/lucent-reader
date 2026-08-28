@@ -1,10 +1,11 @@
 import { useRef } from "react"
 import { Link } from "react-router-dom"
 import { motion, useScroll, useTransform } from "framer-motion"
-import { FlowerHero } from "./FlowerHero"
 import styles from "./marketing.module.css"
 import { useReducedMotion } from "../../lib/useReducedMotion"
 
+// The flower itself lives in the page-level <ScrollFlower> layer, not here -
+// this section only owns the headline/copy/CTAs and their own scroll fade.
 export function Hero() {
   const sectionRef = useRef<HTMLElement>(null)
   const reduced = useReducedMotion()
@@ -16,9 +17,6 @@ export function Hero() {
 
   const copyOpacity = useTransform(scrollYProgress, [0, 0.8], [1, 0])
   const copyY = useTransform(scrollYProgress, [0, 0.8], [0, -40])
-  const flowerY = useTransform(scrollYProgress, [0, 1], [0, -110])
-  const flowerRotate = useTransform(scrollYProgress, [0, 1], [0, 4])
-  const flowerOpacity = useTransform(scrollYProgress, [0, 0.9], [1, 0.35])
 
   return (
     <section ref={sectionRef} className={styles.hero}>
@@ -29,27 +27,23 @@ export function Hero() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
       >
+        <p className={styles.eyebrow}>Your learning companion</p>
         <h1 className={styles.headline}>
           Understand anything
           <br />
           <span className={styles.headlineDisplay}>your way.</span>
         </h1>
-        <p className={styles.subhead}>Lucent adapts to how you learn and helps you truly understand.</p>
+        <p className={styles.subhead}>
+          Read, clarify, and save difficult ideas without leaving the page you’re on.
+        </p>
         <div className={styles.heroActions}>
           <Link to="/signup" className={styles.btnPrimary}>
-            Get started →
+            Get started
           </Link>
-          <a href="#features" className={styles.seeHow}>
-            See how it works
+          <a href="#demo" className={styles.seeHow}>
+            See it in action
           </a>
         </div>
-      </motion.div>
-
-      <motion.div
-        className={styles.flowerStage}
-        style={reduced ? undefined : { y: flowerY, rotate: flowerRotate, opacity: flowerOpacity }}
-      >
-        <FlowerHero />
       </motion.div>
     </section>
   )
