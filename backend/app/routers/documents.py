@@ -5,12 +5,26 @@ from app.schemas.note import NoteResponse
 from app.database import get_db
 from app.models.document import Document
 from app.models.note import Note
+from app.models.source import Source
 from app.services.anthropic_service import generate_structured_note
 from sqlalchemy import select
 router = APIRouter()
 
 @router.post("/documents", response_model=DocumentResponse)
 def create_document(document_request: DocumentCreateRequest, db = Depends(get_db)):
+    source = db.get(Source, document_request.source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found; document was not saved")
+    if source.type == "website":
+        existing = db.execute(
+            select(Document).where(Document.source_id == source.id).order_by(Document.id)
+        ).scalars().first()
+        if existing:
+            existing.title = document_request.title
+            existing.content = document_request.content
+            db.commit()
+            db.refresh(existing)
+            return existing
     document = Document(
         source_id=document_request.source_id,
         title=document_request.title,

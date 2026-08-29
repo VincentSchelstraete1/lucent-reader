@@ -34,3 +34,14 @@ def test_get_missing_source_404(client):
 
 def test_patch_missing_source_404(client):
     assert client.patch("/sources/999999", json={"url": "https://x.com"}).status_code == 404
+
+def test_reuses_source_for_same_canonical_page(client):
+    first = client.post("/sources", json={
+        "type": "website", "url": "HTTPS://Example.COM:443/article#section-one"
+    }).json()
+    repeated = client.post("/sources", json={
+        "type": "website", "url": "https://example.com/article#section-two"
+    }).json()
+    assert repeated["id"] == first["id"]
+    assert repeated["url"] == "https://example.com/article"
+    assert len(client.get("/sources").json()) == 1
