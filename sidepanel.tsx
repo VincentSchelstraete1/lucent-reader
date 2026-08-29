@@ -130,6 +130,12 @@ async function getSelectionFromPage(): Promise<GetSelectionResponse | null> {
 }
 
 type QuickAction = "simplify" | "explain" | "summarize"
+type SelectionSnapshot = {
+  text: string
+  context: string
+  pageTitle: string
+  url: string
+}
 
 const QUICK_ACTION_LABELS: Record<QuickAction, string> = {
   simplify: "Simplify",
@@ -145,6 +151,7 @@ function SidePanel() {
   const [targetLength, setTargetLengthState] = useState<TextLength>(DEFAULT_TEXT_LENGTH)
   const [activeAction, setActiveAction] = useState<QuickAction>("simplify")
   const [resultText, setResultText] = useState("")
+  const [resultSelection, setResultSelection] = useState<SelectionSnapshot | null>(null)
   const [resultError, setResultError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [replaceStatus, setReplaceStatus] = useState<string | null>(null)
@@ -172,6 +179,7 @@ function SidePanel() {
     setWorking(true)
     setActiveAction(action)
     setResultText("")
+    setResultSelection(null)
     setResultError(null)
     setReplaceStatus(null)
     setSaveStatus("idle")
@@ -179,6 +187,12 @@ function SidePanel() {
     const selection = await getSelectionFromPage()
     if (!selection || selection.ok === false) {
       setResultError("Highlight some text on the page first.")
+      setWorking(false)
+      return
+    }
+    const activeTab = await getActiveTab()
+    if (!activeTab?.url) {
+      setResultError("Lucent couldn't identify this page.")
       setWorking(false)
       return
     }
@@ -220,6 +234,7 @@ function SidePanel() {
         if (response.ok === false) throw new Error(response.error)
         setResultText(response.summary)
       }
+      setResultSelection({ ...selection, url: activeTab.url })
     } catch (err) {
       setResultError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
@@ -247,17 +262,19 @@ function SidePanel() {
 
   async function handleSaveToLucent() {
     setSaveStatus("saving")
-    const tab = await getActiveTab()
-    const selection = await getSelectionFromPage()
-    if (!tab?.url || !selection || selection.ok === false) {
-      setSaveStatus("error")
-      return
-    }
-
     try {
+      const currentTab = await getActiveTab()
+      const currentSelection = await getSelectionFromPage()
+      const selection = resultText && resultSelection
+        ? resultSelection
+        : currentTab?.url && currentSelection?.ok
+          ? { ...currentSelection, url: currentTab.url }
+          : null
+      if (!selection) throw new Error("Highlight some text on the page first.")
+
       const ensureMessage: EnsureDocumentMessage = {
         type: ENSURE_DOCUMENT_MESSAGE_TYPE,
-        url: tab.url,
+        url: selection.url,
         title: selection.pageTitle,
         content: selection.context
       }
@@ -269,9 +286,12 @@ function SidePanel() {
       const saveMessage: SaveNoteMessage = {
         type: SAVE_NOTE_MESSAGE_TYPE,
         title: selection.text.length > 80 ? `${selection.text.slice(0, 80)}…` : selection.text,
-        content: selection.text,
-        contentType: "highlight",
-        sourceUrl: tab.url,
+        content: resultText || selection.text,
+        contentType: resultText
+          ? activeAction === "explain" ? "explanation" : activeAction === "simplify" ? "simplification" : "summary"
+          : "highlight",
+        sourcePassage: resultText && activeAction !== "summarize" ? selection.text : undefined,
+        sourceUrl: selection.url,
         documentId: ensureResponse.documentId
       }
       const saveResponse = (await chrome.runtime.sendMessage(saveMessage)) as SaveNoteResponse
@@ -456,7 +476,7 @@ function SidePanel() {
                 disabled={working}
               />
               <QuickActionButton
-                label={saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Save failed" : "Save to Lucent"}
+                label={saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Save failed" : resultText ? `Save ${activeAction}` : "Save highlight"}
                 onClick={handleSaveToLucent}
                 disabled={saveStatus === "saving"}
               />
