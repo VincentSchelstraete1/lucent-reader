@@ -41,20 +41,20 @@ export type ManualActivateResponse =
   | { ok: false; reason: "sensitive_page" }
 
 
-  export const EXPLAIN_MESSAGE_TYPE = "explain" as const 
+export const EXPLAIN_MESSAGE_TYPE = "explain" as const
 
-  export type ExplainMessage = {
-    type: typeof EXPLAIN_MESSAGE_TYPE
-    text: string 
-    context: string 
-    targetGradeLevel: number
-    targetLength: TextLength
-    installId: string
-  }
+export type ExplainMessage = {
+  type: typeof EXPLAIN_MESSAGE_TYPE
+  text: string
+  context: string
+  targetGradeLevel: number
+  targetLength: TextLength
+  installId: string
+}
 
-  export type ExplainResponse =
-    | {ok: true; explanation: string}
-    | {ok: false; error: string}
+export type ExplainResponse =
+  | { ok: true; explanation: string }
+  | { ok: false; error: string }
 
 export const SUMMARIZE_MESSAGE_TYPE = "summarize" as const
 
@@ -142,4 +142,3 @@ export const OPEN_SIDE_PANEL_MESSAGE_TYPE = "open_side_panel" as const
 export type OpenSidePanelMessage = {
   type: typeof OPEN_SIDE_PANEL_MESSAGE_TYPE
 }
-

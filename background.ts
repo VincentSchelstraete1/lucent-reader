@@ -1,28 +1,22 @@
 import { BACKEND_URL } from "./lib/config"
 import {
-  SIMPLIFY_MESSAGE_TYPE,
-  type SimplifyMessage,
-  type SimplifyResponse
-} from "./lib/messages"
-import {
-  EXPLAIN_MESSAGE_TYPE,
-  type ExplainMessage,
-  type ExplainResponse
-} from "./lib/messages"
-import {
   ENSURE_DOCUMENT_MESSAGE_TYPE,
+  EXPLAIN_MESSAGE_TYPE,
+  OPEN_SIDE_PANEL_MESSAGE_TYPE,
+  SAVE_NOTE_MESSAGE_TYPE,
+  SIMPLIFY_MESSAGE_TYPE,
+  SUMMARIZE_MESSAGE_TYPE,
   type EnsureDocumentMessage,
   type EnsureDocumentResponse,
-  SAVE_NOTE_MESSAGE_TYPE,
+  type ExplainMessage,
+  type ExplainResponse,
   type SaveNoteMessage,
-  type SaveNoteResponse
-} from "./lib/messages"
-import {
-  SUMMARIZE_MESSAGE_TYPE,
+  type SaveNoteResponse,
+  type SimplifyMessage,
+  type SimplifyResponse,
   type SummarizeMessage,
   type SummarizeResponse
 } from "./lib/messages"
-import { OPEN_SIDE_PANEL_MESSAGE_TYPE } from "./lib/messages"
 import { openLucent } from "./lib/lucent-panel"
 
 // Makes the toolbar icon open Lucent's interface on click (mockup item
@@ -61,7 +55,7 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
 }
 
 async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> {
-  const response = await fetch(`${BACKEND_URL}/explain`, { //TODO: wire up in backend 
+  const response = await fetch(`${BACKEND_URL}/explain`, {
     method: "POST",
     headers: {"Content-Type" : "application/json"},
     body: JSON.stringify({
