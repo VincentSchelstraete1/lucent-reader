@@ -10,6 +10,7 @@ class Note(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text)
+    source_passage: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_type: Mapped[str] = mapped_column(String(50))
     source_url: Mapped[str | None] = mapped_column(String(255))
     document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id"))
@@ -18,4 +19,3 @@ class Note(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     document: Mapped["Document | None"] = relationship(back_populates="notes")
-

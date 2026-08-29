@@ -33,7 +33,15 @@ export function NoteCard({ note }: { note: Note }) {
       {generated ? (
         <GeneratedNoteView note={generated} />
       ) : (
-        <div className="card-body">{note.content}</div>
+        <>
+          {note.source_passage && (
+            <blockquote className="source-passage">
+              <span>Selected passage</span>
+              {note.source_passage}
+            </blockquote>
+          )}
+          <div className="card-body">{note.content}</div>
+        </>
       )}
 
       <div className="card-meta">Updated {new Date(note.updated_at).toLocaleString()}</div>

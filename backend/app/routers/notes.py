@@ -14,6 +14,7 @@ def create_note(note_request: NoteCreateRequest, db = Depends(get_db)):
     note = Note(
         title=note_request.title,
         content=note_request.content,
+        source_passage=note_request.source_passage,
         content_type=note_request.content_type,
         source_url=note_request.source_url,
         document_id=note_request.document_id,

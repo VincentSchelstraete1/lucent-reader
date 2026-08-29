@@ -134,6 +134,26 @@ h2 {
   line-height: 1.5;
 }
 
+.source-passage {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--lucent-accent);
+  background: var(--lucent-bg);
+  color: var(--lucent-caption);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.source-passage span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--lucent-accent-dark);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .card-subtext {
   font-size: 13px;
   color: var(--lucent-caption);

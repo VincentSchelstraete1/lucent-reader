@@ -139,6 +139,7 @@ async function handleSaveNote(message: SaveNoteMessage): Promise<SaveNoteRespons
     body: JSON.stringify({
       title: message.title,
       content: message.content,
+      source_passage: message.sourcePassage ?? null,
       content_type: message.contentType,
       source_url: message.sourceUrl,
       document_id: message.documentId,

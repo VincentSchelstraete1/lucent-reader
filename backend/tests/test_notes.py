@@ -38,6 +38,28 @@ def test_note_can_be_linked_to_document(client):
     }).json()
     assert note["document_id"] == document["id"]
 
+def test_generated_result_retains_its_source_passage(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://x.com"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Doc", "content": "Dense original passage"}).json()
+    response = client.post("/notes", json={
+        "title": "Clear explanation",
+        "content": "A clearer generated result",
+        "content_type": "explanation",
+        "source_passage": "Dense original passage",
+        "document_id": document["id"]
+    })
+    assert response.status_code == 200
+    assert response.json()["source_passage"] == "Dense original passage"
+
+def test_generated_result_rejects_missing_source_passage(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://x.com"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Doc", "content": "Body"}).json()
+    response = client.post("/notes", json={
+        "title": "Unlinked result", "content": "Generated", "content_type": "simplification",
+        "document_id": document["id"]
+    })
+    assert response.status_code == 422
+
 def test_note_requires_a_persisted_document(client):
     missing = client.post("/notes", json={
         "title": "orphan", "content": "must not persist", "content_type": "highlight"

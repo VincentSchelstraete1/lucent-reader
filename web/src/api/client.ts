@@ -23,6 +23,7 @@ export type Note = {
   id: number
   title: string
   content: string
+  source_passage: string | null
   content_type: string
   source_url: string | null
   document_id: number | null

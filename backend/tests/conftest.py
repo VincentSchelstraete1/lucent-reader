@@ -46,6 +46,11 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, engine, get_db
 from app.main import app  # noqa: E402 - imports models, runs create_all against the test db
 
+# The test database is disposable. Rebuild its schema once per run so model
+# changes are tested immediately; development data is migrated separately.
+Base.metadata.drop_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+
 pytest_plugins = ["ai_fixtures"]
 
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

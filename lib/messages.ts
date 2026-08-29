@@ -97,6 +97,7 @@ export type SaveNoteMessage = {
   type: typeof SAVE_NOTE_MESSAGE_TYPE
   title: string
   content: string
+  sourcePassage?: string
   contentType: SaveContentType
   sourceUrl: string
   documentId: number
