@@ -19,6 +19,20 @@ import {
 } from "./lib/messages"
 import { openLucent } from "./lib/lucent-panel"
 
+async function apiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = await response.json()
+    return typeof data.detail === "string" ? data.detail : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function requestError(error: unknown): string {
+  if (error instanceof TypeError) return "Lucent backend is unreachable"
+  return error instanceof Error ? error.message : "Something went wrong"
+}
+
 // Makes the toolbar icon open Lucent's interface on click (mockup item
 // 1) instead of a default_popup - there is no more popup.tsx, its
 // content moved into sidepanel.tsx's Settings tab. See
@@ -111,7 +125,9 @@ async function handleEnsureDocument(message: EnsureDocumentMessage): Promise<Ens
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "website", url: message.url })
   })
-  if (!sourceResponse.ok) return { ok: false, error: "Failed to save this page" }
+  if (!sourceResponse.ok) {
+    return { ok: false, error: await apiError(sourceResponse, "Source creation failed") }
+  }
   const source = await sourceResponse.json()
 
   const documentResponse = await fetch(`${BACKEND_URL}/documents`, {
@@ -123,7 +139,9 @@ async function handleEnsureDocument(message: EnsureDocumentMessage): Promise<Ens
       content: message.content
     })
   })
-  if (!documentResponse.ok) return { ok: false, error: "Failed to save this page" }
+  if (!documentResponse.ok) {
+    return { ok: false, error: await apiError(documentResponse, "Document creation failed") }
+  }
   const document = await documentResponse.json()
   return { ok: true, documentId: document.id }
 }
@@ -148,7 +166,7 @@ async function handleSaveNote(message: SaveNoteMessage): Promise<SaveNoteRespons
   })
 
   if (!response.ok) {
-    return { ok: false, error: "Save failed" }
+    return { ok: false, error: await apiError(response, "Result save failed") }
   }
 
   return { ok: true }
@@ -174,7 +192,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((err) =>
       sendResponse({
         ok: false,
-        error: err instanceof Error ? err.message : "Something went wrong"
+        error: requestError(err)
       })
     )
   }
@@ -184,7 +202,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((err) =>
       sendResponse({
         ok: false,
-        error: err instanceof Error ? err.message : "Something went wrong"
+        error: requestError(err)
       })
     )
   }
@@ -194,7 +212,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((err) =>
       sendResponse({
         ok: false,
-        error: err instanceof Error ? err.message : "Something went wrong"
+        error: requestError(err)
       })
     )
   }
@@ -204,7 +222,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((err) =>
       sendResponse({
         ok: false,
-        error: err instanceof Error ? err.message : "Something went wrong"
+        error: requestError(err)
       })
     )
   }
@@ -214,7 +232,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .catch((err) =>
       sendResponse({
         ok: false,
-        error: err instanceof Error ? err.message : "Something went wrong"
+        error: requestError(err)
       })
     )
   }

@@ -156,6 +156,7 @@ function SidePanel() {
   const [working, setWorking] = useState(false)
   const [replaceStatus, setReplaceStatus] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Settings tab state
   const [fontOverrideEnabled, setFontOverrideEnabledState] = useState(DEFAULT_FONT_OVERRIDE_ENABLED)
@@ -183,6 +184,7 @@ function SidePanel() {
     setResultError(null)
     setReplaceStatus(null)
     setSaveStatus("idle")
+    setSaveError(null)
 
     const selection = await getSelectionFromPage()
     if (!selection || selection.ok === false) {
@@ -262,6 +264,7 @@ function SidePanel() {
 
   async function handleSaveToLucent() {
     setSaveStatus("saving")
+    setSaveError(null)
     try {
       const currentTab = await getActiveTab()
       const currentSelection = await getSelectionFromPage()
@@ -295,9 +298,11 @@ function SidePanel() {
         documentId: ensureResponse.documentId
       }
       const saveResponse = (await chrome.runtime.sendMessage(saveMessage)) as SaveNoteResponse
-      setSaveStatus(saveResponse.ok ? "saved" : "error")
-    } catch {
+      if (saveResponse.ok === false) throw new Error(saveResponse.error)
+      setSaveStatus("saved")
+    } catch (error) {
       setSaveStatus("error")
+      setSaveError(error instanceof Error ? error.message : "Save failed. Try again.")
     }
   }
 
@@ -417,6 +422,7 @@ function SidePanel() {
                 ))}
               </select>
             </div>
+            {saveError && <p style={{ fontSize: 12, color: tokens.errorText, margin: "-8px 0 12px" }}>{saveError}</p>}
 
             <div
               style={{

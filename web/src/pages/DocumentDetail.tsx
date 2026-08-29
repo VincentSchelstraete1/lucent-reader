@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { api, type Document, type Note, type Quiz } from "../api/client"
+import { api, type Document, type Note, type Quiz, type Source } from "../api/client"
 import { NoteCard } from "../components/NoteCard"
 import { QuizCard } from "../components/QuizCard"
 import { Skeleton } from "../components/Skeleton"
@@ -8,7 +8,7 @@ import { Skeleton } from "../components/Skeleton"
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "loaded"; document: Document; notes: Note[]; quizzes: Quiz[] }
+  | { status: "loaded"; document: Document; source: Source; notes: Note[]; quizzes: Quiz[] }
 
 type ActionState = "idle" | "working" | "error"
 
@@ -23,11 +23,14 @@ export function DocumentDetail() {
 
   function load() {
     setState({ status: "loading" })
-    Promise.all([api.getDocument(id), api.getNotes(), api.getQuizzesForDocument(id)])
-      .then(([document, notes, quizzes]) => {
+    api.getDocument(id).then((document) =>
+      Promise.all([Promise.resolve(document), api.getSource(document.source_id), api.getNotes(), api.getQuizzesForDocument(id)])
+    )
+      .then(([document, source, notes, quizzes]) => {
         setState({
           status: "loaded",
           document,
+          source,
           notes: notes.filter((n) => n.document_id === id),
           quizzes
         })
@@ -94,6 +97,11 @@ export function DocumentDetail() {
             <p className="page-subtitle">
               Updated {new Date(state.document.updated_at).toLocaleString()}
             </p>
+            {state.source.url && (
+              <a className="source-url" href={state.source.url} target="_blank" rel="noreferrer">
+                {state.source.url}
+              </a>
+            )}
           </div>
 
           <div className="document-content">{state.document.content}</div>
