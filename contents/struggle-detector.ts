@@ -1333,6 +1333,9 @@ async function saveNote(
   options?: { title?: string; tags?: string[] }
 ): Promise<SaveNoteResponse> {
   const documentId = await ensureDocumentId()
+  if (!documentId) {
+    return { ok: false, error: "Could not save the source page. Nothing was saved." }
+  }
   const title = options?.title ?? (content.length > 80 ? `${content.slice(0, 80)}…` : content)
 
   const message: SaveNoteMessage = {
@@ -1341,7 +1344,7 @@ async function saveNote(
     content,
     contentType,
     sourceUrl: location.href,
-    documentId: documentId ?? undefined,
+    documentId,
     tags: options?.tags
   }
 

@@ -262,6 +262,9 @@ function SidePanel() {
         content: selection.context
       }
       const ensureResponse = (await chrome.runtime.sendMessage(ensureMessage)) as EnsureDocumentResponse
+      if (ensureResponse.ok === false) {
+        throw new Error(ensureResponse.error)
+      }
 
       const saveMessage: SaveNoteMessage = {
         type: SAVE_NOTE_MESSAGE_TYPE,
@@ -269,7 +272,7 @@ function SidePanel() {
         content: selection.text,
         contentType: "highlight",
         sourceUrl: tab.url,
-        documentId: ensureResponse.ok ? ensureResponse.documentId : undefined
+        documentId: ensureResponse.documentId
       }
       const saveResponse = (await chrome.runtime.sendMessage(saveMessage)) as SaveNoteResponse
       setSaveStatus(saveResponse.ok ? "saved" : "error")

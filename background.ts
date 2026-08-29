@@ -129,6 +129,10 @@ async function handleEnsureDocument(message: EnsureDocumentMessage): Promise<Ens
 }
 
 async function handleSaveNote(message: SaveNoteMessage): Promise<SaveNoteResponse> {
+  if (!message.documentId) {
+    return { ok: false, error: "A saved document is required before saving this result" }
+  }
+
   const response = await fetch(`${BACKEND_URL}/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -137,7 +141,7 @@ async function handleSaveNote(message: SaveNoteMessage): Promise<SaveNoteRespons
       content: message.content,
       content_type: message.contentType,
       source_url: message.sourceUrl,
-      document_id: message.documentId ?? null,
+      document_id: message.documentId,
       tags: message.tags ?? null
     })
   })

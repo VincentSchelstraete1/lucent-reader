@@ -6,7 +6,7 @@ class NoteCreateRequest(BaseModel):
     content: str
     content_type: str
     source_url: str | None = None
-    document_id: int | None = None
+    document_id: int
     tags: list[str] | None = None
 
 class NoteResponse(BaseModel):

@@ -2,11 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.schemas.note import NoteCreateRequest, NoteResponse, NoteUpdateRequest
 from app.database import get_db
 from app.models.note import Note
+from app.models.document import Document
 from sqlalchemy import select
 router = APIRouter()
 
 @router.post("/notes", response_model=NoteResponse)
 def create_note(note_request: NoteCreateRequest, db = Depends(get_db)):
+    if not db.get(Document, note_request.document_id):
+        raise HTTPException(status_code=404, detail="Document not found; note was not saved")
+
     note = Note(
         title=note_request.title,
         content=note_request.content,

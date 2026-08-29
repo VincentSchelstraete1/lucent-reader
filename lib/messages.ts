@@ -99,7 +99,7 @@ export type SaveNoteMessage = {
   content: string
   contentType: SaveContentType
   sourceUrl: string
-  documentId?: number
+  documentId: number
   tags?: string[]
 }
 
