@@ -1,11 +1,21 @@
 import { useState, type FormEvent } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { authAdapter } from "../../lib/authAdapter"
+import { useAuth } from "../../lib/AuthContext"
 import styles from "./auth.module.css"
 
 export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   const [showEmailForm, setShowEmailForm] = useState(false)
   const [notice, setNotice] = useState("")
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { continueAsDevelopmentUser } = useAuth()
+
+  function handleDevelopmentLogin() {
+    continueAsDevelopmentUser()
+    const requestedPath = (location.state as { from?: string } | null)?.from
+    navigate(requestedPath?.startsWith("/") ? requestedPath : "/app", { replace: true })
+  }
 
   async function handleAuth(provider: "google" | "email", e?: FormEvent) {
     e?.preventDefault()
@@ -40,6 +50,12 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
       )}
 
       {notice && <p className={styles.authNotice} role="status">{notice}</p>}
+
+      {import.meta.env.DEV && (
+        <button className={styles.developmentBtn} onClick={handleDevelopmentLogin}>
+          Continue as development user
+        </button>
+      )}
 
       <p className={styles.switchMode}>
         {mode === "login" ? (

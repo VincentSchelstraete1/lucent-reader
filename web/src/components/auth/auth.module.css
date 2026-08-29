@@ -98,6 +98,7 @@
   margin: 0 0 22px;
 }
 .authNotice{padding:10px;border-radius:8px;background:#f1ede4;color:var(--lm-card-caption);font-size:12px;line-height:1.45}
+.developmentBtn{width:100%;margin-top:14px;padding:10px 14px;border:1px dashed var(--lm-moss);border-radius:var(--lucent-radius-control);background:#eef1e8;color:var(--lm-card-text);font:600 13px var(--lucent-font-ui);cursor:pointer}.developmentBtn:hover{background:#e2e9dc}
 
 .googleBtn {
   width: 100%;
@@ -198,6 +199,7 @@
 }
 
 .googleBtn:focus-visible,
+.developmentBtn:focus-visible,
 .emailLink:focus-visible,
 .input:focus-visible,
 .submitBtn:focus-visible,

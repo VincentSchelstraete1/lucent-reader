@@ -7,6 +7,7 @@ import { LandingPage } from "./pages/LandingPage"
 import { AuthPage } from "./pages/AuthPage"
 import { OnboardingPage } from "./pages/OnboardingPage"
 import { AppWalkthrough } from "./components/walkthrough/AppWalkthrough"
+import { ProtectedRoute } from "./components/auth/ProtectedRoute"
 
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
@@ -35,11 +36,13 @@ export function App() {
         <Route path="/signup" element={<AuthPage mode="signup" />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
 
-        <Route element={<AppLayout />}>
-          <Route path="/app" element={<Library />} />
-          <Route path="/sources/:sourceId" element={<SourceDetail />} />
-          <Route path="/documents/:documentId" element={<DocumentDetail />} />
-          <Route path="/quizzes/:quizId" element={<QuizPage />} />
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppLayout />}>
+            <Route path="/app" element={<Library />} />
+            <Route path="/sources/:sourceId" element={<SourceDetail />} />
+            <Route path="/documents/:documentId" element={<DocumentDetail />} />
+            <Route path="/quizzes/:quizId" element={<QuizPage />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
