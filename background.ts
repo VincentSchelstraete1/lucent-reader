@@ -1,4 +1,4 @@
-import { BACKEND_URL } from "./lib/config"
+import { authenticatedFetch, authStatus, login, logout } from "./lib/extension-auth"
 import {
   ENSURE_DOCUMENT_MESSAGE_TYPE,
   EXPLAIN_MESSAGE_TYPE,
@@ -6,6 +6,9 @@ import {
   SAVE_NOTE_MESSAGE_TYPE,
   SIMPLIFY_MESSAGE_TYPE,
   SUMMARIZE_MESSAGE_TYPE,
+  AUTH_STATUS_MESSAGE_TYPE,
+  AUTH_LOGIN_MESSAGE_TYPE,
+  AUTH_LOGOUT_MESSAGE_TYPE,
   type EnsureDocumentMessage,
   type EnsureDocumentResponse,
   type ExplainMessage,
@@ -33,6 +36,35 @@ function requestError(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong"
 }
 
+function text(value: unknown, max = 1_000_000): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max
+}
+
+function validAiMessage(message: unknown): message is SimplifyMessage | ExplainMessage | SummarizeMessage {
+  if (!message || typeof message !== "object") return false
+  const value = message as Record<string, unknown>
+  return text(value.text) && Number.isInteger(value.targetGradeLevel) && typeof value.installId === "string" &&
+    (value.targetLength === "shorter" || value.targetLength === "same" || value.targetLength === "longer") &&
+    (value.type !== EXPLAIN_MESSAGE_TYPE || text(value.context))
+}
+
+function validEnsureDocument(message: unknown): message is EnsureDocumentMessage {
+  if (!message || typeof message !== "object") return false
+  const value = message as Record<string, unknown>
+  if (!text(value.url, 4096) || !text(value.title, 255) || !text(value.content)) return false
+  try { return ["http:", "https:"].includes(new URL(value.url).protocol) } catch { return false }
+}
+
+function validSaveNote(message: unknown): message is SaveNoteMessage {
+  if (!message || typeof message !== "object") return false
+  const value = message as Record<string, unknown>
+  let sourceUrlValid = false
+  try { sourceUrlValid = text(value.sourceUrl, 4096) && ["http:", "https:"].includes(new URL(value.sourceUrl).protocol) } catch { sourceUrlValid = false }
+  return sourceUrlValid && text(value.title, 255) && text(value.content) && Number.isInteger(value.documentId) && Number(value.documentId) > 0 &&
+    ["highlight", "explanation", "simplification", "note", "summary"].includes(String(value.contentType)) &&
+    (value.sourcePassage === undefined || text(value.sourcePassage))
+}
+
 // Makes the toolbar icon open Lucent's interface on click (mockup item
 // 1) instead of a default_popup - there is no more popup.tsx, its
 // content moved into sidepanel.tsx's Settings tab. See
@@ -44,7 +76,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 
 async function handleSimplify(message: SimplifyMessage): Promise<SimplifyResponse> {
-  const response = await fetch(`${BACKEND_URL}/simplify`, {
+  const response = await authenticatedFetch(`/simplify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -69,7 +101,7 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
 }
 
 async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> {
-  const response = await fetch(`${BACKEND_URL}/explain`, {
+  const response = await authenticatedFetch(`/explain`, {
     method: "POST",
     headers: {"Content-Type" : "application/json"},
     body: JSON.stringify({
@@ -95,7 +127,7 @@ async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> 
 }
 
 async function handleSummarize(message: SummarizeMessage): Promise<SummarizeResponse> {
-  const response = await fetch(`${BACKEND_URL}/summarize`, {
+  const response = await authenticatedFetch(`/summarize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -120,7 +152,7 @@ async function handleSummarize(message: SummarizeMessage): Promise<SummarizeResp
 }
 
 async function handleEnsureDocument(message: EnsureDocumentMessage): Promise<EnsureDocumentResponse> {
-  const sourceResponse = await fetch(`${BACKEND_URL}/sources`, {
+  const sourceResponse = await authenticatedFetch(`/sources`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "website", url: message.url })
@@ -130,7 +162,7 @@ async function handleEnsureDocument(message: EnsureDocumentMessage): Promise<Ens
   }
   const source = await sourceResponse.json()
 
-  const documentResponse = await fetch(`${BACKEND_URL}/documents`, {
+  const documentResponse = await authenticatedFetch(`/documents`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -151,7 +183,7 @@ async function handleSaveNote(message: SaveNoteMessage): Promise<SaveNoteRespons
     return { ok: false, error: "A saved document is required before saving this result" }
   }
 
-  const response = await fetch(`${BACKEND_URL}/notes`, {
+  const response = await authenticatedFetch(`/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -186,7 +218,21 @@ chrome.runtime.onInstalled.addListener((details) => {
 })
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const privilegedExtensionPage = sender.url?.startsWith(chrome.runtime.getURL("")) ?? false
+  if (message?.type === AUTH_STATUS_MESSAGE_TYPE && privilegedExtensionPage) {
+    authStatus().then((status) => sendResponse({ ok: true, ...status })).catch((error) => sendResponse({ ok: false, error: requestError(error) }))
+    return true
+  }
+  if (message?.type === AUTH_LOGIN_MESSAGE_TYPE && privilegedExtensionPage) {
+    login().then(() => sendResponse({ ok: true, authenticated: true })).catch((error) => sendResponse({ ok: false, error: requestError(error) }))
+    return true
+  }
+  if (message?.type === AUTH_LOGOUT_MESSAGE_TYPE && privilegedExtensionPage) {
+    logout().then(() => sendResponse({ ok: true, authenticated: false })).catch((error) => sendResponse({ ok: false, error: requestError(error) }))
+    return true
+  }
   if (message?.type === SIMPLIFY_MESSAGE_TYPE){
+    if (!validAiMessage(message)) { sendResponse({ ok: false, error: "Invalid simplify request" }); return false }
     handleSimplify(message as SimplifyMessage)
     .then(sendResponse)
     .catch((err) =>
@@ -197,6 +243,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
   }
   else if (message?.type === EXPLAIN_MESSAGE_TYPE){
+    if (!validAiMessage(message)) { sendResponse({ ok: false, error: "Invalid explain request" }); return false }
     handleExplain(message as ExplainMessage)
     .then(sendResponse)
     .catch((err) =>
@@ -207,6 +254,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
   }
   else if (message?.type === ENSURE_DOCUMENT_MESSAGE_TYPE){
+    if (!validEnsureDocument(message)) { sendResponse({ ok: false, error: "Invalid document request" }); return false }
     handleEnsureDocument(message as EnsureDocumentMessage)
     .then(sendResponse)
     .catch((err) =>
@@ -217,6 +265,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
   }
   else if (message?.type === SAVE_NOTE_MESSAGE_TYPE){
+    if (!validSaveNote(message)) { sendResponse({ ok: false, error: "Invalid save request" }); return false }
     handleSaveNote(message as SaveNoteMessage)
     .then(sendResponse)
     .catch((err) =>
@@ -227,6 +276,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
   }
   else if (message?.type === SUMMARIZE_MESSAGE_TYPE){
+    if (!validAiMessage(message)) { sendResponse({ ok: false, error: "Invalid summarize request" }); return false }
     handleSummarize(message as SummarizeMessage)
     .then(sendResponse)
     .catch((err) =>

@@ -32,6 +32,10 @@ import {
   type EnsureDocumentMessage,
   type EnsureDocumentResponse,
   SAVE_NOTE_MESSAGE_TYPE,
+  AUTH_STATUS_MESSAGE_TYPE,
+  AUTH_LOGIN_MESSAGE_TYPE,
+  AUTH_LOGOUT_MESSAGE_TYPE,
+  type AuthStatusResponse,
   type SaveNoteMessage,
   type SaveNoteResponse
 } from "~lib/messages"
@@ -145,6 +149,7 @@ const QUICK_ACTION_LABELS: Record<QuickAction, string> = {
 
 function SidePanel() {
   const [tab, setTab] = useState<Tab>("assist")
+  const [auth, setAuth] = useState<{ loading: boolean; authenticated: boolean; displayName?: string; error?: string }>({ loading: true, authenticated: false })
 
   // Assist tab state
   const [level, setLevel] = useState(DEFAULT_GRADE_LEVEL)
@@ -169,7 +174,18 @@ function SidePanel() {
     getTargetLength().then(setTargetLengthState)
     getFontOverrideEnabled().then(setFontOverrideEnabledState)
     getAutoActivateEnabled().then(setAutoActivateEnabledState)
+    chrome.runtime.sendMessage({ type: AUTH_STATUS_MESSAGE_TYPE }).then((response: AuthStatusResponse) => {
+      if (response.ok === false) setAuth({ loading: false, authenticated: false, error: response.error })
+      else setAuth({ loading: false, authenticated: response.authenticated, displayName: response.displayName })
+    })
   }, [])
+
+  async function handleAuth() {
+    setAuth((current) => ({ ...current, loading: true, error: undefined }))
+    const response = await chrome.runtime.sendMessage({ type: auth.authenticated ? AUTH_LOGOUT_MESSAGE_TYPE : AUTH_LOGIN_MESSAGE_TYPE }) as AuthStatusResponse
+    if (response.ok === false) setAuth({ loading: false, authenticated: false, error: response.error })
+    else setAuth({ loading: false, authenticated: response.authenticated, displayName: response.displayName })
+  }
 
   async function handleLevelChange(next: number) {
     setLevel(next)
@@ -384,6 +400,12 @@ function SidePanel() {
           ✕
         </button>
       </div>
+
+      <div style={{ margin: "10px 16px 0", padding: "8px 10px", border: `1px solid ${tokens.captionText}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 12, color: tokens.captionText }}>{auth.authenticated ? auth.displayName || "Signed in" : "Sign in to use Lucent"}</span>
+        <button onClick={handleAuth} disabled={auth.loading} style={{ ...secondaryButtonStyle, padding: "6px 10px" }}>{auth.loading ? "Checking…" : auth.authenticated ? "Sign out" : "Sign in"}</button>
+      </div>
+      {auth.error && <p role="alert" style={{ margin: "6px 16px 0", color: tokens.errorText, fontSize: 12 }}>{auth.error}</p>}
 
       <div style={{ display: "flex", padding: "12px 16px 0", gap: 8 }}>
         <TabButton label="Assist" active={tab === "assist"} onClick={() => setTab("assist")} />

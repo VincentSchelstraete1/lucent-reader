@@ -9,6 +9,11 @@
 // regardless of which site the content script is running on.
 import type { TextLength } from "./text-length"
 
+export const AUTH_STATUS_MESSAGE_TYPE = "auth_status" as const
+export const AUTH_LOGIN_MESSAGE_TYPE = "auth_login" as const
+export const AUTH_LOGOUT_MESSAGE_TYPE = "auth_logout" as const
+export type AuthStatusResponse = { ok: true; authenticated: boolean; displayName?: string } | { ok: false; error: string }
+
 export const SIMPLIFY_MESSAGE_TYPE = "simplify" as const
 
 export type SimplifyMessage = {

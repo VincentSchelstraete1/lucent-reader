@@ -14,6 +14,14 @@ import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
 app = FastAPI()
 
+@app.middleware("http")
+async def prevent_auth_response_caching(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/auth/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 # Chrome extension IDs differ between "Load unpacked" (local dev) and the
 # Web Store's published copy, so both need to be listed explicitly here -
 # there's no wildcard for extension origins the way there is for domains.

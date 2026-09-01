@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models.auth import User, WebSession
+from app.models.auth import ExtensionAccessToken, ExtensionGrant, User, WebSession
 from app.security import token_hash, utcnow
 
 
@@ -37,8 +37,33 @@ def get_current_session(request: Request, db: Session = Depends(get_db)) -> WebS
     return session
 
 
-def get_current_user(session: WebSession = Depends(get_current_session), db: Session = Depends(get_db)) -> User:
-    user = db.get(User, session.user_id)
+def _bearer_user(request: Request, db: Session) -> User | None:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, credential = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not credential:
+        return None
+    now = utcnow()
+    row = db.execute(
+        select(ExtensionAccessToken, ExtensionGrant)
+        .join(ExtensionGrant, ExtensionGrant.id == ExtensionAccessToken.grant_id)
+        .where(
+            ExtensionAccessToken.token_hash == token_hash(credential),
+            ExtensionAccessToken.expires_at > now,
+            ExtensionAccessToken.revoked_at.is_(None),
+            ExtensionGrant.revoked_at.is_(None),
+        )
+    ).one_or_none()
+    if not row:
+        return None
+    token, grant = row
+    grant.last_seen_at = now
+    db.commit()
+    return db.get(User, grant.user_id)
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    session = _active_cookie_session(request, db)
+    user = db.get(User, session.user_id) if session else _bearer_user(request, db)
     if not user or user.status != "active":
         raise AUTHENTICATION_REQUIRED
     return user
@@ -46,8 +71,15 @@ def get_current_user(session: WebSession = Depends(get_current_session), db: Ses
 
 def require_csrf(
     request: Request,
-    session: WebSession = Depends(get_current_session),
+    db: Session = Depends(get_db),
 ) -> None:
+    if request.headers.get("authorization", "").lower().startswith("bearer "):
+        if not _bearer_user(request, db):
+            raise AUTHENTICATION_REQUIRED
+        return
+    session = _active_cookie_session(request, db)
+    if not session:
+        raise AUTHENTICATION_REQUIRED
     origin = request.headers.get("origin")
     if not origin or origin.rstrip("/") not in settings.web_origins:
         raise HTTPException(status_code=403, detail="Request origin rejected")
