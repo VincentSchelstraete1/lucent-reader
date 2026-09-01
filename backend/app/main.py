@@ -1,4 +1,3 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -8,6 +7,9 @@ from app.routers.notes import router as notes_router
 from app.routers.sources import router as sources_router
 from app.routers.documents import router as documents_router
 from app.routers.quizzes import router as quizzes_router
+from app.routers.auth import router as auth_router
+from app.config import settings
+import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
 
 app = FastAPI()
@@ -24,17 +26,12 @@ app = FastAPI()
 # published ID (shown on the dashboard, and later on the extension's
 # chrome://extensions card for real installs) - add it as a second entry
 # in .env at that point. That's a config change, not a code change.
-ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get("ALLOWED_ORIGINS", "").split(",")
-    if origin.strip()
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(settings.web_origins),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
 )
 
 @app.get("/")
@@ -46,6 +43,7 @@ app.include_router(notes_router, tags=["Notes"])
 app.include_router(sources_router, tags=["Sources"])
 app.include_router(documents_router, tags=["Documents"])
 app.include_router(quizzes_router, tags=["Quizzes"])
+app.include_router(auth_router, tags=["Authentication"])
 
 
 
@@ -60,4 +58,3 @@ app.include_router(quizzes_router, tags=["Quizzes"])
 
 
     
-

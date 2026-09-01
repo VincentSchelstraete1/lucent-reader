@@ -8,10 +8,7 @@ from sqlalchemy import engine_from_config, pool
 load_dotenv()
 
 from app.database import Base
-from app.models.document import Document  # noqa: F401
-from app.models.note import Note  # noqa: F401
-from app.models.quiz import Quiz, QuizAttempt  # noqa: F401
-from app.models.source import Source  # noqa: F401
+import app.models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])

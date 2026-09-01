@@ -17,6 +17,9 @@ if not urlsplit(_dev_url.replace("postgresql+psycopg://", "postgresql://")).path
     base, _, db_name = _dev_url.rpartition("/")
     _dev_url = f"{base}/{db_name}_test"
 os.environ["DATABASE_URL"] = _dev_url
+os.environ["APP_ENV"] = "test"
+os.environ["ALLOWED_ORIGINS"] = "http://testserver"
+os.environ["API_ORIGIN"] = "http://testserver"
 
 
 def _ensure_database_exists(url: str) -> None:
@@ -45,6 +48,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, engine, get_db
 from app.main import app  # noqa: E402 - imports models, runs create_all against the test db
+from app.config import settings
+from app.models.auth import User, WebSession
+from app.security import token_hash, utcnow
+from datetime import timedelta
 
 # The test database is disposable. Rebuild its schema once per run so model
 # changes are tested immediately; development data is migrated separately.
@@ -69,6 +76,22 @@ app.dependency_overrides[get_db] = _override_get_db
 
 @pytest.fixture()
 def client():
+    with TestSessionLocal() as db:
+        user = User(provider="test", provider_subject="default-user", email="test@lucent.local", email_verified=True)
+        db.add(user)
+        db.flush()
+        credential, csrf = "test-session-credential", "test-csrf-token"
+        now = utcnow()
+        db.add(WebSession(user_id=user.id, credential_hash=token_hash(credential), csrf_hash=token_hash(csrf), idle_expires_at=now + timedelta(hours=1), absolute_expires_at=now + timedelta(hours=2)))
+        db.commit()
+    test_client = TestClient(app, headers={"Origin": "http://testserver", "X-CSRF-Token": csrf})
+    test_client.cookies.set(settings.session_cookie_name, credential)
+    test_client.cookies.set("lucent_csrf", csrf)
+    return test_client
+
+
+@pytest.fixture()
+def unauthenticated_client():
     return TestClient(app)
 
 

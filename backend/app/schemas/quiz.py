@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from uuid import UUID
 
 class QuizQuestion(BaseModel):
     question: str
@@ -25,6 +26,7 @@ class QuizAttemptCreateRequest(BaseModel):
 
 class QuizAttemptResponse(BaseModel):
     id: int
+    user_id: UUID
     quiz_id: int
     score: int
     total: int

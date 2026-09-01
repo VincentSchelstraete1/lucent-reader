@@ -11,15 +11,24 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   const location = useLocation()
   const { continueAsDevelopmentUser } = useAuth()
 
-  function handleDevelopmentLogin() {
-    continueAsDevelopmentUser()
-    const requestedPath = (location.state as { from?: string } | null)?.from
-    navigate(requestedPath?.startsWith("/") ? requestedPath : "/app", { replace: true })
+  async function handleDevelopmentLogin() {
+    try {
+      await continueAsDevelopmentUser()
+      const requestedPath = (location.state as { from?: string } | null)?.from
+      navigate(requestedPath?.startsWith("/") ? requestedPath : "/app", { replace: true })
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Development login failed")
+    }
   }
 
   async function handleAuth(provider: "google" | "email", e?: FormEvent) {
     e?.preventDefault()
-    const result = provider === "google" ? await authAdapter.continueWithGoogle() : await authAdapter.continueWithEmail()
+    if (provider === "google") {
+      const requestedPath = (location.state as { from?: string } | null)?.from
+      authAdapter.continueWithGoogle(requestedPath)
+      return
+    }
+    const result = await authAdapter.continueWithEmail()
     setNotice(result.message)
   }
 
