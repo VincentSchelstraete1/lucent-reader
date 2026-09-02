@@ -53,7 +53,11 @@ function parseSafeSvg(markup: string): SVGElement {
   if (documentNode.querySelector("parsererror") || documentNode.documentElement.tagName.toLowerCase() !== "svg") {
     throw new Error("Mermaid returned an invalid diagram")
   }
-  documentNode.querySelectorAll("script, foreignObject").forEach((node) => node.remove())
+  // Mermaid may place flowchart labels in foreignObject nodes even when
+  // htmlLabels is disabled. Removing them leaves empty node boxes. Mermaid is
+  // configured with securityLevel=strict and labels are escaped below; keep
+  // the label containers while still sanitizing their contents/attributes.
+  documentNode.querySelectorAll("script").forEach((node) => node.remove())
   documentNode.querySelectorAll("*").forEach((node) => {
     for (const attribute of [...node.attributes]) {
       const value = attribute.value.trim().toLowerCase()

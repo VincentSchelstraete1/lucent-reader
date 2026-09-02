@@ -8,6 +8,9 @@ describe("processToMermaid", () => {
     expect(definition).toContain("flowchart LR")
     expect(definition).toContain("node0 --> node1")
     expect(definition).toContain("node1 --> node2")
+    expect(definition).toContain("prepare")
+    expect(definition).toContain("execute")
+    expect(definition).toContain("review")
   })
 
   it("escapes markup in labels", () => {
