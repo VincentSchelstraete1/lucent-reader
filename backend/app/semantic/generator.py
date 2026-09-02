@@ -109,8 +109,8 @@ class HybridSemanticGenerator:
             candidate = self.model_generator.generate(block, decision)
             if candidate.type == decision.type: return candidate
         except Exception:
-            pass
-        return _plain(block)
+            return deterministic
+        return deterministic
 
 class AnthropicSemanticGenerator:
     """Server-only structured extractor. Importing the Anthropic client is lazy so
