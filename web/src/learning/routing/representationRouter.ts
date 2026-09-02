@@ -166,3 +166,6 @@ export function routeRepresentation(sourceText: string): RepresentationRoute {
   }
   return { type: strongest, confidence: strongestScore, scores, reasons: signals[strongest].reasons }
 }
+
+// Alias used by the reproducible experiment harness to name the frozen baseline.
+export const routeRepresentationBaseline = routeRepresentation
