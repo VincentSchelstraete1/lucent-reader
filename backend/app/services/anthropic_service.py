@@ -174,7 +174,7 @@ QUIZ_QUESTIONS_SCHEMA = {
 }
 
 
-def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int) -> dict:
+def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int, timeout: float | None = None) -> dict:
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=max_tokens,
@@ -186,7 +186,8 @@ def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: 
             }
         ],
         tool_choice={"type": "tool", "name": tool_name},
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        **({"timeout": timeout} if timeout is not None else {})
     )
 
     for block in message.content:

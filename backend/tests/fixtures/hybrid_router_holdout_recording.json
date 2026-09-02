@@ -1,0 +1,268 @@
+{
+  "holdout_size": 28,
+  "deterministic_only_accuracy": 0.6429,
+  "classifier_only_accuracy": 0.9643,
+  "hybrid_accuracy": 0.9643,
+  "deterministic_coverage": 0.5,
+  "deterministic_subset_accuracy": 1.0,
+  "fallback_rate": 0.5,
+  "fallback_accuracy": 0.9286,
+  "regressions": [],
+  "total_classifier_calls": 28,
+  "total_latency_seconds": 21.02,
+  "average_latency_seconds": 0.751,
+  "rows": [
+    {
+      "id": "causal-02",
+      "expected": "causal",
+      "deterministic": "causal",
+      "classifier": "causal",
+      "fallback_triggered": false,
+      "hybrid": "causal",
+      "latency": 1.211
+    },
+    {
+      "id": "causal-03",
+      "expected": "causal",
+      "deterministic": "causal",
+      "classifier": "causal",
+      "fallback_triggered": false,
+      "hybrid": "causal",
+      "latency": 0.884
+    },
+    {
+      "id": "causal-08",
+      "expected": "causal",
+      "deterministic": "causal",
+      "classifier": "causal",
+      "fallback_triggered": false,
+      "hybrid": "causal",
+      "latency": 0.703
+    },
+    {
+      "id": "causal-09",
+      "expected": "causal",
+      "deterministic": "plain_text",
+      "classifier": "causal",
+      "fallback_triggered": true,
+      "hybrid": "causal",
+      "latency": 0.858
+    },
+    {
+      "id": "comparison-07",
+      "expected": "comparison",
+      "deterministic": "plain_text",
+      "classifier": "comparison",
+      "fallback_triggered": true,
+      "hybrid": "comparison",
+      "latency": 0.66
+    },
+    {
+      "id": "comparison-14",
+      "expected": "comparison",
+      "deterministic": "plain_text",
+      "classifier": "comparison",
+      "fallback_triggered": true,
+      "hybrid": "comparison",
+      "latency": 0.708
+    },
+    {
+      "id": "comparison-15",
+      "expected": "comparison",
+      "deterministic": "plain_text",
+      "classifier": "comparison",
+      "fallback_triggered": true,
+      "hybrid": "comparison",
+      "latency": 0.653
+    },
+    {
+      "id": "comparison-16",
+      "expected": "comparison",
+      "deterministic": "comparison",
+      "classifier": "comparison",
+      "fallback_triggered": false,
+      "hybrid": "comparison",
+      "latency": 0.71
+    },
+    {
+      "id": "concept_map-08",
+      "expected": "concept_map",
+      "deterministic": "concept_map",
+      "classifier": "concept_map",
+      "fallback_triggered": false,
+      "hybrid": "concept_map",
+      "latency": 0.827
+    },
+    {
+      "id": "concept_map-09",
+      "expected": "concept_map",
+      "deterministic": "plain_text",
+      "classifier": "concept_map",
+      "fallback_triggered": true,
+      "hybrid": "concept_map",
+      "latency": 0.711
+    },
+    {
+      "id": "concept_map-12",
+      "expected": "concept_map",
+      "deterministic": "plain_text",
+      "classifier": "plain_text",
+      "fallback_triggered": true,
+      "hybrid": "plain_text",
+      "latency": 0.721
+    },
+    {
+      "id": "concept_map-13",
+      "expected": "concept_map",
+      "deterministic": "plain_text",
+      "classifier": "concept_map",
+      "fallback_triggered": true,
+      "hybrid": "concept_map",
+      "latency": 0.723
+    },
+    {
+      "id": "hierarchy-10",
+      "expected": "hierarchy",
+      "deterministic": "hierarchy",
+      "classifier": "hierarchy",
+      "fallback_triggered": false,
+      "hybrid": "hierarchy",
+      "latency": 0.813
+    },
+    {
+      "id": "hierarchy-11",
+      "expected": "hierarchy",
+      "deterministic": "hierarchy",
+      "classifier": "hierarchy",
+      "fallback_triggered": false,
+      "hybrid": "hierarchy",
+      "latency": 0.717
+    },
+    {
+      "id": "hierarchy-12",
+      "expected": "hierarchy",
+      "deterministic": "hierarchy",
+      "classifier": "hierarchy",
+      "fallback_triggered": false,
+      "hybrid": "hierarchy",
+      "latency": 0.702
+    },
+    {
+      "id": "hierarchy-13",
+      "expected": "hierarchy",
+      "deterministic": "hierarchy",
+      "classifier": "hierarchy",
+      "fallback_triggered": false,
+      "hybrid": "hierarchy",
+      "latency": 0.763
+    },
+    {
+      "id": "plain_text-01",
+      "expected": "plain_text",
+      "deterministic": "plain_text",
+      "classifier": "plain_text",
+      "fallback_triggered": true,
+      "hybrid": "plain_text",
+      "latency": 0.773
+    },
+    {
+      "id": "plain_text-02",
+      "expected": "plain_text",
+      "deterministic": "plain_text",
+      "classifier": "plain_text",
+      "fallback_triggered": true,
+      "hybrid": "plain_text",
+      "latency": 0.835
+    },
+    {
+      "id": "plain_text-03",
+      "expected": "plain_text",
+      "deterministic": "plain_text",
+      "classifier": "plain_text",
+      "fallback_triggered": true,
+      "hybrid": "plain_text",
+      "latency": 0.558
+    },
+    {
+      "id": "plain_text-13",
+      "expected": "plain_text",
+      "deterministic": "plain_text",
+      "classifier": "plain_text",
+      "fallback_triggered": true,
+      "hybrid": "plain_text",
+      "latency": 0.726
+    },
+    {
+      "id": "process-08",
+      "expected": "process",
+      "deterministic": "plain_text",
+      "classifier": "process",
+      "fallback_triggered": true,
+      "hybrid": "process",
+      "latency": 0.757
+    },
+    {
+      "id": "process-09",
+      "expected": "process",
+      "deterministic": "process",
+      "classifier": "process",
+      "fallback_triggered": false,
+      "hybrid": "process",
+      "latency": 0.73
+    },
+    {
+      "id": "process-12",
+      "expected": "process",
+      "deterministic": "plain_text",
+      "classifier": "process",
+      "fallback_triggered": true,
+      "hybrid": "process",
+      "latency": 0.812
+    },
+    {
+      "id": "process-13",
+      "expected": "process",
+      "deterministic": "plain_text",
+      "classifier": "process",
+      "fallback_triggered": true,
+      "hybrid": "process",
+      "latency": 0.744
+    },
+    {
+      "id": "quantitative-01",
+      "expected": "quantitative",
+      "deterministic": "quantitative",
+      "classifier": "quantitative",
+      "fallback_triggered": false,
+      "hybrid": "quantitative",
+      "latency": 0.73
+    },
+    {
+      "id": "quantitative-06",
+      "expected": "quantitative",
+      "deterministic": "quantitative",
+      "classifier": "quantitative",
+      "fallback_triggered": false,
+      "hybrid": "quantitative",
+      "latency": 0.669
+    },
+    {
+      "id": "quantitative-14",
+      "expected": "quantitative",
+      "deterministic": "quantitative",
+      "classifier": "quantitative",
+      "fallback_triggered": false,
+      "hybrid": "quantitative",
+      "latency": 0.59
+    },
+    {
+      "id": "quantitative-15",
+      "expected": "quantitative",
+      "deterministic": "quantitative",
+      "classifier": "quantitative",
+      "fallback_triggered": false,
+      "hybrid": "quantitative",
+      "latency": 0.734
+    }
+  ]
+}
