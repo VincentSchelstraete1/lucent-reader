@@ -122,39 +122,55 @@ async function postForm<T>(path: string, body: FormData): Promise<T> {
   return response.json()
 }
 
+// Format-neutral provenance pointer, mirroring backend SourceLocation.
+// kind="page" (PDF): index is the physical page number.
+// kind="slide" (PPTX): index is the slide number - never page_number, which
+// stays a PDF-only legacy field so "page" never silently means "slide".
+// kind="document" (DOCX): index is null; sequence_id identifies position
+// within the document's ordered structure (DOCX has no physical pages).
+export type SourceLocation = {
+  kind: "page" | "slide" | "document"
+  index: number | null
+  sequence_id: string | null
+}
+
 export type RawContentBlock = {
   id: string
-  page_number: number
+  page_number: number | null
   type: "text" | "image" | "table" | "unknown"
   text: string | null
   bbox: [number, number, number, number] | null
   reading_order: number
   image_id: string | null
+  location: SourceLocation | null
 }
 
 export type RawImage = {
   id: string
-  page_number: number
+  page_number: number | null
   bbox: [number, number, number, number] | null
   width: number | null
   height: number | null
   mime_type: string | null
   caption: string | null
   asset_reference: string
+  location: SourceLocation | null
 }
 
 export type RawPage = {
-  page_number: number
+  page_number: number | null
   text: string
   blocks: RawContentBlock[]
   extraction_errors: string[]
+  location: SourceLocation | null
 }
 
 export type SourceReference = {
-  page_start: number
-  page_end: number
+  page_start: number | null
+  page_end: number | null
   raw_block_ids: string[]
   bboxes: [number, number, number, number][]
+  locations: SourceLocation[]
 }
 
 export type NormalizedBlock = {
@@ -166,17 +182,18 @@ export type NormalizedBlock = {
 }
 
 export type NormalizedPage = {
-  page_number: number
+  page_number: number | null
   text: string
   blocks: NormalizedBlock[]
   transformation_ids: string[]
   suppressed_artifact_ids: string[]
+  location: SourceLocation | null
 }
 
 export type NormalizationEvent = {
   id: string
   stage: string
-  page_number: number
+  page_number: number | null
   raw_block_ids: string[]
   description: string
   before: string | null
@@ -207,7 +224,7 @@ export type NormalizedDocument = {
   pages: NormalizedPage[]
   images: Array<{
     id: string
-    source_page: number
+    source_page: number | null
     source_bbox: [number, number, number, number] | null
     width: number | null
     height: number | null
@@ -215,6 +232,7 @@ export type NormalizedDocument = {
     caption: string | null
     asset_reference: string
     source_image_ids: string[]
+    location: SourceLocation | null
   }>
   normalization_metadata: {
     version: string
@@ -225,10 +243,12 @@ export type NormalizedDocument = {
   }
 }
 
-export type PdfIngestionResult = {
+export type DocumentSourceType = "pdf" | "docx" | "pptx"
+
+export type DocumentIngestionResult = {
   status: "success"
   filename: string
-  source_type: "pdf"
+  source_type: DocumentSourceType
   page_count: number
   markdown: string
   extracted_character_count: number
@@ -236,6 +256,20 @@ export type PdfIngestionResult = {
   images: RawImage[]
   extraction_metadata: Record<string, string | number | boolean | null>
   normalized: NormalizedDocument
+}
+
+// Legacy alias kept because it was the original (PDF-only) name for this shape.
+export type PdfIngestionResult = DocumentIngestionResult
+
+const INGESTION_ENDPOINT_BY_EXTENSION: Record<string, string> = {
+  pdf: "/ingestion/pdf",
+  docx: "/ingestion/docx",
+  pptx: "/ingestion/pptx"
+}
+
+export function ingestionEndpointFor(filename: string): string | null {
+  const extension = filename.split(".").pop()?.toLowerCase()
+  return extension ? INGESTION_ENDPOINT_BY_EXTENSION[extension] ?? null : null
 }
 
 export const api = {
@@ -253,6 +287,13 @@ export const api = {
   ingestPdf: (file: File) => {
     const form = new FormData()
     form.append("file", file)
-    return postForm<PdfIngestionResult>("/ingestion/pdf", form)
+    return postForm<DocumentIngestionResult>("/ingestion/pdf", form)
+  },
+  ingestDocument: (file: File) => {
+    const endpoint = ingestionEndpointFor(file.name)
+    if (!endpoint) return Promise.reject(new Error(`Unsupported file type: ${file.name}`))
+    const form = new FormData()
+    form.append("file", file)
+    return postForm<DocumentIngestionResult>(endpoint, form)
   }
 }

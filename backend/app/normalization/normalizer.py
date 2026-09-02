@@ -30,6 +30,7 @@ def _source_reference(block) -> SourceReference:
         page_end=block.page_number,
         raw_block_ids=[block.id],
         bboxes=[block.bbox] if block.bbox else [],
+        locations=[block.location] if block.location else [],
     )
 
 
@@ -164,6 +165,7 @@ def normalize_document(document: RawDocument) -> NormalizedDocument:
                     page_end=raw_page.page_number,
                     raw_block_ids=[*previous.source.raw_block_ids, *normalized.source.raw_block_ids],
                     bboxes=[*previous.source.bboxes, *normalized.source.bboxes],
+                    locations=[*previous.source.locations, *normalized.source.locations],
                 )
                 normalized_blocks[-1] = replace(previous, text=combined_text, source=combined_source)
                 counters["reconstructed_blocks"] += 1
@@ -189,6 +191,7 @@ def normalize_document(document: RawDocument) -> NormalizedDocument:
                 blocks=normalized_blocks,
                 transformation_ids=page_event_ids,
                 suppressed_artifact_ids=page_suppressed_ids,
+                location=raw_page.location,
             )
         )
 
@@ -221,6 +224,7 @@ def normalize_document(document: RawDocument) -> NormalizedDocument:
             caption=image.caption,
             asset_reference=image.asset_reference,
             source_image_ids=[image.id],
+            location=image.location,
         )
         for image in document.images
     ]

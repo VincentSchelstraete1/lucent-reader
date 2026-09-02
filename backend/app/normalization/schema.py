@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-from app.ingestion.base import BoundingBox
+from app.ingestion.base import BoundingBox, SourceLocation
 
 
 NormalizedBlockType = Literal["heading", "paragraph", "list", "table", "caption", "image", "unknown"]
@@ -10,10 +10,11 @@ SuppressionType = Literal["header", "footer", "page_number"]
 
 @dataclass(frozen=True)
 class SourceReference:
-    page_start: int
-    page_end: int
+    page_start: int | None
+    page_end: int | None
     raw_block_ids: list[str]
     bboxes: list[BoundingBox]
+    locations: list[SourceLocation] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -27,17 +28,18 @@ class NormalizedBlock:
 
 @dataclass(frozen=True)
 class NormalizedPage:
-    page_number: int
+    page_number: int | None
     text: str
     blocks: list[NormalizedBlock]
     transformation_ids: list[str] = field(default_factory=list)
     suppressed_artifact_ids: list[str] = field(default_factory=list)
+    location: SourceLocation | None = None
 
 
 @dataclass(frozen=True)
 class NormalizedImage:
     id: str
-    source_page: int
+    source_page: int | None
     source_bbox: BoundingBox | None
     width: int | None
     height: int | None
@@ -45,6 +47,7 @@ class NormalizedImage:
     caption: str | None
     asset_reference: str
     source_image_ids: list[str]
+    location: SourceLocation | None = None
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,7 @@ class SuppressedArtifact:
 class NormalizationEvent:
     id: str
     stage: str
-    page_number: int
+    page_number: int | None
     raw_block_ids: list[str]
     description: str
     before: str | None = None

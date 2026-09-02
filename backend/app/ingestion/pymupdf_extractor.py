@@ -2,6 +2,7 @@ import base64
 import hashlib
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pymupdf
@@ -13,6 +14,7 @@ from app.ingestion.base import (
     RawContentBlock,
     RawImage,
     RawPage,
+    SourceLocation,
 )
 
 
@@ -84,18 +86,7 @@ def associate_captions(images: list[RawImage], blocks: list[RawContentBlock]) ->
                     matches.append((vertical_gap, candidate))
         matches.sort(key=lambda item: item[0])
         caption = matches[0][1].text.strip() if len(matches) == 1 else None
-        associated.append(
-            RawImage(
-                id=image.id,
-                page_number=image.page_number,
-                bbox=image.bbox,
-                width=image.width,
-                height=image.height,
-                mime_type=image.mime_type,
-                asset_reference=image.asset_reference,
-                caption=caption,
-            )
-        )
+        associated.append(replace(image, caption=caption))
     return associated
 
 
@@ -122,6 +113,7 @@ class PyMuPDFPageExtractor:
                 page_images: list[RawImage] = []
                 errors: list[str] = []
                 page_text = ""
+                page_location = SourceLocation(kind="page", index=page_number)
                 try:
                     page = document.load_page(page_index)
                     page_text = page.get_text("text", sort=False)
@@ -138,6 +130,7 @@ class PyMuPDFPageExtractor:
                                     text=_text_from_block(block),
                                     bbox=block_bbox,
                                     reading_order=order,
+                                    location=page_location,
                                 )
                             )
                         elif block.get("type") == 1:
@@ -146,7 +139,9 @@ class PyMuPDFPageExtractor:
                             height = block.get("height")
                             if not isinstance(image_bytes, bytes) or not image_bytes or not width or not height:
                                 errors.append(f"Image block {order + 1} did not contain usable raster data")
-                                page_blocks.append(RawContentBlock(block_id, page_number, "unknown", block_bbox, order))
+                                page_blocks.append(
+                                    RawContentBlock(block_id, page_number, "unknown", block_bbox, order, location=page_location)
+                                )
                                 continue
                             mime_type = _mime_type(block.get("ext"))
                             digest = hashlib.sha256(image_bytes).hexdigest()[:16]
@@ -162,6 +157,7 @@ class PyMuPDFPageExtractor:
                                     height=int(height),
                                     mime_type=mime_type,
                                     asset_reference=f"data:{media_type};base64,{encoded}",
+                                    location=page_location,
                                 )
                             )
                             page_blocks.append(
@@ -172,14 +168,17 @@ class PyMuPDFPageExtractor:
                                     bbox=block_bbox,
                                     reading_order=order,
                                     image_id=image_id,
+                                    location=page_location,
                                 )
                             )
                         else:
-                            page_blocks.append(RawContentBlock(block_id, page_number, "unknown", block_bbox, order))
+                            page_blocks.append(
+                                RawContentBlock(block_id, page_number, "unknown", block_bbox, order, location=page_location)
+                            )
                     page_images = associate_captions(page_images, page_blocks)
                 except Exception:
                     errors.append(f"Page {page_number} could not be extracted")
-                pages.append(RawPage(page_number, page_text, page_blocks, errors))
+                pages.append(RawPage(page_number, page_text, page_blocks, errors, location=page_location))
                 images.extend(page_images)
 
             metadata = {

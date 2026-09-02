@@ -16,7 +16,14 @@ class MarkItDownAdapter:
             converter = MarkItDown(enable_plugins=False)
         self._converter = converter
 
-    def extract_markdown(self, stream: BinaryIO, *, filename: str) -> str:
+    def extract_markdown(
+        self,
+        stream: BinaryIO,
+        *,
+        filename: str,
+        mimetype: str = "application/pdf",
+        extension: str = ".pdf",
+    ) -> str:
         try:
             from markitdown import StreamInfo
 
@@ -24,13 +31,13 @@ class MarkItDownAdapter:
             result = self._converter.convert_stream(
                 stream,
                 stream_info=StreamInfo(
-                    mimetype="application/pdf",
-                    extension=".pdf",
+                    mimetype=mimetype,
+                    extension=extension,
                     filename=filename,
                 ),
             )
         except Exception as exc:
-            raise DocumentExtractionError("MarkItDown could not extract this PDF") from exc
+            raise DocumentExtractionError("MarkItDown could not extract this file") from exc
 
         if result.text_content is None:
             raise DocumentExtractionError("MarkItDown returned no extraction result")

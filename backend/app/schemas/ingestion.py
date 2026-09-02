@@ -2,43 +2,59 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.ingestion import RawDocument
+from app.ingestion import RawDocument, SourceLocation
 from app.normalization import NormalizedDocument
+
+
+class SourceLocationResponse(BaseModel):
+    kind: Literal["page", "slide", "document"]
+    index: int | None
+    sequence_id: str | None
+
+
+def _location(location: SourceLocation | None) -> SourceLocationResponse | None:
+    if location is None:
+        return None
+    return SourceLocationResponse(kind=location.kind, index=location.index, sequence_id=location.sequence_id)
 
 
 class RawContentBlockResponse(BaseModel):
     id: str
-    page_number: int
+    page_number: int | None
     type: Literal["text", "image", "table", "unknown"]
     text: str | None
     bbox: tuple[float, float, float, float] | None
     reading_order: int
     image_id: str | None
+    location: SourceLocationResponse | None
 
 
 class RawImageResponse(BaseModel):
     id: str
-    page_number: int
+    page_number: int | None
     bbox: tuple[float, float, float, float] | None
     width: int | None
     height: int | None
     mime_type: str | None
     caption: str | None
     asset_reference: str
+    location: SourceLocationResponse | None
 
 
 class RawPageResponse(BaseModel):
-    page_number: int
+    page_number: int | None
     text: str
     blocks: list[RawContentBlockResponse]
     extraction_errors: list[str]
+    location: SourceLocationResponse | None
 
 
 class SourceReferenceResponse(BaseModel):
-    page_start: int
-    page_end: int
+    page_start: int | None
+    page_end: int | None
     raw_block_ids: list[str]
     bboxes: list[tuple[float, float, float, float]]
+    locations: list[SourceLocationResponse]
 
 
 class NormalizedBlockResponse(BaseModel):
@@ -50,16 +66,17 @@ class NormalizedBlockResponse(BaseModel):
 
 
 class NormalizedPageResponse(BaseModel):
-    page_number: int
+    page_number: int | None
     text: str
     blocks: list[NormalizedBlockResponse]
     transformation_ids: list[str]
     suppressed_artifact_ids: list[str]
+    location: SourceLocationResponse | None
 
 
 class NormalizedImageResponse(BaseModel):
     id: str
-    source_page: int
+    source_page: int | None
     source_bbox: tuple[float, float, float, float] | None
     width: int | None
     height: int | None
@@ -67,6 +84,7 @@ class NormalizedImageResponse(BaseModel):
     caption: str | None
     asset_reference: str
     source_image_ids: list[str]
+    location: SourceLocationResponse | None
 
 
 class SuppressedArtifactResponse(BaseModel):
@@ -80,7 +98,7 @@ class SuppressedArtifactResponse(BaseModel):
 class NormalizationEventResponse(BaseModel):
     id: str
     stage: str
-    page_number: int
+    page_number: int | None
     raw_block_ids: list[str]
     description: str
     before: str | None
@@ -128,17 +146,26 @@ class NormalizedDocumentResponse(BaseModel):
                             id=block.id,
                             type=block.type,
                             text=block.text,
-                            source=SourceReferenceResponse(**vars(block.source)),
+                            source=SourceReferenceResponse(
+                                **{
+                                    **vars(block.source),
+                                    "locations": [_location(item) for item in block.source.locations],
+                                }
+                            ),
                             source_image_id=block.source_image_id,
                         )
                         for block in page.blocks
                     ],
                     transformation_ids=page.transformation_ids,
                     suppressed_artifact_ids=page.suppressed_artifact_ids,
+                    location=_location(page.location),
                 )
                 for page in document.pages
             ],
-            images=[NormalizedImageResponse(**vars(image)) for image in document.images],
+            images=[
+                NormalizedImageResponse(**{**vars(image), "location": _location(image.location)})
+                for image in document.images
+            ],
             normalization_metadata=NormalizationMetadataResponse(
                 version=metadata.version,
                 suppressed_artifacts=[SuppressedArtifactResponse(**vars(item)) for item in metadata.suppressed_artifacts],
@@ -150,9 +177,14 @@ class NormalizedDocumentResponse(BaseModel):
 
 
 class PdfIngestionResponse(BaseModel):
+    """Shared ingestion response shape for every supported format (PDF/DOCX/PPTX) -
+    the name is legacy from when only PDF was supported. New callers should use
+    the format-neutral `DocumentIngestionResponse` alias below.
+    """
+
     status: Literal["success"]
     filename: str
-    source_type: Literal["pdf"]
+    source_type: Literal["pdf", "docx", "pptx"]
     page_count: int
     markdown: str
     extracted_character_count: int
@@ -174,12 +206,22 @@ class PdfIngestionResponse(BaseModel):
                 RawPageResponse(
                     page_number=page.page_number,
                     text=page.text,
-                    blocks=[RawContentBlockResponse(**vars(block)) for block in page.blocks],
+                    blocks=[
+                        RawContentBlockResponse(**{**vars(block), "location": _location(block.location)})
+                        for block in page.blocks
+                    ],
                     extraction_errors=page.extraction_errors,
+                    location=_location(page.location),
                 )
                 for page in document.pages
             ],
-            images=[RawImageResponse(**vars(image)) for image in document.images],
+            images=[
+                RawImageResponse(**{**vars(image), "location": _location(image.location)})
+                for image in document.images
+            ],
             extraction_metadata=document.extraction_metadata,
             normalized=NormalizedDocumentResponse.from_normalized_document(normalized),
         )
+
+
+DocumentIngestionResponse = PdfIngestionResponse
