@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 from app.ingestion import RawDocument, SourceLocation
 from app.normalization import NormalizedDocument
+from app.routing import RepresentationDecision
+from app.segmentation import LearningBlock
 
 
 class SourceLocationResponse(BaseModel):
@@ -176,6 +178,59 @@ class NormalizedDocumentResponse(BaseModel):
         )
 
 
+class RepresentationDecisionResponse(BaseModel):
+    learning_block_id: str
+    type: str
+    confidence: float | None
+    method: Literal["deterministic", "fallback_classifier"]
+    scores: dict[str, float]
+    fallback_used: bool
+
+    @classmethod
+    def from_decision(cls, decision: RepresentationDecision) -> "RepresentationDecisionResponse":
+        return cls(**vars(decision))
+
+
+class LearningBlockResponse(BaseModel):
+    id: str
+    block_type: str
+    title: str | None
+    text: str
+    character_count: int
+    normalized_block_ids: list[str]
+    source: SourceReferenceResponse
+    heading_ancestry: list[str]
+    attached_table_ids: list[str]
+    attached_image_ids: list[str]
+    token_count: int | None
+    segmentation_method: str
+    segmentation_boundary_reason: str
+    segmentation_confidence: float | None
+    representation: RepresentationDecisionResponse
+
+    @classmethod
+    def from_block(cls, block: LearningBlock, decision: RepresentationDecision) -> "LearningBlockResponse":
+        return cls(
+            id=block.id,
+            block_type=block.block_type,
+            title=block.title,
+            text=block.text,
+            character_count=block.character_count,
+            normalized_block_ids=block.normalized_block_ids,
+            source=SourceReferenceResponse(
+                **{**vars(block.source), "locations": [_location(item) for item in block.source.locations]}
+            ),
+            heading_ancestry=block.heading_ancestry,
+            attached_table_ids=block.attached_table_ids,
+            attached_image_ids=block.attached_image_ids,
+            token_count=block.token_count,
+            segmentation_method=block.segmentation.method,
+            segmentation_boundary_reason=block.segmentation.boundary_reason,
+            segmentation_confidence=block.segmentation.confidence,
+            representation=RepresentationDecisionResponse.from_decision(decision),
+        )
+
+
 class PdfIngestionResponse(BaseModel):
     """Shared ingestion response shape for every supported format (PDF/DOCX/PPTX) -
     the name is legacy from when only PDF was supported. New callers should use
@@ -192,6 +247,10 @@ class PdfIngestionResponse(BaseModel):
     images: list[RawImageResponse]
     extraction_metadata: dict[str, str | int | bool | None]
     normalized: NormalizedDocumentResponse
+    # Empty for from_documents() (raw + normalized only, e.g. the plain
+    # ingestion endpoints); populated by from_pipeline() for the end-to-end
+    # dev inspector, which also runs segmentation and routing.
+    learning_blocks: list[LearningBlockResponse] = []
 
     @classmethod
     def from_documents(cls, document: RawDocument, normalized: NormalizedDocument) -> "PdfIngestionResponse":
@@ -221,6 +280,23 @@ class PdfIngestionResponse(BaseModel):
             ],
             extraction_metadata=document.extraction_metadata,
             normalized=NormalizedDocumentResponse.from_normalized_document(normalized),
+        )
+
+    @classmethod
+    def from_pipeline(
+        cls,
+        document: RawDocument,
+        normalized: NormalizedDocument,
+        learning_blocks: list[LearningBlock],
+        decisions: dict[str, RepresentationDecision],
+    ) -> "PdfIngestionResponse":
+        response = cls.from_documents(document, normalized)
+        return response.model_copy(
+            update={
+                "learning_blocks": [
+                    LearningBlockResponse.from_block(block, decisions[block.id]) for block in learning_blocks
+                ]
+            }
         )
 
 

@@ -39,5 +39,16 @@
 .outputHeader p { margin: 12px 0; color: var(--lucent-caption); font-size: 12px; }
 .markdown { display: block; box-sizing: border-box; width: calc(100% - 32px); min-height: 480px; margin-bottom: 16px !important; resize: vertical; border: 1px solid var(--lucent-border); border-radius: 10px; padding: 14px; background: var(--lucent-bg); color: var(--lucent-text); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
 .markdown:focus { outline: 2px solid var(--lucent-accent); outline-offset: 2px; }
+.sectionNote { margin: -8px 0 12px; color: var(--lucent-caption); font-size: 12px; }
+.learningBlockCard { border: 1px solid var(--lucent-border); border-radius: 12px; background: var(--lucent-surface); }
+.learningBlockCard > summary { padding: 14px 16px; cursor: pointer; font-weight: 700; }
+.learningBlockCard[open] > summary { border-bottom: 1px solid var(--lucent-border); }
+.learningBlockCard > :not(summary) { margin-right: 16px; margin-left: 16px; }
+.learningBlockCard h4, .learningBlockCard h5 { margin-bottom: 6px; }
+.learningBlockMeta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px !important; }
+.learningBlockMeta div { min-width: 0; }
+.learningBlockMeta dt { color: var(--lucent-caption); font-size: 12px; }
+.learningBlockMeta dd { overflow-wrap: anywhere; margin: 2px 0 0; font-size: 12px; font-weight: 600; }
+.winningScore { font-weight: 700; color: var(--lucent-accent-dark); }
 @media (max-width: 900px) { .comparison { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .metadata dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outputHeader { align-items: flex-start; flex-direction: column; margin-bottom: 12px; } .markdown { min-height: 360px; } }

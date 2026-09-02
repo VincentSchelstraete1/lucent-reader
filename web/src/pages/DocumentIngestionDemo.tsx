@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import { api, ingestionEndpointFor, type DocumentIngestionResult, type RawImage, type RawPage, type SourceLocation } from "../api/client"
+import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningBlock, type RawImage, type RawPage, type SourceLocation } from "../api/client"
 import styles from "./documentIngestionDemo.module.css"
 
 type IngestionState =
@@ -53,6 +53,64 @@ function pageSummaryLabel(page: RawPage) {
   if (page.location?.kind === "slide") return `Slide ${page.location.index}`
   if (page.location?.kind === "document") return "Document"
   return `Page ${page.page_number ?? "?"}`
+}
+
+function locationsSummary(locations: SourceLocation[]) {
+  if (!locations.length) return "unavailable"
+  const seen = new Set<string>()
+  const labels: string[] = []
+  for (const location of locations) {
+    const label = formatLocation(location)
+    if (!seen.has(label)) {
+      seen.add(label)
+      labels.push(label)
+    }
+  }
+  return labels.join(", ")
+}
+
+function LearningBlockInspection({ block }: { block: LearningBlock }) {
+  const decision = block.representation
+  return (
+    <details className={styles.learningBlockCard}>
+      <summary>
+        {block.title ?? `(untitled ${block.block_type})`} · {block.block_type} · {block.character_count} chars ·{" "}
+        <strong>{decision.type}</strong> {decision.fallback_used && "(classifier fallback)"}
+      </summary>
+      <dl className={styles.learningBlockMeta}>
+        <div><dt>id</dt><dd>{block.id}</dd></div>
+        <div><dt>Inspect by source location</dt><dd>{locationsSummary(block.source.locations)}</dd></div>
+        <div><dt>Heading ancestry</dt><dd>{block.heading_ancestry.length ? block.heading_ancestry.join(" › ") : "(none - top level)"}</dd></div>
+        <div><dt>Normalized block ids</dt><dd>{block.normalized_block_ids.join(", ")}</dd></div>
+        <div><dt>Attached tables</dt><dd>{block.attached_table_ids.join(", ") || "none"}</dd></div>
+        <div><dt>Attached images</dt><dd>{block.attached_image_ids.join(", ") || "none"}</dd></div>
+        <div><dt>Token count</dt><dd>{block.token_count ?? "not computed"}</dd></div>
+      </dl>
+      <h4>Text</h4>
+      <pre className={styles.rawText}>{block.text || "(no body text)"}</pre>
+
+      <h4>Segmentation</h4>
+      <dl className={styles.learningBlockMeta}>
+        <div><dt>Method</dt><dd>{block.segmentation_method}</dd></div>
+        <div><dt>Boundary reason</dt><dd>{block.segmentation_boundary_reason}</dd></div>
+        <div><dt>Confidence</dt><dd>{block.segmentation_confidence ?? "n/a (deterministic-structural)"}</dd></div>
+      </dl>
+
+      <h4>Representation decision</h4>
+      <dl className={styles.learningBlockMeta}>
+        <div><dt>Final type</dt><dd>{decision.type}</dd></div>
+        <div><dt>Decision method</dt><dd>{decision.method}</dd></div>
+        <div><dt>Fallback used</dt><dd>{decision.fallback_used ? "yes" : "no"}</dd></div>
+        <div><dt>Confidence</dt><dd>{decision.confidence ?? "n/a - classifier confidence is not calibrated"}</dd></div>
+      </dl>
+      <h5>Deterministic router scores</h5>
+      <div className={styles.scores}>
+        {Object.entries(decision.scores).map(([type, score]) => (
+          <span key={type} className={type === decision.type ? styles.winningScore : undefined}>{type}: {score.toFixed(2)}</span>
+        ))}
+      </div>
+    </details>
+  )
 }
 
 export function DocumentIngestionDemo() {
@@ -219,6 +277,17 @@ export function DocumentIngestionDemo() {
                   </details>
                 )
               })}
+            </div>
+          </section>
+
+          <section aria-labelledby="learning-blocks">
+            <h2 id="learning-blocks">Learning blocks &amp; routing ({state.result.learning_blocks.length})</h2>
+            <p className={styles.sectionNote}>
+              Each block traces NormalizedDocument → LearningBlock → RepresentationDecision. Blocks are listed in
+              document order; each one shows its own PDF page / PPTX slide / DOCX source location.
+            </p>
+            <div className={styles.pages}>
+              {state.result.learning_blocks.map((block) => <LearningBlockInspection key={block.id} block={block} />)}
             </div>
           </section>
 

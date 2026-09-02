@@ -19,8 +19,10 @@ from app.ingestion import (
 from app.ingestion.docx_ingestor import DOCX_MIME_TYPE
 from app.ingestion.pptx_ingestor import PPTX_MIME_TYPE
 from app.models.auth import User
-from app.normalization import normalize_document
+from app.normalization import NormalizedDocument, normalize_document
+from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
+from app.segmentation import LearningBlock, segment_document
 
 
 router = APIRouter(prefix="/ingestion")
@@ -43,6 +45,19 @@ def get_docx_ingestor() -> DocxDocumentIngestor:
 @lru_cache(maxsize=1)
 def get_pptx_ingestor() -> PptxDocumentIngestor:
     return PptxDocumentIngestor(MarkItDownAdapter())
+
+
+@lru_cache(maxsize=1)
+def get_classifier() -> ClassifierAdapter:
+    return AnthropicClassifierAdapter()
+
+
+def _segment_and_route(
+    normalized: NormalizedDocument, classifier: ClassifierAdapter
+) -> tuple[list[LearningBlock], dict[str, RepresentationDecision]]:
+    blocks = segment_document(normalized)
+    decisions = {block.id: route_learning_block_hybrid(block, classifier) for block in blocks}
+    return blocks, decisions
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -107,6 +122,7 @@ async def ingest_pdf(
     file: UploadFile = File(...),
     _user: User = Depends(get_current_user),
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
+    classifier: ClassifierAdapter = Depends(get_classifier),
 ) -> PdfIngestionResponse:
     if file.content_type not in PDF_MEDIA_TYPES:
         await file.close()
@@ -132,7 +148,8 @@ async def ingest_pdf(
         )
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    return PdfIngestionResponse.from_documents(extracted, normalized)
+    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)
 
 
 @router.post(
@@ -144,6 +161,7 @@ async def ingest_docx(
     file: UploadFile = File(...),
     _user: User = Depends(get_current_user),
     ingestor: DocxDocumentIngestor = Depends(get_docx_ingestor),
+    classifier: ClassifierAdapter = Depends(get_classifier),
 ) -> DocumentIngestionResponse:
     if file.content_type not in DOCX_MEDIA_TYPES:
         await file.close()
@@ -161,7 +179,8 @@ async def ingest_docx(
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "docx_extraction_failed", "The DOCX could not be extracted")
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    return DocumentIngestionResponse.from_documents(extracted, normalized)
+    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)
 
 
 @router.post(
@@ -173,6 +192,7 @@ async def ingest_pptx(
     file: UploadFile = File(...),
     _user: User = Depends(get_current_user),
     ingestor: PptxDocumentIngestor = Depends(get_pptx_ingestor),
+    classifier: ClassifierAdapter = Depends(get_classifier),
 ) -> DocumentIngestionResponse:
     if file.content_type not in PPTX_MEDIA_TYPES:
         await file.close()
@@ -190,4 +210,5 @@ async def ingest_pptx(
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "pptx_extraction_failed", "The PPTX could not be extracted")
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    return DocumentIngestionResponse.from_documents(extracted, normalized)
+    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)

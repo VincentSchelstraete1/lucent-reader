@@ -245,6 +245,37 @@ export type NormalizedDocument = {
 
 export type DocumentSourceType = "pdf" | "docx" | "pptx"
 
+export type RepresentationType = "plain_text" | "process" | "comparison" | "causal" | "concept_map" | "hierarchy" | "quantitative"
+
+export type RepresentationDecision = {
+  learning_block_id: string
+  type: RepresentationType
+  confidence: number | null
+  method: "deterministic" | "fallback_classifier"
+  scores: Record<string, number>
+  fallback_used: boolean
+}
+
+export type LearningBlockType = "section" | "list" | "table" | "figure" | "mixed"
+
+export type LearningBlock = {
+  id: string
+  block_type: LearningBlockType
+  title: string | null
+  text: string
+  character_count: number
+  normalized_block_ids: string[]
+  source: SourceReference
+  heading_ancestry: string[]
+  attached_table_ids: string[]
+  attached_image_ids: string[]
+  token_count: number | null
+  segmentation_method: string
+  segmentation_boundary_reason: string
+  segmentation_confidence: number | null
+  representation: RepresentationDecision
+}
+
 export type DocumentIngestionResult = {
   status: "success"
   filename: string
@@ -256,6 +287,7 @@ export type DocumentIngestionResult = {
   images: RawImage[]
   extraction_metadata: Record<string, string | number | boolean | null>
   normalized: NormalizedDocument
+  learning_blocks: LearningBlock[]
 }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.

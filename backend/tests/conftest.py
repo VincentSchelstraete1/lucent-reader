@@ -50,6 +50,7 @@ from app.database import Base, engine, get_db
 from app.main import app  # noqa: E402 - imports models, runs create_all against the test db
 from app.config import settings
 from app.models.auth import User, WebSession
+from app.routers.ingestion import get_classifier
 from app.security import token_hash, utcnow
 from datetime import timedelta
 
@@ -59,6 +60,21 @@ Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 pytest_plugins = ["ai_fixtures"]
+
+
+class _NullClassifier:
+    """Default test-session classifier: always reports "no opinion", so the
+    ingestion endpoints' full pipeline (segmentation + hybrid routing) safely
+    falls back to the deterministic decision instead of making a live
+    Anthropic call on every ordinary ingestion test. Individual tests that
+    care about classifier behavior override get_classifier themselves
+    (see test_hybrid_router*.py)."""
+
+    def classify(self, text: str) -> None:
+        return None
+
+
+app.dependency_overrides[get_classifier] = lambda: _NullClassifier()
 
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
