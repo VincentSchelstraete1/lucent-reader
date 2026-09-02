@@ -6,6 +6,7 @@ from app.ingestion import RawDocument, SourceLocation
 from app.normalization import NormalizedDocument
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
+from app.semantic.assembler import GeneratedNote
 
 
 class SourceLocationResponse(BaseModel):
@@ -251,6 +252,7 @@ class PdfIngestionResponse(BaseModel):
     # ingestion endpoints); populated by from_pipeline() for the end-to-end
     # dev inspector, which also runs segmentation and routing.
     learning_blocks: list[LearningBlockResponse] = []
+    generated_note: GeneratedNote | None = None
 
     @classmethod
     def from_documents(cls, document: RawDocument, normalized: NormalizedDocument) -> "PdfIngestionResponse":
@@ -289,13 +291,15 @@ class PdfIngestionResponse(BaseModel):
         normalized: NormalizedDocument,
         learning_blocks: list[LearningBlock],
         decisions: dict[str, RepresentationDecision],
+        generated_note: GeneratedNote | None = None,
     ) -> "PdfIngestionResponse":
         response = cls.from_documents(document, normalized)
         return response.model_copy(
             update={
                 "learning_blocks": [
                     LearningBlockResponse.from_block(block, decisions[block.id]) for block in learning_blocks
-                ]
+                ],
+                "generated_note": generated_note,
             }
         )
 

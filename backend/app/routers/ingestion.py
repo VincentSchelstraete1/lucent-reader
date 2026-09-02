@@ -23,6 +23,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
 from app.segmentation import LearningBlock, segment_document
+from app.semantic import AnthropicSemanticGenerator, HybridSemanticGenerator, SemanticGenerator, assemble_note, plain_text_fallback
 
 
 router = APIRouter(prefix="/ingestion")
@@ -50,6 +51,10 @@ def get_pptx_ingestor() -> PptxDocumentIngestor:
 @lru_cache(maxsize=1)
 def get_classifier() -> ClassifierAdapter:
     return AnthropicClassifierAdapter()
+
+@lru_cache(maxsize=1)
+def get_semantic_generator() -> SemanticGenerator:
+    return HybridSemanticGenerator(AnthropicSemanticGenerator())
 
 
 def _segment_and_route(
@@ -123,6 +128,7 @@ async def ingest_pdf(
     _user: User = Depends(get_current_user),
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
+    semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
 ) -> PdfIngestionResponse:
     if file.content_type not in PDF_MEDIA_TYPES:
         await file.close()
@@ -149,7 +155,12 @@ async def ingest_pdf(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)
+    objects = {}
+    for block in blocks:
+        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
+        except Exception: objects[block.id] = plain_text_fallback(block)
+    note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects)
+    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note)
 
 
 @router.post(
@@ -162,6 +173,7 @@ async def ingest_docx(
     _user: User = Depends(get_current_user),
     ingestor: DocxDocumentIngestor = Depends(get_docx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
+    semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
 ) -> DocumentIngestionResponse:
     if file.content_type not in DOCX_MEDIA_TYPES:
         await file.close()
@@ -180,7 +192,11 @@ async def ingest_docx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)
+    objects = {}
+    for block in blocks:
+        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
+        except Exception: objects[block.id] = plain_text_fallback(block)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects))
 
 
 @router.post(
@@ -193,6 +209,7 @@ async def ingest_pptx(
     _user: User = Depends(get_current_user),
     ingestor: PptxDocumentIngestor = Depends(get_pptx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
+    semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
 ) -> DocumentIngestionResponse:
     if file.content_type not in PPTX_MEDIA_TYPES:
         await file.close()
@@ -211,4 +228,8 @@ async def ingest_pptx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions)
+    objects = {}
+    for block in blocks:
+        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
+        except Exception: objects[block.id] = plain_text_fallback(block)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects))
