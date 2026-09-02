@@ -1,15 +1,7 @@
 import type { ProcessLearningObject, ProcessStep } from "../schema/learningObject"
+import { stableTextId } from "./builderUtils"
 
 const TRANSITION_PREFIX = /^(?:\d+[.)]\s*|step\s+\d+[:.)]?\s*|first,?\s+|next,?\s+|then,?\s+|finally,?\s+|afterward,?\s+)/i
-
-function stableTextId(text: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return Math.abs(hash >>> 0).toString(36)
-}
 
 function extractSteps(sourceText: string): ProcessStep[] {
   return sourceText

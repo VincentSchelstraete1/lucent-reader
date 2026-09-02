@@ -1,0 +1,13 @@
+.wrapper { display: grid; gap: 16px; }
+.tableScroll { max-width: 100%; overflow-x: auto; }
+.table { width: 100%; min-width: 480px; border-collapse: separate; border-spacing: 0; border: 1px solid var(--lucent-border); border-radius: 10px; overflow: hidden; }
+.table th, .table td { padding: 12px 14px; border-right: 1px solid var(--lucent-border); border-bottom: 1px solid var(--lucent-border); text-align: left; vertical-align: top; }
+.table tr > :last-child { border-right: 0; }
+.table tbody tr:last-child > * { border-bottom: 0; }
+.table thead th { background: var(--lucent-accent); color: #fff; font-size: 13px; }
+.table tbody th { width: 28%; background: var(--lucent-bg); color: var(--lucent-caption); font-size: 12px; }
+.table td { background: var(--lucent-surface); font-size: 14px; font-weight: 600; }
+.wrapper section { padding-left: 12px; border-left: 3px solid var(--lucent-accent); }
+.wrapper h3 { margin: 0 0 6px; font-size: 13px; }
+.wrapper ul { margin: 0; padding-left: 18px; color: var(--lucent-caption); font-size: 13px; line-height: 1.5; }
+@media (max-width: 560px) { .table th, .table td { padding: 10px; } }

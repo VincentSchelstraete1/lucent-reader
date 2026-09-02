@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
-import { buildProcessLearningObject } from "../builders/processBuilder"
-import { ProcessRenderer } from "../renderers/ProcessRenderer"
+import { buildLearningObject } from "../builders/learningObjectBuilder"
+import { LearningObjectRenderer } from "../renderers/LearningObjectRenderer"
 import { routeRepresentation } from "../routing/representationRouter"
 import { REPRESENTATION_TYPES } from "../routing/representationTypes"
 import styles from "./learningCanvasDemo.module.css"
@@ -10,9 +10,8 @@ const EXAMPLE = "The client sends SYN. Then the server responds with SYN-ACK. Fi
 export function LearningCanvasDemo() {
   const [sourceText, setSourceText] = useState(EXAMPLE)
   const route = useMemo(() => routeRepresentation(sourceText), [sourceText])
-  const processObject = useMemo(() => {
-    if (route.type !== "process") return null
-    try { return buildProcessLearningObject(sourceText) } catch { return null }
+  const learningObject = useMemo(() => {
+    try { return buildLearningObject(route.type, sourceText) } catch { return null }
   }, [route.type, sourceText])
 
   return (
@@ -39,14 +38,14 @@ export function LearningCanvasDemo() {
         </article>
 
         <article className={styles.panel}>
-          <h2>Process LearningObject</h2>
-          {processObject ? <pre className={styles.json}>{JSON.stringify(processObject, null, 2)}</pre> : <p>This first slice renders only text routed as a process.</p>}
+          <h2>LearningObject</h2>
+          {learningObject ? <pre className={styles.json}>{JSON.stringify(learningObject, null, 2)}</pre> : <p>No deterministic builder exists for this representation yet.</p>}
         </article>
       </div>
 
       <article className={styles.diagramPanel}>
-        <h2>Process renderer</h2>
-        {processObject ? <ProcessRenderer object={processObject} /> : <p>No process diagram for the current routing result.</p>}
+        <h2>{learningObject ? `${learningObject.type} renderer` : "Renderer"}</h2>
+        {learningObject ? <LearningObjectRenderer object={learningObject} /> : <p>No renderer for the current routing result.</p>}
       </article>
     </section>
   )
