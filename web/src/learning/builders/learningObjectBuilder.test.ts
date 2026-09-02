@@ -10,7 +10,9 @@ describe("buildLearningObject", () => {
     expect(buildLearningObject("comparison", "TCP uses connections, whereas UDP uses datagrams.")?.type).toBe("comparison")
   })
 
-  it("returns null for taxonomy types without builders", () => {
-    expect(buildLearningObject("causal", "A causes B.")).toBeNull()
+  it("builds every taxonomy type", () => {
+    for (const type of ["causal", "concept_map", "hierarchy", "quantitative", "plain_text"] as const) {
+      expect(buildLearningObject(type, "A causes B.")?.type).toBe(type)
+    }
   })
 })

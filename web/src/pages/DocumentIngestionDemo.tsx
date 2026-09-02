@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningBlock, type RawImage, type RawPage, type SourceLocation } from "../api/client"
 import styles from "./documentIngestionDemo.module.css"
+import { GeneratedNoteRenderer } from "../learning/components/GeneratedNoteRenderer"
 
 type IngestionState =
   | { status: "idle" }
@@ -211,6 +212,7 @@ export function DocumentIngestionDemo() {
               </details>
             )}
           </section>
+          {state.result.generated_note && <GeneratedNoteRenderer note={state.result.generated_note} />}
 
           <section aria-labelledby="physical-pages">
             <h2 id="physical-pages">Physical pages / slides</h2>

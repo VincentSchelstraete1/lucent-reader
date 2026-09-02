@@ -1,3 +1,4 @@
+import type { LearningObject } from "../learning/schema/learningObject"
 // Single place the backend's base URL is defined, mirroring lib/config.ts
 // in the Chrome extension - one line to change instead of scattering
 // backend URLs through components.
@@ -288,7 +289,10 @@ export type DocumentIngestionResult = {
   extraction_metadata: Record<string, string | number | boolean | null>
   normalized: NormalizedDocument
   learning_blocks: LearningBlock[]
+  generated_note: GeneratedLearningNote | null
 }
+
+export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; learningObject: LearningObject; generationFallback: boolean }> }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult

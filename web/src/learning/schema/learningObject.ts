@@ -46,6 +46,21 @@ export interface ComparisonLearningObject extends LearningObjectBase<"comparison
   differences?: string[]
 }
 
-// This union deliberately contains only implemented semantic objects. The
-// routing taxonomy is broader, and future concrete objects extend this union.
-export type LearningObject = ProcessLearningObject | ComparisonLearningObject
+export interface CausalNode { id: string; label: string; explanation?: string }
+export interface CausalEdge { from: string; to: string; label?: string }
+export interface CausalLearningObject extends LearningObjectBase<"causal"> { nodes: CausalNode[]; edges: CausalEdge[] }
+
+export interface ConceptMapNode { id: string; label: string; definition?: string }
+export interface ConceptMapRelationship { from: string; to: string; label: string }
+export interface ConceptMapLearningObject extends LearningObjectBase<"concept_map"> { nodes: ConceptMapNode[]; relationships: ConceptMapRelationship[] }
+
+export interface HierarchyNode { id: string; label: string; children?: HierarchyNode[] }
+export interface HierarchyLearningObject extends LearningObjectBase<"hierarchy"> { root: HierarchyNode }
+
+export interface QuantitativeVariable { id: string; name: string; value?: string; unit?: string; explanation?: string }
+export interface QuantitativeRelationship { expression: string; explanation?: string }
+export interface QuantitativeLearningObject extends LearningObjectBase<"quantitative"> { variables: QuantitativeVariable[]; relationships: QuantitativeRelationship[] }
+
+export interface PlainTextLearningObject extends LearningObjectBase<"plain_text"> { paragraphs: string[]; keyPoints?: string[]; definitions?: Array<{ term: string; meaning: string }> }
+
+export type LearningObject = ProcessLearningObject | ComparisonLearningObject | CausalLearningObject | ConceptMapLearningObject | HierarchyLearningObject | QuantitativeLearningObject | PlainTextLearningObject

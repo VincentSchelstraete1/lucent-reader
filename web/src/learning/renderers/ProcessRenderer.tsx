@@ -95,7 +95,7 @@ export function ProcessRenderer({ object }: { object: ProcessLearningObject }) {
   return (
     <div aria-busy={status === "loading"}>
       {status === "loading" && <p role="status">Building process diagram…</p>}
-      {status === "error" && <p role="alert">{error}</p>}
+      {status === "error" && <><p role="alert">{error}</p><ol>{object.steps.map(step => <li key={step.id}><strong>{step.label}</strong>{step.explanation ? ` — ${step.explanation}` : ""}</li>)}</ol></>}
       <div ref={host} aria-label={`${object.title} diagram`} />
     </div>
   )
