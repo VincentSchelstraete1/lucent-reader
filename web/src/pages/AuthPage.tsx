@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react"
-import { Link } from "react-router-dom"
+import { Link, Navigate } from "react-router-dom"
 import { AuthCard } from "../components/auth/AuthCard"
 import { LanyardErrorBoundary } from "../components/auth/LanyardErrorBoundary"
 import { useReducedMotion } from "../lib/useReducedMotion"
 import styles from "../components/auth/auth.module.css"
+import { useAuth } from "../lib/AuthContext"
 
 // Lazy-loaded: pulls in three/fiber/drei/rapier (incl. its WASM physics
 // engine) - keep it out of the main bundle. AuthCard (the real, functional
@@ -23,6 +24,11 @@ function LanyardLoadingPlaceholder() {
 
 export function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const reduced = useReducedMotion()
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/app" replace />
+  }
 
   return (
     <div className={styles.page}>
