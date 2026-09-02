@@ -76,3 +76,14 @@ Both representations are returned in one non-normalized `RawDocument`, and no
 Source or Document rows are created. Inline image data is temporary response
 data rather than durable storage. The web development server exposes the inspector at
 `/app/dev/ingestion`; the route is omitted from production web builds.
+
+The response also includes a deterministic `NormalizedDocument` beside the raw
+representation. It suppresses only conservatively detected repeated page
+furniture, repairs narrow layout artifacts, retains RawBlock/Image provenance,
+and records every transformation or unresolved suspicious artifact. It does not
+perform semantic segmentation. To print a task-specific evaluation report for
+one or more local PDFs without persistence, run from `backend/`:
+
+```bash
+PYTHONPATH=. venv/bin/python scripts/evaluate_normalization.py /path/to/file.pdf
+```

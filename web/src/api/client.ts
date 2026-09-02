@@ -150,6 +150,81 @@ export type RawPage = {
   extraction_errors: string[]
 }
 
+export type SourceReference = {
+  page_start: number
+  page_end: number
+  raw_block_ids: string[]
+  bboxes: [number, number, number, number][]
+}
+
+export type NormalizedBlock = {
+  id: string
+  type: "heading" | "paragraph" | "list" | "table" | "caption" | "image" | "unknown"
+  text: string | null
+  source: SourceReference
+  source_image_id: string | null
+}
+
+export type NormalizedPage = {
+  page_number: number
+  text: string
+  blocks: NormalizedBlock[]
+  transformation_ids: string[]
+  suppressed_artifact_ids: string[]
+}
+
+export type NormalizationEvent = {
+  id: string
+  stage: string
+  page_number: number
+  raw_block_ids: string[]
+  description: string
+  before: string | null
+  after: string | null
+}
+
+export type SuppressedArtifact = {
+  id: string
+  type: "header" | "footer" | "page_number"
+  text: string
+  page_numbers: number[]
+  raw_block_ids: string[]
+}
+
+export type UnresolvedArtifact = {
+  id: string
+  type: string
+  page_number: number | null
+  raw_block_ids: string[]
+  text: string
+  reason: string
+}
+
+export type NormalizedDocument = {
+  source_type: string
+  filename: string
+  page_count: number
+  pages: NormalizedPage[]
+  images: Array<{
+    id: string
+    source_page: number
+    source_bbox: [number, number, number, number] | null
+    width: number | null
+    height: number | null
+    mime_type: string | null
+    caption: string | null
+    asset_reference: string
+    source_image_ids: string[]
+  }>
+  normalization_metadata: {
+    version: string
+    suppressed_artifacts: SuppressedArtifact[]
+    events: NormalizationEvent[]
+    unresolved_artifacts: UnresolvedArtifact[]
+    counters: Record<string, number>
+  }
+}
+
 export type PdfIngestionResult = {
   status: "success"
   filename: string
@@ -160,6 +235,7 @@ export type PdfIngestionResult = {
   pages: RawPage[]
   images: RawImage[]
   extraction_metadata: Record<string, string | number | boolean | null>
+  normalized: NormalizedDocument
 }
 
 export const api = {

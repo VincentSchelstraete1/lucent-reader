@@ -15,6 +15,7 @@ from app.ingestion import (
     PyMuPDFPageExtractor,
 )
 from app.models.auth import User
+from app.normalization import normalize_document
 from app.schemas.ingestion import PdfIngestionResponse
 
 
@@ -88,4 +89,5 @@ async def ingest_pdf(
             "The PDF could not be extracted",
         )
 
-    return PdfIngestionResponse.from_raw_document(extracted)
+    normalized = await run_in_threadpool(normalize_document, extracted)
+    return PdfIngestionResponse.from_documents(extracted, normalized)

@@ -86,7 +86,7 @@ export function PdfIngestionDemo() {
       {state.status === "success" && (
         <section className={styles.output}>
           <section className={styles.metadata} aria-labelledby="document-metadata">
-            <h2 id="document-metadata">Raw document</h2>
+            <h2 id="document-metadata">Raw and normalized document</h2>
             <dl>
               <div><dt>Filename</dt><dd>{state.result.filename}</dd></div>
               <div><dt>Physical pages</dt><dd>{state.result.page_count}</dd></div>
@@ -94,6 +94,32 @@ export function PdfIngestionDemo() {
               <div><dt>Markdown characters</dt><dd>{state.result.extracted_character_count.toLocaleString()}</dd></div>
             </dl>
             <pre>{JSON.stringify(state.result.extraction_metadata, null, 2)}</pre>
+            <h3>Normalization summary</h3>
+            <dl className={styles.counters}>
+              {Object.entries(state.result.normalized.normalization_metadata.counters).map(([name, count]) => (
+                <div key={name}><dt>{name.replace(/_/g, " ")}</dt><dd>{count}</dd></div>
+              ))}
+            </dl>
+            {state.result.normalized.normalization_metadata.suppressed_artifacts.length > 0 && (
+              <details>
+                <summary>Suppressed page furniture</summary>
+                <ul>
+                  {state.result.normalized.normalization_metadata.suppressed_artifacts.map((artifact) => (
+                    <li key={artifact.id}><strong>{artifact.type}</strong>: {artifact.text} · pages {artifact.page_numbers.join(", ")}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {state.result.normalized.normalization_metadata.unresolved_artifacts.length > 0 && (
+              <details>
+                <summary>Unresolved suspicious artifacts</summary>
+                <ul>
+                  {state.result.normalized.normalization_metadata.unresolved_artifacts.map((artifact) => (
+                    <li key={artifact.id}><strong>{artifact.type}</strong> on page {artifact.page_number ?? "unknown"}: {artifact.text} — {artifact.reason}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </section>
 
           <section aria-labelledby="physical-pages">
@@ -101,22 +127,54 @@ export function PdfIngestionDemo() {
             <div className={styles.pages}>
               {state.result.pages.map((page) => {
                 const images = state.result.images.filter((image) => image.page_number === page.page_number)
+                const normalizedPage = state.result.normalized.pages.find((candidate) => candidate.page_number === page.page_number)
+                const pageEvents = state.result.normalized.normalization_metadata.events.filter((event) => event.page_number === page.page_number)
                 return (
                   <details className={styles.pageCard} key={page.page_number} open={page.page_number === 1}>
                     <summary>Page {page.page_number} · {page.blocks.length} blocks · {images.length} images</summary>
                     {page.extraction_errors.map((error) => <p className="error" key={error}>{error}</p>)}
-                    <h3>Page text</h3>
-                    <pre className={styles.rawText}>{page.text || "(no text extracted)"}</pre>
-                    <h3>Raw blocks</h3>
-                    <ol className={styles.blocks}>
-                      {page.blocks.map((block) => (
-                        <li key={block.id}>
-                          <code>#{block.reading_order} · {block.type} · bbox {formatBbox(block.bbox)}</code>
-                          {block.text !== null && <pre>{block.text || "(empty text block)"}</pre>}
-                          {block.image_id && <span>Image: {block.image_id}</span>}
-                        </li>
-                      ))}
-                    </ol>
+                    <div className={styles.comparison}>
+                      <section>
+                        <h3>Raw</h3>
+                        <pre className={styles.rawText}>{page.text || "(no text extracted)"}</pre>
+                        <h4>Raw blocks</h4>
+                        <ol className={styles.blocks}>
+                          {page.blocks.map((block) => (
+                            <li key={block.id}>
+                              <code>#{block.reading_order} · {block.type} · {block.id} · bbox {formatBbox(block.bbox)}</code>
+                              {block.text !== null && <pre>{block.text || "(empty text block)"}</pre>}
+                              {block.image_id && <span>Image: {block.image_id}</span>}
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                      <section>
+                        <h3>Normalized</h3>
+                        <pre className={styles.rawText}>{normalizedPage?.text || "(no normalized text)"}</pre>
+                        <h4>Normalized blocks</h4>
+                        <ol className={styles.blocks}>
+                          {normalizedPage?.blocks.map((block) => (
+                            <li key={block.id}>
+                              <code>{block.type} · pages {block.source.page_start}–{block.source.page_end}</code>
+                              <span>Raw IDs: {block.source.raw_block_ids.join(", ")}</span>
+                              <span>Source bboxes: {block.source.bboxes.map(formatBbox).join("; ") || "unavailable"}</span>
+                              {block.text !== null && <pre>{block.text || "(empty normalized block)"}</pre>}
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                    </div>
+                    {(pageEvents.length > 0 || normalizedPage?.suppressed_artifact_ids.length) && (
+                      <details className={styles.pageAudit}>
+                        <summary>Page transformations</summary>
+                        <ul>
+                          {normalizedPage?.suppressed_artifact_ids.map((id) => <li key={id}>Suppressed: {id}</li>)}
+                          {pageEvents.map((event) => (
+                            <li key={event.id}>{event.stage}: {event.description} · raw blocks {event.raw_block_ids.join(", ")}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                     {images.length > 0 && (
                       <>
                         <h3>Images and figures</h3>
