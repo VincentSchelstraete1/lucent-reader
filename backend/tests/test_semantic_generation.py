@@ -2,9 +2,10 @@ from types import SimpleNamespace
 
 from app.semantic import DeterministicSemanticGenerator, DeterministicPedagogicalPlanner, assemble_note
 from app.routing import RepresentationDecision
+from app.normalization import SourceReference
 
 def block(text, ident="b1"):
-    return SimpleNamespace(id=ident, text=text, title=None, source=SimpleNamespace(page_start=1, page_end=1, normalized_block_ids=["n1"], locations=[]))
+    return SimpleNamespace(id=ident, text=text, title=None, heading_ancestry=[], attached_table_ids=[], attached_image_ids=[], source=SourceReference(page_start=1, page_end=1, raw_block_ids=["r1"], bboxes=[], locations=[]))
 
 def decision(kind, ident="b1"):
     return RepresentationDecision(learning_block_id=ident, type=kind, confidence=.8, method="deterministic", scores={kind: .8}, fallback_used=False)
@@ -31,7 +32,7 @@ def test_note_assembly_preserves_source_order_and_provenance():
     objects = {b.id: generator.generate(b, decisions[b.id]) for b in (first, second)}
     note = assemble_note("lesson.pdf", "pdf", 2, [first, second], decisions, objects)
     assert [section.learning_block_id for section in note.sections] == ["a", "b"]
-    assert note.sections[0].source["normalized_block_ids"] == ["n1"]
+    assert note.sections[0].source["raw_block_ids"] == ["r1"]
 
 def test_planner_explains_representation_purpose_and_can_downgrade_weak_map():
     planner = DeterministicPedagogicalPlanner()

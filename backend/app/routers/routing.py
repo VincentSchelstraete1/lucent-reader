@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -9,6 +7,8 @@ from app.routers.ingestion import get_classifier, get_semantic_generator
 from app.routing import ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import RepresentationDecisionResponse
 from app.semantic import SemanticGenerator, plain_text_fallback, build_context_packet
+from app.normalization import SourceReference
+from app.segmentation import LearningBlock, SegmentationMetadata
 
 router = APIRouter(prefix="/routing")
 
@@ -20,6 +20,23 @@ class RoutingResponse(BaseModel):
     learning_object: dict
     teaching_plan: dict
 
+def _canvas_learning_block(text: str) -> LearningBlock:
+    """Build a complete LearningBlock for text with no document provenance."""
+    return LearningBlock(
+        id="learning-canvas",
+        block_type="section",
+        text=text,
+        character_count=len(text),
+        normalized_block_ids=[],
+        source=SourceReference(page_start=None, page_end=None, raw_block_ids=[], bboxes=[], locations=[]),
+        segmentation=SegmentationMetadata(method="canvas", boundary_reason="Interactive Learning Canvas input"),
+        title=None,
+        heading_ancestry=[],
+        attached_table_ids=[],
+        attached_image_ids=[],
+        token_count=None,
+    )
+
 @router.post("/representation", response_model=RoutingResponse, dependencies=[Depends(require_csrf)])
 def route_canvas_text(
     request: RoutingRequest,
@@ -27,7 +44,7 @@ def route_canvas_text(
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
 ) -> RoutingResponse:
-    block = SimpleNamespace(id="learning-canvas", text=request.text.strip(), title=None, heading_ancestry=[])
+    block = _canvas_learning_block(request.text.strip())
     decision: RepresentationDecision = route_learning_block_hybrid(block, classifier)
     plan = semantic_generator.plan(block, decision, build_context_packet(block))
     try:
