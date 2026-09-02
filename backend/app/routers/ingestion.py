@@ -23,7 +23,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicSemanticGenerator, HybridSemanticGenerator, SemanticGenerator, assemble_note, plain_text_fallback
+from app.semantic import AnthropicPedagogicalPlanner, AnthropicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet
 
 
 router = APIRouter(prefix="/ingestion")
@@ -54,7 +54,7 @@ def get_classifier() -> ClassifierAdapter:
 
 @lru_cache(maxsize=1)
 def get_semantic_generator() -> SemanticGenerator:
-    return HybridSemanticGenerator(AnthropicSemanticGenerator())
+    return HybridSemanticGenerator(AnthropicSemanticGenerator(), planner=PedagogicalPlanner(AnthropicPedagogicalPlanner()))
 
 
 def _segment_and_route(
@@ -63,6 +63,18 @@ def _segment_and_route(
     blocks = segment_document(normalized)
     decisions = {block.id: route_learning_block_hybrid(block, classifier) for block in blocks}
     return blocks, decisions
+
+async def _generate_note(extracted, blocks, decisions, semantic_generator):
+    objects, plans = {}, {}
+    for index, block in enumerate(blocks):
+        context = build_context_packet(block, previous=blocks[index - 1] if index else None, next_block=blocks[index + 1] if index + 1 < len(blocks) else None, document_title=extracted.filename)
+        try:
+            plan = await run_in_threadpool(semantic_generator.plan, block, decisions[block.id], context)
+            plans[block.id] = plan
+            objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id], plan)
+        except Exception:
+            objects[block.id] = plain_text_fallback(block)
+    return assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects, plans)
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -155,11 +167,7 @@ async def ingest_pdf(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    objects = {}
-    for block in blocks:
-        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
-        except Exception: objects[block.id] = plain_text_fallback(block)
-    note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects)
+    note = await _generate_note(extracted, blocks, decisions, semantic_generator)
     return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note)
 
 
@@ -192,11 +200,7 @@ async def ingest_docx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    objects = {}
-    for block in blocks:
-        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
-        except Exception: objects[block.id] = plain_text_fallback(block)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects))
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, await _generate_note(extracted, blocks, decisions, semantic_generator))
 
 
 @router.post(
@@ -228,8 +232,4 @@ async def ingest_pptx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    objects = {}
-    for block in blocks:
-        try: objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id])
-        except Exception: objects[block.id] = plain_text_fallback(block)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects))
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, await _generate_note(extracted, blocks, decisions, semantic_generator))

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.semantic import DeterministicSemanticGenerator, assemble_note
+from app.semantic import DeterministicSemanticGenerator, DeterministicPedagogicalPlanner, assemble_note
 from app.routing import RepresentationDecision
 
 def block(text, ident="b1"):
@@ -32,3 +32,11 @@ def test_note_assembly_preserves_source_order_and_provenance():
     note = assemble_note("lesson.pdf", "pdf", 2, [first, second], decisions, objects)
     assert [section.learning_block_id for section in note.sections] == ["a", "b"]
     assert note.sections[0].source["normalized_block_ids"] == ["n1"]
+
+def test_planner_explains_representation_purpose_and_can_downgrade_weak_map():
+    planner = DeterministicPedagogicalPlanner()
+    weak = planner.plan(block("The hippocampus is a brain structure.", "map"), decision("concept_map", "map"))
+    assert weak.final_representation == "plain_text"
+    strong = planner.plan(block("The TLB caches page-table translations.", "map2"), decision("concept_map", "map2"))
+    assert strong.final_representation == "concept_map"
+    assert strong.representation_plan
