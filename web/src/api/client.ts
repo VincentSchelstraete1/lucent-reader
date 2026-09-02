@@ -257,6 +257,8 @@ export type RepresentationDecision = {
   fallback_used: boolean
 }
 
+export type LearningCanvasResult = { decision: RepresentationDecision; learning_object: LearningObject }
+
 export type LearningBlockType = "section" | "list" | "table" | "figure" | "mixed"
 
 export type LearningBlock = {
@@ -331,5 +333,6 @@ export const api = {
     const form = new FormData()
     form.append("file", file)
     return postForm<DocumentIngestionResult>(endpoint, form)
-  }
+  },
+  routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text })
 }

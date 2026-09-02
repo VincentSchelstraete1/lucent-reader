@@ -1,18 +1,22 @@
-import { useMemo, useState } from "react"
-import { buildLearningObject } from "../builders/learningObjectBuilder"
+import { useState } from "react"
+import { api, type LearningCanvasResult } from "../../api/client"
 import { LearningObjectRenderer } from "../renderers/LearningObjectRenderer"
-import { routeRepresentation } from "../routing/representationRouter"
-import { REPRESENTATION_TYPES } from "../routing/representationTypes"
 import styles from "./learningCanvasDemo.module.css"
 
 const EXAMPLE = "The client sends SYN. Then the server responds with SYN-ACK. Finally the client sends ACK."
 
 export function LearningCanvasDemo() {
   const [sourceText, setSourceText] = useState(EXAMPLE)
-  const route = useMemo(() => routeRepresentation(sourceText), [sourceText])
-  const learningObject = useMemo(() => {
-    try { return buildLearningObject(route.type, sourceText) } catch { return null }
-  }, [route.type, sourceText])
+  const [result, setResult] = useState<LearningCanvasResult | null>(null)
+  const [isLoading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  async function analyze() {
+    if (!sourceText.trim()) return
+    setLoading(true); setError(null)
+    try { setResult(await api.routeLearningCanvas(sourceText)) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to route this text") }
+    finally { setLoading(false) }
+  }
 
   return (
     <section className={styles.page}>
@@ -22,31 +26,36 @@ export function LearningCanvasDemo() {
       </header>
 
       <label className={styles.label} htmlFor="learning-source">Source text</label>
-      <textarea id="learning-source" className={styles.input} rows={6} value={sourceText} onChange={(event) => setSourceText(event.target.value)} />
+      <textarea id="learning-source" className={styles.input} rows={6} value={sourceText} onChange={(event) => { setSourceText(event.target.value); setResult(null) }} />
+      <button type="button" onClick={analyze} disabled={isLoading || !sourceText.trim()}>{isLoading ? "Analyzing…" : "Analyze with production router"}</button>
+      {error && <p className="error" role="alert">{error}</p>}
 
+      {result && <>
       <div className={styles.grid}>
         <article className={styles.panel}>
           <h2>Router result</h2>
           <dl className={styles.resultList}>
-            <div><dt>Type</dt><dd>{route.type}</dd></div>
-            <div><dt>Confidence</dt><dd>{route.confidence.toFixed(2)}</dd></div>
+            <div><dt>Type</dt><dd>{result.decision.type}</dd></div>
+            <div><dt>Confidence</dt><dd>{result.decision.confidence?.toFixed(2) ?? "not calibrated (fallback)"}</dd></div>
+            <div><dt>Method</dt><dd>{result.decision.method}</dd></div>
+            <div><dt>Fallback used</dt><dd>{result.decision.fallback_used ? "yes" : "no"}</dd></div>
           </dl>
-          <ul>{route.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           <div className={styles.scores}>
-            {REPRESENTATION_TYPES.map((type) => <span key={type}>{type}: {route.scores[type].toFixed(2)}</span>)}
+            {Object.entries(result.decision.scores).map(([type, score]) => <span key={type}>{type}: {score.toFixed(2)}</span>)}
           </div>
         </article>
 
         <article className={styles.panel}>
           <h2>LearningObject</h2>
-          {learningObject ? <pre className={styles.json}>{JSON.stringify(learningObject, null, 2)}</pre> : <p>No deterministic builder exists for this representation yet.</p>}
+          <pre className={styles.json}>{JSON.stringify(result.learning_object, null, 2)}</pre>
         </article>
       </div>
 
       <article className={styles.diagramPanel}>
-        <h2>{learningObject ? `${learningObject.type} renderer` : "Renderer"}</h2>
-        {learningObject ? <LearningObjectRenderer object={learningObject} /> : <p>No renderer for the current routing result.</p>}
+        <h2>{result.learning_object.type} renderer</h2>
+        <LearningObjectRenderer object={result.learning_object} />
       </article>
+      </>}
     </section>
   )
 }
