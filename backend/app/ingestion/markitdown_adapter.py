@@ -3,11 +3,11 @@ from typing import TYPE_CHECKING, BinaryIO
 if TYPE_CHECKING:
     from markitdown import MarkItDown
 
-from app.ingestion.base import DocumentExtractionError, RawExtractedDocument
+from app.ingestion.base import DocumentExtractionError
 
 
-class MarkItDownDocumentIngestor:
-    """Translate MarkItDown output into Lucent's raw ingestion boundary."""
+class MarkItDownAdapter:
+    """Expose MarkItDown as a raw Markdown extractor, not Lucent's document model."""
 
     def __init__(self, converter: "MarkItDown | None" = None) -> None:
         if converter is None:
@@ -16,7 +16,7 @@ class MarkItDownDocumentIngestor:
             converter = MarkItDown(enable_plugins=False)
         self._converter = converter
 
-    def ingest_pdf(self, stream: BinaryIO, *, filename: str) -> RawExtractedDocument:
+    def extract_markdown(self, stream: BinaryIO, *, filename: str) -> str:
         try:
             from markitdown import StreamInfo
 
@@ -32,11 +32,6 @@ class MarkItDownDocumentIngestor:
         except Exception as exc:
             raise DocumentExtractionError("MarkItDown could not extract this PDF") from exc
 
-        markdown = result.text_content
-        if markdown is None:
+        if result.text_content is None:
             raise DocumentExtractionError("MarkItDown returned no extraction result")
-        return RawExtractedDocument(
-            original_filename=filename,
-            source_type="pdf",
-            markdown=markdown,
-        )
+        return result.text_content

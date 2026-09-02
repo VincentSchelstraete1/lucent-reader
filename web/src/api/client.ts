@@ -122,12 +122,44 @@ async function postForm<T>(path: string, body: FormData): Promise<T> {
   return response.json()
 }
 
+export type RawContentBlock = {
+  id: string
+  page_number: number
+  type: "text" | "image" | "table" | "unknown"
+  text: string | null
+  bbox: [number, number, number, number] | null
+  reading_order: number
+  image_id: string | null
+}
+
+export type RawImage = {
+  id: string
+  page_number: number
+  bbox: [number, number, number, number] | null
+  width: number | null
+  height: number | null
+  mime_type: string | null
+  caption: string | null
+  asset_reference: string
+}
+
+export type RawPage = {
+  page_number: number
+  text: string
+  blocks: RawContentBlock[]
+  extraction_errors: string[]
+}
+
 export type PdfIngestionResult = {
   status: "success"
-  original_filename: string
+  filename: string
   source_type: "pdf"
+  page_count: number
   markdown: string
   extracted_character_count: number
+  pages: RawPage[]
+  images: RawImage[]
+  extraction_metadata: Record<string, string | number | boolean | null>
 }
 
 export const api = {

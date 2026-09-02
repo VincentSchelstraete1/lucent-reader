@@ -1,9 +1,25 @@
-from app.ingestion.base import DocumentExtractionError, DocumentIngestor, RawExtractedDocument
-from app.ingestion.markitdown_adapter import MarkItDownDocumentIngestor
+from app.ingestion.base import (
+    DocumentExtractionError,
+    DocumentIngestor,
+    PageAwareExtraction,
+    RawContentBlock,
+    RawDocument,
+    RawImage,
+    RawPage,
+)
+from app.ingestion.markitdown_adapter import MarkItDownAdapter
+from app.ingestion.pdf_ingestor import PdfDocumentIngestor
+from app.ingestion.pymupdf_extractor import PyMuPDFPageExtractor
 
 __all__ = [
     "DocumentExtractionError",
     "DocumentIngestor",
-    "MarkItDownDocumentIngestor",
-    "RawExtractedDocument",
+    "MarkItDownAdapter",
+    "PageAwareExtraction",
+    "PdfDocumentIngestor",
+    "PyMuPDFPageExtractor",
+    "RawContentBlock",
+    "RawDocument",
+    "RawImage",
+    "RawPage",
 ]

@@ -16,6 +16,8 @@ Use one copy of this worksheet for each PDF. Preserve the raw output when report
 - Extraction completed: yes / no
 - Error shown, if any:
 - Extracted character count:
+- Physical page count matches PDF: yes / no
+- Extracted image count:
 
 ## Output inspection
 
@@ -33,6 +35,14 @@ Use one copy of this worksheet for each PDF. Preserve the raw output when report
 | Missing content | | |
 | Duplicated content | | |
 | Strange Markdown artifacts | | |
+| Physical page association | | |
+| Raw block order and bounding boxes | | |
+| Extracted figures/images | | |
+| Image-to-page association | | |
+| Conservative caption association | | |
+
+Compare each physical page's raw text and block list against the global
+MarkItDown output. Record observed differences without correcting either form.
 
 ## Summary
 

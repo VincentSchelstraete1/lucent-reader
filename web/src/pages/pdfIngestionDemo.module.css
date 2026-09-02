@@ -5,11 +5,30 @@
 .form input { font: inherit; }
 .form button, .output button { width: fit-content; border: 1px solid var(--lucent-accent-dark); border-radius: 8px; padding: 8px 12px; background: var(--lucent-accent); color: white; font: inherit; font-weight: 600; cursor: pointer; }
 .form button:disabled { cursor: not-allowed; opacity: 0.55; }
-.form button:focus-visible, .output button:focus-visible, .form input:focus-visible { outline: 2px solid var(--lucent-accent); outline-offset: 2px; }
-.output { margin-top: 24px; }
-.outputHeader { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
-.outputHeader h2 { margin: 0 0 4px; }
-.outputHeader p { margin: 0; color: var(--lucent-caption); font-size: 12px; }
-.markdown { display: block; width: 100%; min-height: 480px; resize: vertical; border: 1px solid var(--lucent-border); border-radius: 10px; padding: 14px; background: var(--lucent-surface); color: var(--lucent-text); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+.form button:focus-visible, .output button:focus-visible, .form input:focus-visible, .pageCard summary:focus-visible, .markdownSection summary:focus-visible { outline: 2px solid var(--lucent-accent); outline-offset: 2px; }
+.output { display: grid; gap: 28px; margin-top: 24px; }
+.metadata, .pageCard, .markdownSection { border: 1px solid var(--lucent-border); border-radius: 12px; background: var(--lucent-surface); }
+.metadata { padding: 18px; }
+.metadata h2 { margin-top: 0; }
+.metadata dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.metadata dl div { min-width: 0; }
+.metadata dt { color: var(--lucent-caption); font-size: 12px; }
+.metadata dd { overflow-wrap: anywhere; margin: 4px 0 0; font-weight: 600; }
+.metadata pre { overflow: auto; padding: 10px; border-radius: 8px; background: var(--lucent-bg); font-size: 11px; }
+.pages { display: grid; gap: 12px; }
+.pageCard > summary, .markdownSection > summary { padding: 14px 16px; cursor: pointer; font-weight: 700; }
+.pageCard[open] > summary, .markdownSection[open] > summary { border-bottom: 1px solid var(--lucent-border); }
+.pageCard > :not(summary), .markdownSection > :not(summary) { margin-right: 16px; margin-left: 16px; }
+.rawText, .blocks pre { overflow: auto; max-height: 320px; padding: 12px; border-radius: 8px; background: var(--lucent-bg); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+.blocks { display: grid; gap: 10px; padding-left: 30px; }
+.blocks li { padding: 10px; border: 1px solid var(--lucent-border); border-radius: 8px; }
+.blocks code, .blocks span { display: block; overflow-wrap: anywhere; font-size: 11px; }
+.images { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 18px !important; }
+.imageCard { display: grid; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--lucent-border); border-radius: 8px; }
+.imageCard img { display: block; max-width: 100%; max-height: 360px; margin: auto; object-fit: contain; }
+.imageCard figcaption { display: grid; gap: 3px; overflow-wrap: anywhere; font-size: 11px; }
+.outputHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.outputHeader p { margin: 12px 0; color: var(--lucent-caption); font-size: 12px; }
+.markdown { display: block; box-sizing: border-box; width: calc(100% - 32px); min-height: 480px; margin-bottom: 16px !important; resize: vertical; border: 1px solid var(--lucent-border); border-radius: 10px; padding: 14px; background: var(--lucent-bg); color: var(--lucent-text); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
 .markdown:focus { outline: 2px solid var(--lucent-accent); outline-offset: 2px; }
-@media (max-width: 640px) { .outputHeader { align-items: flex-start; flex-direction: column; } .markdown { min-height: 360px; } }
+@media (max-width: 720px) { .metadata dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .outputHeader { align-items: flex-start; flex-direction: column; margin-bottom: 12px; } .markdown { min-height: 360px; } }

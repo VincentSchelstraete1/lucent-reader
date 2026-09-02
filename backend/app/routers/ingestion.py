@@ -1,5 +1,4 @@
 from functools import lru_cache
-from io import BytesIO
 from pathlib import PurePosixPath
 import re
 
@@ -8,7 +7,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth_dependencies import get_current_user, require_csrf
 from app.config import settings
-from app.ingestion import DocumentExtractionError, DocumentIngestor, MarkItDownDocumentIngestor
+from app.ingestion import (
+    DocumentExtractionError,
+    DocumentIngestor,
+    MarkItDownAdapter,
+    PdfDocumentIngestor,
+    PyMuPDFPageExtractor,
+)
 from app.models.auth import User
 from app.schemas.ingestion import PdfIngestionResponse
 
@@ -20,7 +25,7 @@ READ_CHUNK_BYTES = 1024 * 1024
 
 @lru_cache(maxsize=1)
 def get_document_ingestor() -> DocumentIngestor:
-    return MarkItDownDocumentIngestor()
+    return PdfDocumentIngestor(PyMuPDFPageExtractor(), MarkItDownAdapter())
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -73,20 +78,14 @@ async def ingest_pdf(
     try:
         extracted = await run_in_threadpool(
             ingestor.ingest_pdf,
-            BytesIO(data),
+            data,
             filename=filename,
         )
     except DocumentExtractionError:
         raise _error(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "pdf_extraction_failed",
-            "MarkItDown could not extract this PDF",
+            "The PDF could not be extracted",
         )
 
-    return PdfIngestionResponse(
-        status="success",
-        original_filename=extracted.original_filename,
-        source_type="pdf",
-        markdown=extracted.markdown,
-        extracted_character_count=len(extracted.markdown),
-    )
+    return PdfIngestionResponse.from_raw_document(extracted)

@@ -69,7 +69,10 @@ PDF_UPLOAD_MAX_BYTES=20971520
 ```
 
 Authenticated web clients can send a multipart request with a `file` field to
-`POST /ingestion/pdf`. The endpoint validates and converts the PDF in memory,
-returns MarkItDown's raw `text_content`, and does not create Source or Document
-rows. The web development server exposes the inspector at
+`POST /ingestion/pdf`. The endpoint validates and converts the PDF in memory.
+PyMuPDF preserves physical pages, raw layout blocks, bounding boxes, and inline
+image assets; MarkItDown independently supplies its raw global `text_content`.
+Both representations are returned in one non-normalized `RawDocument`, and no
+Source or Document rows are created. Inline image data is temporary response
+data rather than durable storage. The web development server exposes the inspector at
 `/app/dev/ingestion`; the route is omitted from production web builds.
