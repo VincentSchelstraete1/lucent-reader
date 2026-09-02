@@ -31,7 +31,8 @@ or development-only switches are enabled.
 The web app uses an opaque server-side session in an HttpOnly cookie. The
 extension uses an independent device grant with a 15-minute opaque access
 token and a rotating opaque refresh token; the refresh token is persisted only
-in `chrome.storage.local`, while access tokens use `chrome.storage.session`.
+in background-origin IndexedDB (not extension storage exposed to content
+scripts), while access tokens use `chrome.storage.session`.
 
 ## One-time local legacy ownership claim
 

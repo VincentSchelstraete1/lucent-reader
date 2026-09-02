@@ -23,6 +23,7 @@ class SessionMetadata(BaseModel):
 
 class ExtensionTokenExchange(BaseModel):
     code: str
+    state: str
     code_verifier: str
     redirect_uri: str
 

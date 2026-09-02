@@ -83,6 +83,7 @@ class ExtensionAuthorizationCode(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    state_hash: Mapped[str] = mapped_column(String(64))
     code_challenge: Mapped[str] = mapped_column(String(128))
     redirect_uri: Mapped[str] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

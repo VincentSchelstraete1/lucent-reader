@@ -3,12 +3,13 @@ from dataclasses import replace
 
 from authlib.jose import JsonWebKey, jwt
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.config import settings
 from app.main import app
 from app.models.auth import User, WebSession
 from app.security import token_hash, utcnow
-from app.routers.auth import _verified_google_claims
+from app.routers.auth import _rotate_web_session, _verified_google_claims
 from conftest import TestSessionLocal
 
 
@@ -57,6 +58,21 @@ def test_logout_revokes_server_session():
     client = _client_for(_user("logout"))
     assert client.post("/auth/logout").status_code == 204
     assert client.get("/auth/me").status_code == 401
+
+
+def test_successful_authentication_rotates_existing_session():
+    user = _user("rotate")
+    old_credential = "existing-session"
+    now = utcnow()
+    with TestSessionLocal() as db:
+        old = WebSession(user_id=user.id, credential_hash=token_hash(old_credential), csrf_hash=token_hash("old-csrf"), idle_expires_at=now + timedelta(hours=1), absolute_expires_at=now + timedelta(hours=2))
+        db.add(old); db.commit(); old_id = old.id
+        request = Request({"type": "http", "method": "GET", "path": "/", "headers": [(b"cookie", f"{settings.session_cookie_name}={old_credential}".encode())]})
+        new_credential, _, new_session = _rotate_web_session(db, request, db.get(User, user.id))
+        db.commit()
+        assert db.get(WebSession, old_id).revoked_at is not None
+        assert new_session.credential_hash == token_hash(new_credential)
+        assert new_session.credential_hash != token_hash(old_credential)
 
 
 def test_csrf_missing_and_invalid_rejected_and_valid_succeeds():

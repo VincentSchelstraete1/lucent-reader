@@ -61,6 +61,13 @@ def _new_session(db: Session, user: User) -> tuple[str, str, WebSession]:
     return credential, csrf, row
 
 
+def _rotate_web_session(db: Session, request: Request, user: User) -> tuple[str, str, WebSession]:
+    prior_session = _active_cookie_session(request, db)
+    if prior_session:
+        prior_session.revoked_at = utcnow()
+    return _new_session(db, user)
+
+
 def _claim_legacy_once(db: Session, user: User) -> None:
     if not settings.enable_legacy_claim or settings.environment != "development" or user.provider != "google":
         return
@@ -81,10 +88,10 @@ def _extension_redirect_allowed(uri: str) -> bool:
     return any(uri == f"https://{extension_id}.chromiumapp.org/lucent-auth" for extension_id in settings.extension_ids)
 
 
-def _issue_extension_code(db: Session, user: User, challenge: str, redirect_uri: str) -> str:
+def _issue_extension_code(db: Session, user: User, challenge: str, redirect_uri: str, extension_state: str) -> str:
     code = random_token(32)
     db.add(ExtensionAuthorizationCode(
-        user_id=user.id, code_hash=token_hash(code), code_challenge=challenge,
+        user_id=user.id, code_hash=token_hash(code), state_hash=token_hash(extension_state), code_challenge=challenge,
         redirect_uri=redirect_uri, expires_at=utcnow() + timedelta(minutes=2),
     ))
     db.flush()
@@ -207,14 +214,11 @@ def google_callback(request: Request, code: str, state: str, db: Session = Depen
     if transaction.flow_type == "extension":
         if not transaction.extension_redirect_uri or not transaction.extension_code_challenge or not transaction.extension_state:
             raise HTTPException(status_code=400, detail="Invalid extension authorization transaction")
-        extension_code = _issue_extension_code(db, user, transaction.extension_code_challenge, transaction.extension_redirect_uri)
+        extension_code = _issue_extension_code(db, user, transaction.extension_code_challenge, transaction.extension_redirect_uri, transaction.extension_state)
         db.commit()
         query = urlencode({"code": extension_code, "state": transaction.extension_state})
         return RedirectResponse(f"{transaction.extension_redirect_uri}?{query}", status_code=303)
-    prior_session = _active_cookie_session(request, db)
-    if prior_session:
-        prior_session.revoked_at = now
-    credential, csrf, _ = _new_session(db, user)
+    credential, csrf, _ = _rotate_web_session(db, request, user)
     db.commit()
     response = RedirectResponse(_web_redirect(transaction.return_to), status_code=303)
     _set_auth_cookies(response, credential, csrf)
@@ -271,6 +275,8 @@ def extension_token(payload: ExtensionTokenExchange, db: Session = Depends(get_d
     now = utcnow()
     if not row or row.used_at or row.expires_at <= now or not _extension_redirect_allowed(payload.redirect_uri):
         raise HTTPException(status_code=400, detail="Invalid or expired authorization code")
+    if not hmac.compare_digest(token_hash(payload.state), row.state_hash):
+        raise HTTPException(status_code=400, detail="OAuth state verification failed")
     if row.redirect_uri != payload.redirect_uri or not hmac.compare_digest(pkce_challenge(payload.code_verifier), row.code_challenge):
         raise HTTPException(status_code=400, detail="PKCE verification failed")
     row.used_at = now

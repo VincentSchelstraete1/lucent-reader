@@ -53,7 +53,7 @@ export async function login(): Promise<void> {
   if (result.searchParams.get("state") !== state) throw new Error("Lucent sign-in state mismatch")
   const code = result.searchParams.get("code")
   if (!code) throw new Error("Lucent sign-in did not return a code")
-  const issued = await exchange("/auth/extension/token", { code, code_verifier: verifier, redirect_uri: redirectUri })
+  const issued = await exchange("/auth/extension/token", { code, state, code_verifier: verifier, redirect_uri: redirectUri })
   await saveTokens(issued.access_token, issued.refresh_token)
 }
 

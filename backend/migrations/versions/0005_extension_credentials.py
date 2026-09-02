@@ -16,7 +16,7 @@ def upgrade() -> None:
     op.create_index("ix_extension_grants_user_id", "extension_grants", ["user_id"])
     op.create_table("extension_authorization_codes",
         sa.Column("id", sa.Uuid(), primary_key=True), sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("code_hash", sa.String(64), nullable=False, unique=True), sa.Column("code_challenge", sa.String(128), nullable=False),
+        sa.Column("code_hash", sa.String(64), nullable=False, unique=True), sa.Column("state_hash", sa.String(64), nullable=False), sa.Column("code_challenge", sa.String(128), nullable=False),
         sa.Column("redirect_uri", sa.String(512), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False), sa.Column("used_at", sa.DateTime(timezone=True), nullable=True))
     op.create_index("ix_extension_authorization_codes_code_hash", "extension_authorization_codes", ["code_hash"], unique=True)
