@@ -1,80 +1,145 @@
-import { ROUTER_CONFIG, STRUCTURED_TYPE_PRIORITY } from "./scoringConfig"
+import { ROUTER_CONFIG, ROUTER_MARKERS, STRUCTURED_TYPE_PRIORITY } from "./scoringConfig"
 import { REPRESENTATION_TYPES, type RepresentationRoute, type RepresentationScores, type RepresentationType } from "./representationTypes"
 
 type ScoredSignal = { score: number; reasons: string[] }
+
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
-const rounded = (value: number) => Math.round(clamp(value) * 100) / 100
+const rounded = (value: number) => {
+  const scale = 10 ** ROUTER_CONFIG.scorePrecision
+  return Math.round(clamp(value) * scale) / scale
+}
 const matches = (text: string, pattern: RegExp) => text.match(pattern)?.length ?? 0
+const commaSeparatedItems = (text: string) => matches(text, /,/g) >= 2
 
 function processScore(text: string): ScoredSignal {
-  const transitions = matches(text, /\b(first|next|then|finally|afterward|subsequently)\b/gi)
-  const temporal = matches(text, /\b(before|after|once|when)\b/gi)
-  const explicit = /\b(the process begins|followed by|the process ends|in sequence)\b/i.test(text)
-  const orderedItems = matches(text, /^\s*(?:\d+[.)]|step\s+\d+[:.)]?)[ \t]+/gim)
-  const arrows = /(?:→|->|=>)/.test(text)
-  let score = Math.min(0.64, transitions * ROUTER_CONFIG.process.transitionWeight)
-  score += Math.min(0.24, temporal * ROUTER_CONFIG.process.temporalWeight)
-  if (transitions >= 2) score += ROUTER_CONFIG.process.repeatedTransitionBonus
-  if (explicit) score += ROUTER_CONFIG.process.explicitPhraseWeight
-  if (orderedItems >= 2) score += ROUTER_CONFIG.process.orderedListWeight
-  else if (orderedItems === 1) score += 0.2
-  if (arrows) score += ROUTER_CONFIG.process.arrowWeight
-  const reasons: string[] = []
-  if (transitions) reasons.push("contains sequential transition words")
-  if (temporal || explicit) reasons.push("contains ordered procedural language")
-  if (orderedItems) reasons.push("contains numbered or ordered steps")
-  if (arrows) reasons.push("contains explicit progression arrows")
-  return { score: rounded(score), reasons }
+  const markers = ROUTER_MARKERS.process
+  const config = ROUTER_CONFIG.process
+  const transitions = matches(text, markers.transitions)
+  const temporal = matches(text, markers.temporal)
+  const explicit = markers.explicit.test(text)
+  const orderedItems = matches(text, markers.orderedItem)
+  const arrows = markers.arrow.test(text)
+  let score = Math.min(config.transitionCap, transitions * config.transitionWeight)
+  score += Math.min(config.temporalCap, temporal * config.temporalWeight)
+  if (transitions >= 2) score += config.repeatedTransitionBonus
+  if (explicit) score += config.explicitPhraseWeight
+  if (orderedItems >= 2) score += config.orderedListWeight
+  else if (orderedItems === 1) score += config.singleOrderedItemWeight
+  if (arrows) score += config.arrowWeight
+  return {
+    score: rounded(score),
+    reasons: [
+      ...(transitions ? ["contains sequential transition words"] : []),
+      ...(temporal || explicit ? ["contains ordered procedural language"] : []),
+      ...(orderedItems ? ["contains numbered or ordered steps"] : []),
+      ...(arrows ? ["contains explicit progression arrows"] : [])
+    ]
+  }
 }
 
 function comparisonScore(text: string): ScoredSignal {
-  const terms = matches(text, /\b(vs\.?|versus|whereas|unlike|compared (?:with|to)|similarities|differences)\b/gi)
-  const parallel = /\b(?:both|either)\b.*\b(?:and|or)\b/i.test(text) || /\b\w+\b.*\bwhereas\b.*\b\w+\b/i.test(text)
-  const score = terms * ROUTER_CONFIG.comparison.termWeight + (parallel ? ROUTER_CONFIG.comparison.parallelLanguageWeight : 0)
-  return { score: rounded(score), reasons: [...(terms ? ["contains explicit comparison language"] : []), ...(parallel ? ["contrasts parallel alternatives"] : [])] }
+  const markers = ROUTER_MARKERS.comparison
+  const config = ROUTER_CONFIG.comparison
+  const explicitTerms = markers.metaLanguage.test(text) ? 0 : matches(text, markers.explicit)
+  const parallel = markers.parallel.test(text)
+  const comparative = markers.comparative.test(text)
+  return {
+    score: rounded(explicitTerms * config.explicitTermWeight
+      + (parallel ? config.parallelLanguageWeight : 0)
+      + (comparative ? config.comparativeFormWeight : 0)),
+    reasons: [
+      ...(explicitTerms ? ["contains explicit comparison language"] : []),
+      ...(parallel ? ["contrasts parallel alternatives"] : []),
+      ...(comparative ? ["uses a comparative relationship"] : [])
+    ]
+  }
 }
 
 function causalScore(text: string): ScoredSignal {
-  const terms = matches(text, /\b(because|therefore|causes?|leads? to|results? in|due to|consequently|effects?)\b/gi)
-  return { score: rounded(terms * ROUTER_CONFIG.causal.termWeight), reasons: terms ? ["contains cause-and-effect language"] : [] }
+  const markers = ROUTER_MARKERS.causal
+  const config = ROUTER_CONFIG.causal
+  const directional = matches(text, markers.directional)
+  const connectives = markers.metaLanguage.test(text) ? 0 : matches(text, markers.connective)
+  const signalCount = directional + connectives
+  const hasTwoClauseConnection = connectives > 0 && /[,;]|\b(?:which|so)\b/i.test(text)
+  let score = directional * config.directionalWeight + connectives * config.connectiveWeight
+  if (hasTwoClauseConnection) score += config.twoClauseBonus
+  if (signalCount >= 2) score += config.repeatedSignalBonus
+  return {
+    score: rounded(score),
+    reasons: [
+      ...(directional ? ["states a directional cause-and-effect relationship"] : []),
+      ...(connectives ? ["connects a cause with its consequence"] : []),
+      ...(signalCount >= 2 ? ["contains multiple reinforcing causal signals"] : [])
+    ]
+  }
 }
 
 function conceptMapScore(text: string): ScoredSignal {
-  const relations = matches(text, /\b(related to|associated with|connected to|depends on|interacts with)\b/gi)
-  const definitionNetwork = /\b(?:is|are|refers to)\b/i.test(text) && matches(text, /,/g) >= 2
+  const markers = ROUTER_MARKERS.conceptMap
+  const config = ROUTER_CONFIG.conceptMap
+  const relations = matches(text, markers.relation)
+  const hubs = matches(text, markers.hub)
+  const entityNetwork = (relations > 0 || hubs > 0) && commaSeparatedItems(text)
+  const combinedNetwork = relations + hubs >= 2 || (relations > 0 && entityNetwork)
+  let score = relations * config.relationWeight + hubs * config.hubWeight
+  if (entityNetwork) score += config.entityNetworkWeight
+  if (combinedNetwork) score += config.networkCombinationBonus
   return {
-    score: rounded(relations * ROUTER_CONFIG.conceptMap.relationWeight + (definitionNetwork ? ROUTER_CONFIG.conceptMap.definitionNetworkWeight : 0)),
-    reasons: [...(relations ? ["links multiple related concepts"] : []), ...(definitionNetwork ? ["defines a concept through neighboring concepts"] : [])]
+    score: rounded(score),
+    reasons: [
+      ...(relations ? ["links concepts with explicit relationships"] : []),
+      ...(hubs ? ["describes a concept involving neighboring concepts"] : []),
+      ...(entityNetwork ? ["connects a network of multiple named concepts"] : [])
+    ]
   }
 }
 
 function hierarchyScore(text: string): ScoredSignal {
-  const containment = matches(text, /\b(consists of|contains|includes|types of|categories of|parts of|components of)\b/gi)
-  const enumeration = containment > 0 && matches(text, /,/g) >= 2
-  const listItems = matches(text, /^\s*(?:[-*]|\d+[.)])[ \t]+/gim)
-  const nestedList = /^\s{2,}(?:[-*]|\d+[.)])[ \t]+/m.test(text)
-  let score = containment * ROUTER_CONFIG.hierarchy.containmentWeight
-  if (enumeration) score += ROUTER_CONFIG.hierarchy.enumerationWeight
-  if (listItems >= 3) score += ROUTER_CONFIG.hierarchy.listWeight
-  if (nestedList) score += 0.2
+  const markers = ROUTER_MARKERS.hierarchy
+  const config = ROUTER_CONFIG.hierarchy
+  const strongContainment = matches(text, markers.strongContainment)
+  const weakContainment = matches(text, markers.weakContainment)
+  const listItems = matches(text, markers.listItem)
+  const nestedList = markers.nestedListItem.test(text)
+  const enumeration = (strongContainment + weakContainment > 0)
+    && (commaSeparatedItems(text) || /:\s*[^.!?]+(?:,|;)/.test(text))
+  let score = strongContainment * config.strongContainmentWeight + weakContainment * config.weakContainmentWeight
+  if (enumeration) score += config.groupedEnumerationWeight
+  if (listItems >= 3) score += config.flatListWeight
+  if (nestedList) score += config.nestedListBonus
   return {
     score: rounded(score),
-    reasons: [...(containment ? ["contains explicit part-to-whole language"] : []), ...(enumeration || listItems >= 3 ? ["contains grouped or nested items"] : [])]
+    reasons: [
+      ...(strongContainment || weakContainment ? ["contains explicit part-to-whole language"] : []),
+      ...(enumeration ? ["groups several members under a parent concept"] : []),
+      ...(listItems >= 3 ? ["contains a structured list of members"] : []),
+      ...(nestedList ? ["contains nested hierarchy levels"] : [])
+    ]
   }
 }
 
 function quantitativeScore(text: string): ScoredSignal {
-  const equation = /(?:=|\+|−|-|×|\*|÷|\/|≤|≥)/.test(text)
-  const percentage = /\b\d+(?:\.\d+)?\s*%/.test(text)
-  const units = /\b\d+(?:\.\d+)?\s*(?:ms|s|hz|khz|mhz|ghz|kb|mb|gb|bytes?|meters?|kg|°c)\b/i.test(text)
-  const relationship = /\b(average|rate|ratio|proportional|equals?|sum|difference|probability)\b/i.test(text)
-  let score = equation ? ROUTER_CONFIG.quantitative.equationWeight : 0
-  if (percentage) score += ROUTER_CONFIG.quantitative.percentageWeight
-  if (units) score += ROUTER_CONFIG.quantitative.unitWeight
-  if (relationship) score += ROUTER_CONFIG.quantitative.numericRelationWeight
+  const markers = ROUTER_MARKERS.quantitative
+  const config = ROUTER_CONFIG.quantitative
+  const equation = markers.symbolicEquation.test(text)
+  const verbalRelationship = markers.verbalRelationship.test(text)
+  const percentages = matches(text, markers.percentage)
+  const units = matches(text, markers.unit)
+  const quantities = matches(text, markers.quantity)
+  let score = equation ? config.symbolicEquationWeight : 0
+  if (verbalRelationship) score += config.verbalRelationshipWeight
+  if (percentages) score += config.percentageWeight
+  if (units) score += config.unitWeight
+  if (quantities >= 2) score += config.multipleQuantityWeight
   return {
     score: rounded(score),
-    reasons: [...(equation ? ["contains a mathematical relationship"] : []), ...(percentage || units ? ["contains quantities or units"] : []), ...(relationship ? ["describes a numeric relationship"] : [])]
+    reasons: [
+      ...(equation ? ["contains a symbolic mathematical relationship"] : []),
+      ...(verbalRelationship ? ["describes a quantitative relationship in words"] : []),
+      ...(percentages || units ? ["contains explicit quantities or units"] : []),
+      ...(quantities >= 2 ? ["relates multiple numeric values"] : [])
+    ]
   }
 }
 
@@ -89,8 +154,13 @@ export function routeRepresentation(sourceText: string): RepresentationRoute {
     if (signals[type].score > signals[strongest].score) strongest = type
   }
   const strongestScore = signals[strongest].score
-  const plainScore = rounded(strongestScore < ROUTER_CONFIG.structuredThreshold ? 0.75 - strongestScore * 0.25 : 0.12)
-  const scores = Object.fromEntries(REPRESENTATION_TYPES.map((type) => [type, type === "plain_text" ? plainScore : signals[type].score])) as RepresentationScores
+  const plainConfig = ROUTER_CONFIG.plainText
+  const plainScore = strongestScore < ROUTER_CONFIG.structuredThreshold
+    ? rounded(Math.max(plainConfig.minimumConfidence, plainConfig.baseConfidence - strongestScore * plainConfig.competingSignalPenalty))
+    : plainConfig.structuredContextScore
+  const scores = Object.fromEntries(
+    REPRESENTATION_TYPES.map((type) => [type, type === "plain_text" ? plainScore : signals[type].score])
+  ) as RepresentationScores
   if (!text || strongestScore < ROUTER_CONFIG.structuredThreshold) {
     return { type: "plain_text", confidence: plainScore, scores, reasons: ["no strong structural signals detected"] }
   }
