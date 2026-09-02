@@ -58,3 +58,18 @@ graph before their direct `user_id` becomes non-null.
 `ENABLE_DEVELOPMENT_AUTH=true` optionally exposes the deterministic backend
 development user, but only with `APP_ENV=development`. It never performs or
 claims to perform Google login and cannot claim legacy data.
+
+## PDF ingestion inspector
+
+Install dependencies from `requirements.txt`, then optionally configure the
+maximum in-memory PDF upload size in bytes (the default is 20 MiB):
+
+```bash
+PDF_UPLOAD_MAX_BYTES=20971520
+```
+
+Authenticated web clients can send a multipart request with a `file` field to
+`POST /ingestion/pdf`. The endpoint validates and converts the PDF in memory,
+returns MarkItDown's raw `text_content`, and does not create Source or Document
+rows. The web development server exposes the inspector at
+`/app/dev/ingestion`; the route is omitted from production web builds.

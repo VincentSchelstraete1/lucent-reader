@@ -24,6 +24,7 @@ class Settings:
     enable_development_auth: bool
     enable_legacy_claim: bool
     extension_ids: tuple[str, ...]
+    pdf_upload_max_bytes: int
     session_idle_seconds: int = 60 * 60 * 24
     session_absolute_seconds: int = 60 * 60 * 24 * 30
 
@@ -72,7 +73,10 @@ def load_settings() -> Settings:
         enable_development_auth=_bool("ENABLE_DEVELOPMENT_AUTH"),
         enable_legacy_claim=_bool("ENABLE_LEGACY_CLAIM"),
         extension_ids=_origins(os.getenv("LUCENT_EXTENSION_IDS", "")),
+        pdf_upload_max_bytes=int(os.getenv("PDF_UPLOAD_MAX_BYTES", str(20 * 1024 * 1024))),
     )
+    if settings.pdf_upload_max_bytes <= 0:
+        raise RuntimeError("PDF_UPLOAD_MAX_BYTES must be greater than zero")
     settings.validate()
     return settings
 

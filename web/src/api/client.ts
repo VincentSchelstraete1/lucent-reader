@@ -69,18 +69,31 @@ export type QuizAttempt = {
   created_at: string
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
-  constructor(path: string, status: number) {
-    super(`${path} failed: ${status}`)
+  code: string | null
+  constructor(path: string, status: number, message?: string, code?: string) {
+    super(message || `${path} failed: ${status}`)
     this.status = status
+    this.code = code ?? null
   }
+}
+
+async function apiError(path: string, response: Response): Promise<ApiError> {
+  try {
+    const payload = await response.json() as { detail?: string | { code?: string; message?: string } }
+    if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail)
+    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code)
+  } catch {
+    // Some existing endpoints intentionally return no JSON error body.
+  }
+  return new ApiError(path, response.status)
 }
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { credentials: "include" })
   if (!response.ok) {
-    throw new ApiError(path, response.status)
+    throw await apiError(path, response)
   }
   return response.json()
 }
@@ -93,9 +106,28 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     body: body ? JSON.stringify(body) : undefined
   })
   if (!response.ok) {
-    throw new ApiError(path, response.status)
+    throw await apiError(path, response)
   }
   return response.json()
+}
+
+async function postForm<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
+    body
+  })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
+export type PdfIngestionResult = {
+  status: "success"
+  original_filename: string
+  source_type: "pdf"
+  markdown: string
+  extracted_character_count: number
 }
 
 export const api = {
@@ -109,5 +141,10 @@ export const api = {
   getQuizzesForDocument: (documentId: number) => get<Quiz[]>(`/documents/${documentId}/quizzes`),
   getQuiz: (id: number) => get<Quiz>(`/quizzes/${id}`),
   submitQuizAttempt: (quizId: number, attempt: { score: number; total: number }) =>
-    post<QuizAttempt>(`/quizzes/${quizId}/attempts`, attempt)
+    post<QuizAttempt>(`/quizzes/${quizId}/attempts`, attempt),
+  ingestPdf: (file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return postForm<PdfIngestionResult>("/ingestion/pdf", form)
+  }
 }

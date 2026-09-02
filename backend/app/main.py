@@ -8,6 +8,7 @@ from app.routers.sources import router as sources_router
 from app.routers.documents import router as documents_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.auth import router as auth_router
+from app.routers.ingestion import router as ingestion_router
 from app.config import settings
 import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
@@ -52,6 +53,7 @@ app.include_router(sources_router, tags=["Sources"])
 app.include_router(documents_router, tags=["Documents"])
 app.include_router(quizzes_router, tags=["Quizzes"])
 app.include_router(auth_router, tags=["Authentication"])
+app.include_router(ingestion_router, tags=["Ingestion"])
 
 
 
