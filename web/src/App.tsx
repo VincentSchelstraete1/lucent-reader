@@ -8,6 +8,7 @@ import { AuthPage } from "./pages/AuthPage"
 import { OnboardingPage } from "./pages/OnboardingPage"
 import { AppWalkthrough } from "./components/walkthrough/AppWalkthrough"
 import { ProtectedRoute } from "./components/auth/ProtectedRoute"
+import { LearningCanvasDemo } from "./learning/components/LearningCanvasDemo"
 
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
@@ -18,6 +19,7 @@ function AppLayout() {
         <Link to="/app" className="brand" data-tour="app-brand">
           Lucent Library
         </Link>
+        <Link to="/app/learning-canvas" className="app-header-link">Learning Canvas</Link>
       </header>
       <main>
         <Outlet />
@@ -42,6 +44,7 @@ export function App() {
             <Route path="/sources/:sourceId" element={<SourceDetail />} />
             <Route path="/documents/:documentId" element={<DocumentDetail />} />
             <Route path="/quizzes/:quizId" element={<QuizPage />} />
+            <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
           </Route>
         </Route>
 

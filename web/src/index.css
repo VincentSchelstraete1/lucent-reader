@@ -43,6 +43,15 @@ main {
   background: var(--lucent-surface);
 }
 
+.app-header-link {
+  margin-left: 18px;
+  color: var(--lucent-accent-dark);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.app-header-link:hover { text-decoration: underline; }
+
 .brand {
   font-size: 18px;
   font-weight: 700;
