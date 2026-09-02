@@ -257,7 +257,7 @@ export type RepresentationDecision = {
   fallback_used: boolean
 }
 
-export type LearningCanvasResult = { decision: RepresentationDecision; learning_object: LearningObject }
+export type LearningCanvasResult = { decision: RepresentationDecision; learning_object: LearningObject; teaching_plan: TeachingPlan }
 
 export type LearningBlockType = "section" | "list" | "table" | "figure" | "mixed"
 
@@ -294,7 +294,8 @@ export type DocumentIngestionResult = {
   generated_note: GeneratedLearningNote | null
 }
 
-export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; learningObject: LearningObject; generationFallback: boolean }> }
+export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
+export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; teachingPlan: TeachingPlan | null; learningObject: LearningObject; generationFallback: boolean }> }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult

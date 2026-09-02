@@ -17,6 +17,8 @@ export interface ProcessStep {
   id: string
   label: string
   explanation: string
+  transitionLabel?: string
+  why?: string
 }
 
 export interface ProcessConnection {
@@ -47,20 +49,21 @@ export interface ComparisonLearningObject extends LearningObjectBase<"comparison
 }
 
 export interface CausalNode { id: string; label: string; explanation?: string }
-export interface CausalEdge { from: string; to: string; label?: string }
+export interface CausalEdge { from: string; to: string; label?: string; mechanism?: string; explanation?: string }
 export interface CausalLearningObject extends LearningObjectBase<"causal"> { nodes: CausalNode[]; edges: CausalEdge[] }
 
 export interface ConceptMapNode { id: string; label: string; definition?: string }
-export interface ConceptMapRelationship { from: string; to: string; label: string }
+export interface ConceptMapRelationship { source: string; target: string; relation: string; explanation?: string }
 export interface ConceptMapLearningObject extends LearningObjectBase<"concept_map"> { nodes: ConceptMapNode[]; relationships: ConceptMapRelationship[] }
 
 export interface HierarchyNode { id: string; label: string; children?: HierarchyNode[] }
-export interface HierarchyLearningObject extends LearningObjectBase<"hierarchy"> { root: HierarchyNode }
+export interface HierarchyEdge { parent: string; child: string; explanation?: string }
+export interface HierarchyLearningObject extends LearningObjectBase<"hierarchy"> { root: HierarchyNode; edges?: HierarchyEdge[] }
 
 export interface QuantitativeVariable { id: string; name: string; value?: string; unit?: string; explanation?: string }
 export interface QuantitativeRelationship { expression: string; explanation?: string }
-export interface QuantitativeLearningObject extends LearningObjectBase<"quantitative"> { variables: QuantitativeVariable[]; relationships: QuantitativeRelationship[] }
+export interface QuantitativeLearningObject extends LearningObjectBase<"quantitative"> { formula?: string; variables: QuantitativeVariable[]; givenValues?: Array<{ variable: string; value: string; unit?: string }>; substitutions?: string[]; derivationSteps?: string[]; result?: string; interpretation?: string; relationships: QuantitativeRelationship[] }
 
-export interface PlainTextLearningObject extends LearningObjectBase<"plain_text"> { paragraphs: string[]; keyPoints?: string[]; definitions?: Array<{ term: string; meaning: string }> }
+export interface PlainTextLearningObject extends LearningObjectBase<"plain_text"> { paragraphs: string[]; explanation?: string; keyPoints?: string[]; definitions?: Array<{ term: string; meaning: string }>; sourceGroundedContext?: string[] }
 
 export type LearningObject = ProcessLearningObject | ComparisonLearningObject | CausalLearningObject | ConceptMapLearningObject | HierarchyLearningObject | QuantitativeLearningObject | PlainTextLearningObject

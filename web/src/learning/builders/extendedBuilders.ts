@@ -13,7 +13,7 @@ export function buildConceptMapLearningObject(text: string): ConceptMapLearningO
   const concepts = (text.match(/[A-Z][A-Za-z-]{2,}(?:\s+[A-Za-z-]{2,})?/g) ?? []).slice(0, 8)
   const labels = concepts.length >= 2 ? [...new Set(concepts)] : text.split(/[,;]|\band\b/i).map(s => s.trim()).filter(Boolean).slice(0, 8)
   const nodes = labels.map((label, i) => ({ id: `concept-${i}`, label }))
-  return { ...base("concept_map", text, "Concept relationships"), nodes, relationships: nodes.slice(1).map((node, i) => ({ from: nodes[0].id, to: node.id, label: "related to" })) }
+  return { ...base("concept_map", text, "Concept relationships"), nodes, relationships: nodes.slice(1).map((node) => ({ source: nodes[0].id, target: node.id, relation: "related to" })) }
 }
 
 export function buildHierarchyLearningObject(text: string): HierarchyLearningObject {

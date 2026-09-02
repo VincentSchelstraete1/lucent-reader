@@ -43,6 +43,10 @@ export function LearningCanvasDemo() {
           <div className={styles.scores}>
             {Object.entries(result.decision.scores).map(([type, score]) => <span key={type}>{type}: {score.toFixed(2)}</span>)}
           </div>
+          <h3>Teaching plan</h3>
+          <p>{result.teaching_plan.rationale}</p>
+          <p><strong>Final representation:</strong> {result.teaching_plan.finalRepresentation}{result.teaching_plan.override ? " (planner override)" : ""}</p>
+          <ul>{result.teaching_plan.representationPlan.map(item => <li key={item}>{item}</li>)}</ul>
         </article>
 
         <article className={styles.panel}>
