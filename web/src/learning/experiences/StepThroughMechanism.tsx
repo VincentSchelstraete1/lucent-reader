@@ -54,7 +54,6 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
       <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
-        {stage === data.stages.length - 1 && <path d="M76 207 L86 207 L86 197" className="right-angle" />}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
       </svg>
       <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>
