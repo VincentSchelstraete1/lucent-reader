@@ -88,7 +88,7 @@ def test_section_request_uses_bounded_output_and_no_retries(monkeypatch):
         model_section_note(section, model_version="test-policy")
     assert seen["max_retries"] == 0
     assert seen["timeout"] == 15
-    assert args_seen[3] == 1000
+    assert args_seen[3] == 1600
 
 
 def test_model_structure_without_root_is_rejected(monkeypatch):

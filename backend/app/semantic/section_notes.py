@@ -15,6 +15,7 @@ from .schema import LearningObject, PlainTextObject
 
 _SECTION_CACHE: dict[str, SectionNote] = {}
 logger = logging.getLogger(__name__)
+SECTION_NOTE_MAX_TOKENS = 1600
 
 
 @dataclass(frozen=True)
@@ -385,9 +386,9 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
         return _SECTION_CACHE[key].model_copy()
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     started = time.perf_counter()
-    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false source_chars=%d blocks=%d max_tokens=1000", section.id, section.title, len(source), len(section.blocks))
+    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false source_chars=%d blocks=%d max_tokens=%d", section.id, section.title, len(source), len(section.blocks), SECTION_NOTE_MAX_TOKENS)
     try:
-        raw = _run_structured_tool("Design a concise, source-grounded study note that teaches this coherent section rather than rewriting it. First identify the central mental model, essential facts, mechanisms, relationships, terminology, equations, and removable repetition. Choose a coherent teaching sequence and only the component types that materially improve learning; do not request or emit every type. Prefer a small set of strong components, use visual structure only when it is clearer than prose, preserve important technical detail, and explain meaningful transitions. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 1000, timeout=15, max_retries=0)
+        raw = _run_structured_tool("Design a concise, source-grounded study note that teaches this coherent section rather than rewriting it. First identify the central mental model, essential facts, mechanisms, relationships, terminology, equations, and removable repetition. Choose a coherent teaching sequence and only the component types that materially improve learning; do not request or emit every type. Prefer a small set of strong components, use visual structure only when it is clearer than prose, preserve important technical detail, and explain meaningful transitions. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, SECTION_NOTE_MAX_TOKENS, timeout=15, max_retries=0)
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
