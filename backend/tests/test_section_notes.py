@@ -100,11 +100,11 @@ def test_model_structure_without_root_is_rejected(monkeypatch):
 @pytest.mark.parametrize("component", [
     {"kind": "explanation", "title": "Explain", "text": "Text", "sourceBlockIds": ["b"]},
     {"kind": "key_definition", "title": "Term", "term": "Term", "definition": "Meaning", "sourceBlockIds": ["b"]},
-    {"kind": "flow", "title": "Flow", "nodes": [{"id": "a"}], "edges": [{"source": "a", "target": "a"}], "sourceBlockIds": ["b"]},
-    {"kind": "structure", "title": "Tree", "root": {"id": "r"}, "sourceBlockIds": ["b"]},
-    {"kind": "relationship_map", "title": "Map", "nodes": [{"id": "a"}], "edges": [{"source": "a", "target": "a"}], "sourceBlockIds": ["b"]},
-    {"kind": "comparison", "title": "Compare", "items": [{"name": "A"}], "sourceBlockIds": ["b"]},
-    {"kind": "worked_example", "title": "Example", "steps": [{"description": "Step"}], "sourceBlockIds": ["b"]},
+    {"kind": "flow", "title": "Flow", "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "edges": [{"source": "a", "target": "b", "relation": "then"}], "sourceBlockIds": ["b"]},
+    {"kind": "structure", "title": "Tree", "root": {"id": "r", "label": "Root"}, "sourceBlockIds": ["b"]},
+    {"kind": "relationship_map", "title": "Map", "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "edges": [{"source": "a", "target": "b", "relation": "uses"}], "sourceBlockIds": ["b"]},
+    {"kind": "comparison", "title": "Compare", "items": [{"id": "a", "name": "A", "values": {"cost": "low"}}, {"id": "b", "name": "B", "values": {"cost": "high"}}], "dimensions": ["cost"], "sourceBlockIds": ["b"]},
+    {"kind": "worked_example", "title": "Example", "problem": "Problem", "steps": [{"order": 1, "description": "Step"}], "result": "Result", "interpretation": "Meaning", "sourceBlockIds": ["b"]},
     {"kind": "equation", "title": "Equation", "equation": "x = 1", "sourceBlockIds": ["b"]},
     {"kind": "callout", "title": "Note", "text": "Important", "sourceBlockIds": ["b"]},
     {"kind": "takeaway", "title": "Remember", "takeaway": "Key point", "sourceBlockIds": ["b"]},
@@ -120,10 +120,32 @@ def test_generated_section_note_accepts_minimum_valid_component(component):
 def test_generated_schema_requires_kind_specific_fields():
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     serialized = str(schema)
-    assert "GeneratedStructure" in serialized
+    assert "StructureComponent" in serialized
     assert "root" in serialized
-    assert "GeneratedDefinition" in serialized
+    assert "KeyDefinitionComponent" in serialized
     assert "term" in serialized and "definition" in serialized
+
+
+def test_trips_golden_note_preserves_teaching_structure(monkeypatch):
+    block = make_block("trips", "TRIPS maps hyperblocks onto an execution grid and forwards results to dependent instructions.")
+    section = SectionInput("trips-section", "TRIPS Multiprocessor", ["TRIPS"], [block.id], [block], {})
+    raw = {
+        "title": "TRIPS Multiprocessor", "bigIdea": "Distributed execution maps instruction blocks across a grid.",
+        "learningGoals": ["Understand the execution mechanism"],
+        "components": [
+            {"kind": "flow", "title": "Execution flow", "sourceBlockIds": [block.id],
+             "nodes": [{"id": "h", "label": "Hyperblock"}, {"id": "g", "label": "Execution grid"}, {"id": "r", "label": "Result forwarding"}],
+             "edges": [{"source": "h", "target": "g", "relation": "maps onto"}, {"source": "g", "target": "r", "relation": "forwards results"}]},
+            {"kind": "key_definition", "title": "Hyperblock", "sourceBlockIds": [block.id], "term": "Hyperblock", "definition": "A compiler-formed group of instructions."},
+        ],
+        "keyTakeaways": ["TRIPS distributes execution across a grid."], "omittedNoise": [],
+    }
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", lambda *args, **kwargs: raw)
+    note = model_section_note(section, model_version="trips-golden")
+    assert any(component.kind == "flow" for component in note.components)
+    flow = next(component for component in note.components if component.kind == "flow")
+    assert all(edge.relation.lower() != "related to" for edge in flow.edges)
+    assert note.key_takeaways
 
 
 def test_deterministic_fallback_downgrades_invalid_visual_to_explanation():

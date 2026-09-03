@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from app.segmentation import LearningBlock
 from app.routing import RepresentationDecision
@@ -80,103 +80,186 @@ class SectionComponent(BaseModel):
         return self
 
 
-class SectionNote(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    id: str
-    title: str
-    big_idea: str = Field(alias="bigIdea")
-    learning_goals: list[str] = Field(default_factory=list, alias="learningGoals")
-    components: list[SectionComponent] = Field(default_factory=list)
-    key_takeaways: list[str] = Field(default_factory=list, alias="keyTakeaways")
-    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
-    omitted_noise: list[str] = Field(default_factory=list, alias="omittedNoise")
+class GraphNode(BaseModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=120)
+    explanation: str | None = None
 
 
-# Model-output contract.  This is deliberately separate from the richer
-# runtime SectionComponent (which may carry an already-built LearningObject),
-# but it is the single source used both to generate the Anthropic JSON schema
-# and to validate the returned payload before conversion to SectionNote.
-class _GeneratedBase(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
-    title: str
+class GraphEdge(BaseModel):
+    source: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    relation: str = Field(min_length=1, max_length=80)
+    explanation: str | None = None
+
+    @model_validator(mode="after")
+    def concise_relation(self):
+        if len(self.relation.split()) > 4 or self.relation.lower() == "related to":
+            raise ValueError("relationship labels must be concise and meaningful")
+        return self
+
+
+class _TypedComponent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    title: str = Field(min_length=1)
     source_block_ids: list[str] = Field(alias="sourceBlockIds", min_length=1)
+    # Compatibility/debug metadata populated by deterministic conversion; it
+    # is excluded from the model-generation JSON schema.
+    learning_object: LearningObject | None = Field(default=None, alias="learningObject", exclude=True)
 
 
-class GeneratedExplanation(_GeneratedBase):
+class ExplanationComponent(_TypedComponent):
     kind: Literal["explanation"]
     text: str = Field(min_length=1)
     why_it_matters: str | None = Field(default=None, alias="whyItMatters")
 
 
-class GeneratedDefinition(_GeneratedBase):
+class KeyDefinitionComponent(_TypedComponent):
     kind: Literal["key_definition"]
     term: str = Field(min_length=1)
     definition: str = Field(min_length=1)
     significance: str | None = None
 
 
-class GeneratedFlow(_GeneratedBase):
+class FlowComponent(_TypedComponent):
     kind: Literal["flow"]
-    nodes: list[dict] = Field(min_length=1)
-    edges: list[dict] = Field(min_length=1)
-    text: str = ""
+    nodes: list[GraphNode] = Field(min_length=2)
+    edges: list[GraphEdge] = Field(min_length=1)
+    transition_explanation: str | None = Field(default=None, alias="transitionExplanation")
+
+    @model_validator(mode="after")
+    def connected_sequence(self):
+        ids = {node.id for node in self.nodes}
+        if any(edge.source not in ids or edge.target not in ids for edge in self.edges):
+            raise ValueError("flow edges must reference existing nodes")
+        if len({edge.source for edge in self.edges} | {edge.target for edge in self.edges}) < 2:
+            raise ValueError("flow must contain a real sequence")
+        return self
 
 
-class GeneratedStructure(_GeneratedBase):
+class TreeNode(BaseModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=120)
+    explanation: str | None = None
+    children: list["TreeNode"] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_descendants(self):
+        ids = [self.id] + [child.id for child in self.children]
+        if len(ids) != len(set(ids)):
+            raise ValueError("structure tree contains duplicate node IDs")
+        return self
+
+
+class StructureComponent(_TypedComponent):
     kind: Literal["structure"]
-    root: dict
-    text: str = ""
+    root: TreeNode
 
 
-class GeneratedRelationshipMap(_GeneratedBase):
+class RelationshipMapComponent(_TypedComponent):
     kind: Literal["relationship_map"]
-    nodes: list[dict] = Field(min_length=1)
-    edges: list[dict] = Field(min_length=1)
-    text: str = ""
+    nodes: list[GraphNode] = Field(min_length=2)
+    edges: list[GraphEdge] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def connected_graph(self):
+        ids = {node.id for node in self.nodes}
+        if any(edge.source not in ids or edge.target not in ids for edge in self.edges):
+            raise ValueError("relationship edges must reference existing nodes")
+        seen = {next(iter(ids))}
+        changed = True
+        while changed:
+            changed = False
+            for edge in self.edges:
+                if edge.source in seen or edge.target in seen:
+                    before = len(seen)
+                    seen.update((edge.source, edge.target))
+                    changed = changed or len(seen) != before
+        if seen != ids:
+            raise ValueError("relationship map must be connected")
+        return self
 
 
-class GeneratedComparison(_GeneratedBase):
+class ComparisonItem(BaseModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    values: dict[str, str] = Field(min_length=1)
+
+
+class ComparisonComponent(_TypedComponent):
     kind: Literal["comparison"]
-    items: list[dict] = Field(min_length=1)
-    dimensions: list[str] = Field(default_factory=list)
-    conclusion: str | None = None
+    items: list[ComparisonItem] = Field(min_length=2)
+    dimensions: list[str] = Field(min_length=1)
+    why_it_matters: str | None = Field(default=None, alias="whyItMatters")
+
+    @model_validator(mode="after")
+    def aligned_dimensions(self):
+        expected = set(self.dimensions)
+        if any(set(item.values) != expected for item in self.items):
+            raise ValueError("comparison values must align across dimensions")
+        return self
 
 
-class GeneratedWorkedExample(_GeneratedBase):
+class WorkedExampleStep(BaseModel):
+    order: int = Field(ge=1)
+    description: str = Field(min_length=1)
+
+
+class WorkedExampleComponent(_TypedComponent):
     kind: Literal["worked_example"]
-    problem: str | None = None
-    known_values: list[dict] = Field(default_factory=list, alias="knownValues")
-    steps: list[dict] = Field(min_length=1)
-    result: str | None = None
-    interpretation: str | None = None
+    problem: str = Field(min_length=1)
+    known_values: list[dict[str, str]] = Field(default_factory=list, alias="knownValues")
+    steps: list[WorkedExampleStep] = Field(min_length=1)
+    result: str = Field(min_length=1)
+    interpretation: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def ordered_steps(self):
+        if [step.order for step in self.steps] != sorted(step.order for step in self.steps):
+            raise ValueError("worked example steps must be ordered")
+        return self
 
 
-class GeneratedEquation(_GeneratedBase):
+class EquationComponent(_TypedComponent):
     kind: Literal["equation"]
     equation: str = Field(min_length=1)
-    variables: list[dict] = Field(default_factory=list)
+    variables: list[dict[str, str]] = Field(default_factory=list)
+    known_values: list[dict[str, str]] = Field(default_factory=list, alias="knownValues")
+    substitution: str | None = None
     result: str | None = None
     interpretation: str | None = None
 
 
-class GeneratedCallout(_GeneratedBase):
+class CalloutComponent(_TypedComponent):
     kind: Literal["callout"]
     text: str = Field(min_length=1)
     callout_type: str | None = Field(default=None, alias="calloutType")
 
 
-class GeneratedTakeaway(_GeneratedBase):
+class TakeawayComponent(_TypedComponent):
     kind: Literal["takeaway"]
     takeaway: str = Field(min_length=1)
-    text: str = ""
 
 
-GeneratedComponent = Annotated[Union[
-    GeneratedExplanation, GeneratedDefinition, GeneratedFlow,
-    GeneratedStructure, GeneratedRelationshipMap, GeneratedComparison,
-    GeneratedWorkedExample, GeneratedEquation, GeneratedCallout,
-    GeneratedTakeaway,
+TypedSectionComponent = Annotated[Union[
+    ExplanationComponent, KeyDefinitionComponent, FlowComponent,
+    StructureComponent, RelationshipMapComponent, ComparisonComponent,
+    WorkedExampleComponent, EquationComponent, CalloutComponent,
+    TakeawayComponent,
 ], Field(discriminator="kind")]
+TreeNode.model_rebuild()
+
+
+class SectionNote(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    id: str
+    title: str
+    big_idea: str = Field(alias="bigIdea")
+    learning_goals: list[str] = Field(default_factory=list, alias="learningGoals")
+    components: list[TypedSectionComponent] = Field(default_factory=list)
+    key_takeaways: list[str] = Field(default_factory=list, alias="keyTakeaways")
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
+    omitted_noise: list[str] = Field(default_factory=list, alias="omittedNoise")
 
 
 class GeneratedSectionNote(BaseModel):
@@ -184,7 +267,7 @@ class GeneratedSectionNote(BaseModel):
     title: str
     big_idea: str = Field(alias="bigIdea")
     learning_goals: list[str] = Field(alias="learningGoals")
-    components: list[GeneratedComponent]
+    components: list[TypedSectionComponent]
     key_takeaways: list[str] = Field(alias="keyTakeaways")
     omitted_noise: list[str] = Field(alias="omittedNoise")
 
@@ -246,9 +329,9 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
         # model output.  If the LearningObject lacks a connected graph/tree,
         # retain the source-grounded text as an explanation instead.
         try:
-            components.append(SectionComponent.model_validate(data))
+            components.append(TypeAdapter(TypedSectionComponent).validate_python(data))
         except ValueError:
-            components.append(SectionComponent(
+            components.append(ExplanationComponent(
                 kind="explanation",
                 title=obj.title or "Explanation",
                 text=block.text[:500],
@@ -271,7 +354,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     started = time.perf_counter()
     logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false", section.id, section.title)
     try:
-        raw = _run_structured_tool("Design concise, source-grounded study notes for this coherent section, not a generic summary. Use only components that materially improve learning; prefer 2-5 strong components over many weak ones. Keep explanations concise, preserve essential technical detail, and do not create a visual merely because a component type exists. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 1000, timeout=15, max_retries=0)
+        raw = _run_structured_tool("Design a concise, source-grounded study note that teaches this coherent section rather than rewriting it. First identify the central mental model, essential facts, mechanisms, relationships, terminology, equations, and removable repetition. Choose a coherent teaching sequence and only the component types that materially improve learning; do not request or emit every type. Prefer a small set of strong components, use visual structure only when it is clearer than prose, preserve important technical detail, and explain meaningful transitions. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 1000, timeout=15, max_retries=0)
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
