@@ -146,6 +146,28 @@ def test_callout_why_it_matters_is_shared_by_generation_and_runtime_contracts():
     assert generated.components[0].why_it_matters == canonical.components[0].why_it_matters
 
 
+def test_structure_and_relationship_map_preserve_teaching_explanations():
+    structure = {"kind": "structure", "title": "Memory levels", "sourceBlockIds": ["b"],
+                 "root": {"id": "memory", "label": "Memory", "children": [{"id": "cache", "label": "Cache"}]},
+                 "whyItMatters": "Levels trade speed for capacity and cost."}
+    relationship = {"kind": "relationship_map", "title": "Address translation", "sourceBlockIds": ["b"],
+                    "nodes": [{"id": "tables", "label": "Page tables"}, {"id": "frames", "label": "Physical frames"}],
+                    "edges": [{"source": "tables", "target": "frames", "relation": "map", "explanation": "They translate virtual pages into physical frames."}],
+                    "whyItMatters": "The map shows how virtual addresses become usable physical locations."}
+    generated = GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [structure, relationship], "keyTakeaways": [], "omittedNoise": []})
+    assert generated.components[0].why_it_matters
+    assert generated.components[1].edges[0].relation == "map"
+
+
+def test_relationship_map_rejects_explanatory_prose_as_visual_relation_label():
+    with pytest.raises(ValueError, match="concise"):
+        GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [{
+            "kind": "relationship_map", "title": "Map", "sourceBlockIds": ["b"],
+            "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+            "edges": [{"source": "a", "target": "b", "relation": "This longer explanation belongs outside the diagram"}],
+        }], "keyTakeaways": [], "omittedNoise": []})
+
+
 def test_trips_golden_note_preserves_teaching_structure(monkeypatch):
     block = make_block("trips", "TRIPS maps hyperblocks onto an execution grid and forwards results to dependent instructions.")
     section = SectionInput("trips-section", "TRIPS Multiprocessor", ["TRIPS"], [block.id], [block], {})

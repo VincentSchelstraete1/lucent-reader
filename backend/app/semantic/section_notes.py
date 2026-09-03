@@ -169,12 +169,14 @@ class TreeNode(BaseModel):
 class StructureComponent(_TypedComponent):
     kind: Literal["structure"]
     root: TreeNode
+    why_it_matters: str | None = Field(default=None, alias="whyItMatters")
 
 
 class RelationshipMapComponent(_TypedComponent):
     kind: Literal["relationship_map"]
     nodes: list[GraphNode] = Field(min_length=2)
     edges: list[GraphEdge] = Field(min_length=1)
+    why_it_matters: str | None = Field(default=None, alias="whyItMatters")
 
     @model_validator(mode="after")
     def connected_graph(self):
@@ -360,7 +362,19 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
                 learningObject=obj,
             ))
     title = section.title if usable(section.title) else (available[0].title if available else "Learning section")
-    takeaways = [block.text.strip() for block in section.blocks if usable(block.text)][:3]
+    # Keep fallback takeaways genuinely memorable rather than repeating whole
+    # source blocks.  Preserve the first sentence/line as a conservative,
+    # source-grounded compression; never invent a summary.
+    takeaways = []
+    for block in section.blocks:
+        if not usable(block.text):
+            continue
+        text = " ".join(block.text.split())
+        takeaway = text.split(".", 1)[0].strip() if "." in text else text
+        if takeaway and takeaway not in takeaways:
+            takeaways.append(takeaway[:240])
+        if len(takeaways) == 3:
+            break
     return SectionNote(id=section.id, title=title, bigIdea=first_text or title, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=takeaways or [title], sourceBlockIds=section.learning_block_ids)
 
 
