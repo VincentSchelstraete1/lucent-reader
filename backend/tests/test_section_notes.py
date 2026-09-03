@@ -1,8 +1,10 @@
 import asyncio
+import pytest
 
 from app.normalization import SourceReference
 from app.semantic import deterministic_section_note, group_learning_blocks, generate_sections_progressively
 from app.semantic.section_notes import SectionInput
+from app.semantic.section_notes import SectionComponent
 from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
@@ -38,3 +40,9 @@ def test_progressive_generation_reports_each_section_independently():
     notes = asyncio.run(generate_sections_progressively(sections, objects, on_complete, concurrency=2, use_model=False))
     assert [note.id for note in notes] == ["section-0", "section-1"]
     assert {item[0] for item in completed} == {0, 1}
+
+def test_structured_components_reject_orphan_relationships_and_accept_definitions():
+    with pytest.raises(ValueError):
+        SectionComponent(kind="flow", title="Broken", sourceBlockIds=["a"], nodes=[{"id": "a", "label": "A"}], edges=[{"source": "a", "target": "missing", "relation": "causes"}])
+    definition = SectionComponent(kind="key_definition", title="TLB", term="TLB", definition="Caches recent translations.", sourceBlockIds=["a"])
+    assert definition.definition
