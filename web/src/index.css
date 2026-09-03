@@ -13,7 +13,9 @@
 .note-big-idea { font-size: 1.15rem; max-width: 68ch; }
 .note-component { margin: 1rem 0; max-width: 760px; }
 .note-component h3 { margin-bottom: .45rem; }
-.note-node { border: 1px solid #58735d; border-radius: 8px; background: #f4f1e8; padding: .55rem .8rem; cursor: pointer; font: inherit; }
+.note-hint { color: #6c746e; font-size: .82rem; margin: 0 0 .55rem; }
+.note-node { border: 1px solid #58735d; border-radius: 8px; background: #f4f1e8; padding: .55rem .8rem; cursor: pointer; font: inherit; max-width: 100%; text-align: left; }
+.note-node:hover, .note-node:focus-visible, .note-node.selected { background: #dcefe5; outline: 2px solid transparent; }
 .note-edge { display: grid; justify-items: center; color: #58735d; padding: .3rem; }
 .note-detail { margin: .35rem 0 .5rem 1rem; color: #55544e; }
 .note-tree ul { margin: .5rem 0 .5rem 1.25rem; padding-left: 1rem; border-left: 1px solid #d8d2c5; }
@@ -24,7 +26,13 @@
 .note-table { overflow-x: auto; }
 .note-table table { border-collapse: collapse; width: 100%; }
 .note-table th, .note-table td { border: 1px solid #d8d2c5; padding: .55rem; text-align: left; }
-.note-example { background: #f4f1e8; border-radius: 8px; padding: .8rem; }
+.note-example { background: #f4f1e8; border-radius: 8px; padding: .9rem 1rem; }
+.note-example-problem { margin-top: 0; }
+.note-equation { display: block; font-size: 1.05rem; background: #fff; border-radius: 6px; padding: .7rem; margin: .6rem 0; overflow-x: auto; }
+.note-values { display: grid; grid-template-columns: minmax(7rem, auto) 1fr; gap: .25rem .8rem; margin: .75rem 0; }
+.note-values dt { font-weight: 600; }
+.note-values dd { margin: 0; }
+.note-reveal { border: 1px solid #58735d; border-radius: 999px; background: #fff; color: #315d4d; padding: .45rem .8rem; cursor: pointer; font: inherit; }
 .note-takeaways { background: #eef2e8; padding: .8rem 1rem; border-radius: 8px; max-width: 760px; }
 .note-skeleton { border-top: 1px solid #d8d2c5; padding: 1rem 0; }
 
