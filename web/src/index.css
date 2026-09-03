@@ -50,6 +50,10 @@
 .sequence-message-label { font-size: 12px; font-weight: 700; fill: #26215c; paint-order: stroke; stroke: #fbfaf6; stroke-width: 4px; }
 .sequence-message-emphasized line { stroke: #1d9e75; }
 .sequence-message-emphasized polygon { fill: #1d9e75; }
+.ordered-item-label { font-size: 12px; font-weight: 700; fill: #26215c; }
+.ordered-operation-label { font-size: 11px; fill: #3e4b43; }
+.visual-unavailable { min-height: 180px; display: grid; align-content: center; gap: .5rem; padding: 1.5rem; color: #68736b; background: #f1efe8; border: 1px dashed #c8c1b4; border-radius: 10px; }
+.visual-unavailable strong { color: #26215c; }
 .step-mechanism { max-width: 760px; }
 .step-goal { color: #55544e; max-width: 65ch; }
 .step-visual { background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: .75rem 1rem .5rem; }

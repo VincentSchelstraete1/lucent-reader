@@ -28,6 +28,7 @@ SOURCE_FIXTURES = {
     "gram-schmidt": "Gram-Schmidt starts with a set of vectors. Keep the first vector as the first basis direction. For each later vector, project it onto every earlier orthogonal direction, subtract those projections, and keep the remaining perpendicular component. Normalize the resulting vectors when an orthonormal basis is needed.",
     "tcp-handshake": "A TCP connection begins when the client sends SYN. The server responds with SYN-ACK. The client completes the handshake by sending ACK, after which both sides can exchange data.",
     "bubble-sort": "Bubble sort repeatedly compares adjacent elements. If a pair is out of order, swap it. After one pass the largest remaining element bubbles to the end; repeat passes until no swaps are needed.",
+    "insertion-sort": "Insertion sort grows a sorted prefix. Take the next item, compare it with items to its left, shift larger items right, and insert the item into its sorted position.",
     "cache-lookup": "A processor checks the fastest cache level first. On a hit it returns the data quickly. On a miss it checks the next level, eventually fetching from main memory and placing the result in a closer cache when possible.",
     "photosynthesis": "Photosynthesis uses light energy to split water and build energy-rich molecules. The light reactions produce ATP and NADPH. The Calvin cycle uses those molecules to fix carbon dioxide into sugars.",
 }
@@ -53,7 +54,7 @@ class StepThroughMetadata(BaseModel):
     fixture_name: str
     source_hash: str
     mode: Literal["replay", "live"]
-    fixture_kind: Literal["golden_manual", "recorded_live"]
+    fixture_kind: Literal["golden_manual", "sample_manual", "recorded_live"]
     cache_hit: bool
     model_call_count: Literal[0, 1]
     model: str | None = None
@@ -80,6 +81,7 @@ def _slug(value: str) -> str:
 def _golden_mechanism() -> StepThroughMechanism:
     return StepThroughMechanism.model_validate({
         "title": "Gram–Schmidt: remove overlap to create a perpendicular direction",
+        "sceneType": "vector_scene",
         "learningGoal": "Understand geometrically why subtracting projections produces orthogonal directions.",
         "entities": [
             {"id": "v1", "label": "u₁ = v₁"},
@@ -98,6 +100,24 @@ def _golden_mechanism() -> StepThroughMechanism:
     })
 
 
+def _ordered_replay(name: str) -> StepThroughMechanism | None:
+    if name == "bubble-sort":
+        stages = [
+            {"title": "Compare adjacent items", "explanation": "Compare the first adjacent pair and inspect their order.", "visual": {"type": "ordered_items_scene", "items": [{"id": "a", "label": "3"}, {"id": "b", "label": "1"}, {"id": "c", "label": "2"}], "operations": [{"type": "compare", "itemIds": ["a", "b"], "explanation": "3 is larger than 1."}], "emphasizedItemIds": ["a", "b"]}},
+            {"title": "Swap the out-of-order pair", "explanation": "Swap the pair so the larger item moves toward the end of the list.", "visual": {"type": "ordered_items_scene", "items": [{"id": "b", "label": "1"}, {"id": "a", "label": "3"}, {"id": "c", "label": "2"}], "operations": [{"type": "swap", "itemIds": ["a", "b"]}], "emphasizedItemIds": ["a", "b"]}},
+            {"title": "Mark the completed end", "explanation": "After repeated comparisons, the largest remaining item settles at the end.", "visual": {"type": "ordered_items_scene", "items": [{"id": "b", "label": "1"}, {"id": "c", "label": "2"}, {"id": "a", "label": "3"}], "operations": [{"type": "markComplete", "itemIds": ["a"]}], "emphasizedItemIds": ["a"]}},
+        ]
+        return StepThroughMechanism.model_validate({"sceneType": "ordered_items_scene", "title": "Bubble Sort", "learningGoal": "Understand how adjacent comparisons and swaps move larger items toward the end.", "entities": [{"id": "a", "label": "3"}, {"id": "b", "label": "1"}, {"id": "c", "label": "2"}], "stages": stages, "conclusion": "Repeated adjacent comparisons and swaps gradually place items in sorted order."})
+    if name == "insertion-sort":
+        stages = [
+            {"title": "Grow the sorted prefix", "explanation": "Treat the first item as a sorted prefix and select the next item.", "visual": {"type": "ordered_items_scene", "items": [{"id": "a", "label": "4"}, {"id": "b", "label": "2"}, {"id": "c", "label": "5"}], "operations": [{"type": "highlight", "itemIds": ["b"]}], "emphasizedItemIds": ["b"]}},
+            {"title": "Shift larger items", "explanation": "Compare the selected item leftward and shift larger items to make space.", "visual": {"type": "ordered_items_scene", "items": [{"id": "a", "label": "4"}, {"id": "b", "label": "2"}, {"id": "c", "label": "5"}], "operations": [{"type": "compare", "itemIds": ["a", "b"]}, {"type": "highlight", "itemIds": ["a"]}], "emphasizedItemIds": ["a", "b"]}},
+            {"title": "Insert into position", "explanation": "Insert the selected item before the larger item; the sorted prefix is now longer.", "visual": {"type": "ordered_items_scene", "items": [{"id": "b", "label": "2"}, {"id": "a", "label": "4"}, {"id": "c", "label": "5"}], "operations": [{"type": "markComplete", "itemIds": ["b", "a"]}], "emphasizedItemIds": ["b", "a"]}},
+        ]
+        return StepThroughMechanism.model_validate({"sceneType": "ordered_items_scene", "title": "Insertion Sort", "learningGoal": "Understand how a sorted prefix grows by inserting each next item into position.", "entities": [{"id": "a", "label": "4"}, {"id": "b", "label": "2"}, {"id": "c", "label": "5"}], "stages": stages, "conclusion": "Insertion sort maintains a sorted prefix and inserts each next item where it belongs."})
+    return None
+
+
 def _fixture_path(name: str, source_hash: str) -> Path:
     return FIXTURE_DIR / f"{_slug(name)}-{source_hash[:16]}.json"
 
@@ -109,7 +129,10 @@ def _load_recorded(name: str, source_hash: str) -> StepThroughMechanism | None:
     payload = json.loads(path.read_text())
     if payload.get("schema_version") != SCHEMA_VERSION:
         return None
-    return StepThroughMechanism.model_validate(payload["mechanism"])
+    try:
+        return StepThroughMechanism.model_validate(payload["mechanism"])
+    except Exception:
+        return None
 
 
 def _save_recorded(name: str, source_text: str, mechanism: StepThroughMechanism) -> None:
@@ -127,8 +150,8 @@ def _save_recorded(name: str, source_text: str, mechanism: StepThroughMechanism)
 
 def _prompt(source_text: str) -> str:
     return ("Turn this one short source section into a semantic step-through mechanism that teaches the process, not a summary. "
-            "Return every required field: title, learningGoal, entities, stages, and conclusion. Use 2-5 ordered stages. Keep labels concise and each stage explanation short. Explain why each important state change matters. "
-            "Choose a stage visual grammar when it improves understanding. For actor/message exchanges, use visual.type=sequence_exchange_scene with actors, messages (sender, receiver, short label), visibleMessageIds, and an emphasizedMessageId; do not use coordinates or Cartesian axes. For vector mathematics, visual.type=vector_scene may identify activeEntityIds. "
+            "Return every required field: sceneType, title, learningGoal, entities, stages, and conclusion. sceneType must be exactly one of vector_scene, sequence_exchange_scene, or ordered_items_scene; never omit it. Use 2-5 ordered stages. Keep labels concise and each stage explanation short. Explain why each important state change matters. "
+            "Choose a stage visual grammar when it improves understanding. For actor/message exchanges, use sceneType=sequence_exchange_scene and visual.type=sequence_exchange_scene with actors, messages (sender, receiver, short label), visibleMessageIds, and an emphasizedMessageId; do not use coordinates or Cartesian axes. For vector mathematics, use sceneType=vector_scene and visual.type=vector_scene with activeEntityIds. For ordered collections, use sceneType=ordered_items_scene and visual.type=ordered_items_scene with items and semantic operations whose types are compare, swap, highlight, or markComplete. "
             "You may include a prediction question when the learner can reason before the reveal. "
             "Generate meaning only: never include coordinates, SVG, HTML, CSS, colors, layout, animation, or pixel positions. Stay grounded in the source.\n\n"
             f"Source section:\n{source_text}")
@@ -138,7 +161,7 @@ def _prompt(source_text: str) -> str:
 def list_fixtures(_user: User = Depends(get_current_user)) -> list[StepThroughFixture]:
     result = []
     for name, source in SOURCE_FIXTURES.items():
-        result.append(StepThroughFixture(name=name, source_text=source, source_hash=_hash_source(source), replay_available=name == "gram-schmidt" or _load_recorded(name, _hash_source(source)) is not None))
+        result.append(StepThroughFixture(name=name, source_text=source, source_hash=_hash_source(source), replay_available=name in {"gram-schmidt", "bubble-sort", "insertion-sort"} or _load_recorded(name, _hash_source(source)) is not None))
     return result
 
 
@@ -147,13 +170,13 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
     source_hash = _hash_source(request.source_text)
     started = time.perf_counter()
     if request.mode == "replay":
-        mechanism = _load_recorded(request.fixture_name, source_hash)
+        mechanism = _ordered_replay(request.fixture_name) if request.fixture_name in {"bubble-sort", "insertion-sort"} and request.source_text == SOURCE_FIXTURES[request.fixture_name] else _load_recorded(request.fixture_name, source_hash)
         is_golden = mechanism is None and request.fixture_name == "gram-schmidt" and request.source_text == SOURCE_FIXTURES["gram-schmidt"]
         if is_golden:
             mechanism = _golden_mechanism()
         if mechanism is None:
             raise HTTPException(status_code=404, detail={"code": "fixture_not_found", "message": "No replay fixture matches this source. Choose Live generate once."})
-        kind = "golden_manual" if is_golden else "recorded_live"
+        kind = "golden_manual" if is_golden else "sample_manual" if request.fixture_name in {"bubble-sort", "insertion-sort"} else "recorded_live"
         return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, validation="passed"))
 
     try:

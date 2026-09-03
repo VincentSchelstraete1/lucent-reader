@@ -25,6 +25,7 @@ def test_step_through_unknown_replay_does_not_call_provider(client):
 
 def test_sequence_exchange_visual_is_strict_and_semantic_only():
     payload = {
+        "sceneType": "sequence_exchange_scene",
         "title": "Handshake",
         "learningGoal": "Understand the exchange",
         "entities": [{"id": "client", "label": "Client"}, {"id": "server", "label": "Server"}],
@@ -49,3 +50,16 @@ def test_sequence_exchange_visual_is_strict_and_semantic_only():
         pass
     else:
         raise AssertionError("presentation coordinates must be rejected")
+
+
+def test_ordered_items_replays_for_bubble_and_insertion_sort(client):
+    for fixture_name in ("bubble-sort", "insertion-sort"):
+        source = {
+            "bubble-sort": "Bubble sort repeatedly compares adjacent elements. If a pair is out of order, swap it. After one pass the largest remaining element bubbles to the end; repeat passes until no swaps are needed.",
+            "insertion-sort": "Insertion sort grows a sorted prefix. Take the next item, compare it with items to its left, shift larger items right, and insert the item into its sorted position.",
+        }[fixture_name]
+        response = client.post("/dev/step-through/generate", json={"fixture_name": fixture_name, "source_text": source, "mode": "replay"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["mechanism"]["sceneType"] == "ordered_items_scene"
+        assert body["metadata"]["model_call_count"] == 0

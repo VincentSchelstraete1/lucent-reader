@@ -304,15 +304,16 @@ export type ProgressivePoll = { job_id: string; filename: string; status: "proce
 
 export type StepThroughMechanism = {
   type: "step_through_mechanism"
+  sceneType: "vector_scene" | "sequence_exchange_scene" | "ordered_items_scene"
   title: string
   learningGoal: string
   entities: Array<{ id: string; label: string; color?: string | null }>
-  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[] }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: unknown }>
   prediction?: { prompt: string; options: string[]; answer: number; reveal: string } | null
   conclusion: string
 }
 export type StepThroughFixture = { name: string; source_text: string; source_hash: string; replay_available: boolean }
-export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; validation: "passed" | "failed"; error?: string | null }
+export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "sample_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; validation: "passed" | "failed"; error?: string | null }
 export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: StepThroughMetadata }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.

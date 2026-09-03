@@ -11,9 +11,11 @@ export type MechanismStage = {
 }
 export type SequenceExchangeScene = { type: "sequence_exchange_scene"; actors: { id: string; label: string }[]; messages: { id: string; sender: string; receiver: string; label: string; explanation?: string | null }[]; visibleMessageIds: string[]; emphasizedMessageId?: string | null }
 export type VectorScene = { type: "vector_scene"; activeEntityIds: string[] }
-export type StageVisual = SequenceExchangeScene | VectorScene
+export type OrderedItemsScene = { type: "ordered_items_scene"; items: { id: string; label: string }[]; operations: { type: "compare" | "swap" | "highlight" | "markComplete"; itemIds: string[]; explanation?: string | null }[]; emphasizedItemIds: string[] }
+export type StageVisual = SequenceExchangeScene | VectorScene | OrderedItemsScene
 export type MechanismPrediction = { prompt: string; options: string[]; answer: number; reveal: string }
 export type StepThroughMechanismData = {
+  sceneType: string
   learningGoal: string
   entities: MechanismEntity[]
   stages: MechanismStage[]
@@ -23,16 +25,18 @@ export type StepThroughMechanismData = {
 
 export type GeneratedStepThroughMechanism = {
   type: "step_through_mechanism"
+  sceneType: string
   title: string
   learningGoal: string
   entities: Array<{ id: string; label: string; color?: string | null }>
-  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: StageVisual | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: unknown }>
   prediction?: MechanismPrediction | null
   conclusion: string
 }
 
 export function generatedMechanismToRendererData(mechanism: GeneratedStepThroughMechanism): StepThroughMechanismData {
   return {
+    sceneType: mechanism.sceneType,
     learningGoal: mechanism.learningGoal,
     entities: mechanism.entities.map((entity) => ({ ...entity, color: entity.color ?? undefined })),
     stages: mechanism.stages.map((stage) => ({
@@ -40,11 +44,20 @@ export function generatedMechanismToRendererData(mechanism: GeneratedStepThrough
       explanation: stage.explanation,
       equation: stage.equation ?? undefined,
       activeEntityIds: stage.activeEntityIds,
-      visual: stage.visual ?? undefined,
+      visual: stage.visual as StageVisual | undefined,
     })),
     prediction: mechanism.prediction ?? undefined,
     conclusion: mechanism.conclusion,
   }
+}
+
+function OrderedItemsVisual({ scene }: { scene: OrderedItemsScene }) {
+  const emphasized = new Set(scene.emphasizedItemIds)
+  const activeItems = new Set(scene.operations.flatMap((operation) => operation.itemIds))
+  return <svg viewBox="0 0 420 250" role="img" aria-label="Ordered items process diagram">
+    <g className="ordered-items-row">{scene.items.slice(0, 8).map((item, index) => <g key={item.id}><rect x={22 + index * 49} y="78" width="42" height="42" rx="8" fill={emphasized.has(item.id) ? "#d9eee5" : "#fbfaf6"} stroke={activeItems.has(item.id) ? "#1d9e75" : "#d8d2c5"} strokeWidth={emphasized.has(item.id) ? 3 : 2} /><text x={43 + index * 49} y="103" textAnchor="middle" className="ordered-item-label">{item.label}</text></g>)}</g>
+    <g className="ordered-operations">{scene.operations.map((operation, index) => <text key={`${operation.type}-${index}`} x="210" y={154 + index * 19} textAnchor="middle" className="ordered-operation-label">{operation.type === "markComplete" ? "✓ complete" : `${operation.type}: ${operation.itemIds.join(" ↔ ")}`}</text>)}</g>
+  </svg>
 }
 
 function SequenceExchangeVisual({ scene }: { scene: SequenceExchangeScene }) {
@@ -101,7 +114,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
   return <section className="step-mechanism" aria-label={data.learningGoal}>
     <p className="step-goal">Learning goal: {data.learningGoal}</p>
     <div className="step-visual" aria-live="polite">
-      {current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
+      {data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
         {!vectors.length && (current.activeEntityIds ?? data.entities.map((entity) => entity.id)).slice(0, 4).map((entityId, index, activeIds) => {
@@ -111,7 +124,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
           return <g key={entity.id}><rect x={x - 38} y="105" width="76" height="40" rx="10" fill="#fbfaf6" stroke={entity.color ?? "#58735d"} strokeWidth="2" /><text x={x} y="129" textAnchor="middle" className="vector-label">{entity.label}</text>{index < activeIds.length - 1 && <path d={`M${x + 39} 125 L${x + 53} 125`} stroke="#58735d" strokeWidth="2" markerEnd="none" />}</g>
         })}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
-      </svg>}
+      </svg> : <div className="visual-unavailable" role="status"><strong>Visual unavailable</strong><span>This mechanism has no supported visual scene. The step explanation remains available below.</span></div>}
       <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>
     </div>
     <div className="step-copy"><p className="step-count">Step {stage + 1} of {data.stages.length}</p><h3>{current.title}</h3><p>{current.explanation}</p>{current.equation && <code className="step-equation">{current.equation}</code>}</div>

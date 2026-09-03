@@ -70,7 +70,31 @@ class VectorScene(BaseModel):
     active_entity_ids: list[str] = Field(alias="activeEntityIds", min_length=1)
 
 
-StageVisual = SequenceExchangeScene | VectorScene
+class OrderedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=80)
+
+
+class OrderedOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: Literal["compare", "swap", "highlight", "markComplete"]
+    item_ids: list[str] = Field(alias="itemIds", min_length=1, max_length=4)
+    explanation: str | None = Field(default=None, max_length=240)
+
+
+class OrderedItemsScene(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: Literal["ordered_items_scene"]
+    items: list[OrderedItem] = Field(min_length=2, max_length=20)
+    operations: list[OrderedOperation] = Field(min_length=1, max_length=8)
+    emphasized_item_ids: list[str] = Field(default_factory=list, alias="emphasizedItemIds")
+
+
+StageVisual = SequenceExchangeScene | VectorScene | OrderedItemsScene
 
 
 class MechanismPrediction(BaseModel):
@@ -92,6 +116,7 @@ class StepThroughMechanism(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     type: Literal["step_through_mechanism"] = "step_through_mechanism"
+    scene_type: Literal["vector_scene", "sequence_exchange_scene", "ordered_items_scene"] = Field(alias="sceneType")
     title: str = Field(min_length=1, max_length=200)
     learning_goal: str = Field(alias="learningGoal", min_length=1, max_length=300)
     entities: list[StepEntity] = Field(min_length=1, max_length=20)

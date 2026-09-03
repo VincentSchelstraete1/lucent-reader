@@ -1,6 +1,7 @@
 import type { StepThroughMechanismData } from "./StepThroughMechanism"
 
 export const gramSchmidtGolden: StepThroughMechanismData = {
+  sceneType: "vector_scene",
   learningGoal: "Understand geometrically why subtracting projections produces orthogonal directions.",
   entities: [
     { id: "v1", label: "u₁ = v₁", color: "#1d9e75" },
