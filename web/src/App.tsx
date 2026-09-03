@@ -10,6 +10,7 @@ import { AppWalkthrough } from "./components/walkthrough/AppWalkthrough"
 import { ProtectedRoute } from "./components/auth/ProtectedRoute"
 import { LearningCanvasDemo } from "./learning/components/LearningCanvasDemo"
 import { DocumentIngestionDemo } from "./pages/DocumentIngestionDemo"
+import { Notes } from "./pages/Notes"
 
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
@@ -21,6 +22,7 @@ function AppLayout() {
           Lucent Library
         </Link>
         <Link to="/app/learning-canvas" className="app-header-link">Learning Canvas</Link>
+        <Link to="/app/notes" className="app-header-link">Notes</Link>
         {import.meta.env.DEV && <Link to="/app/dev/ingestion" className="app-header-link">Document ingestion</Link>}
       </header>
       <main>
@@ -43,6 +45,7 @@ export function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/app" element={<Library />} />
+            <Route path="/app/notes" element={<Notes />} />
             <Route path="/sources/:sourceId" element={<SourceDetail />} />
             <Route path="/documents/:documentId" element={<DocumentDetail />} />
             <Route path="/quizzes/:quizId" element={<QuizPage />} />

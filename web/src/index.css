@@ -1,6 +1,29 @@
 @import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap");
 @import "./styles/public-tokens.css";
 
+.notes-import { border: 1px solid #d8d2c5; border-radius: 12px; padding: 1rem; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: #fbfaf6; }
+.notes-import label { font-weight: 600; width: 100%; }
+.notes-progress, .notes-output { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+.note-section { border-top: 1px solid #d8d2c5; padding-top: 1.25rem; }
+.note-kicker { text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: #58735d; margin-bottom: .25rem; }
+.note-big-idea { font-size: 1.15rem; max-width: 68ch; }
+.note-component { margin: 1rem 0; max-width: 760px; }
+.note-component h3 { margin-bottom: .45rem; }
+.note-node { border: 1px solid #58735d; border-radius: 8px; background: #f4f1e8; padding: .55rem .8rem; cursor: pointer; font: inherit; }
+.note-edge { display: grid; justify-items: center; color: #58735d; padding: .3rem; }
+.note-detail { margin: .35rem 0 .5rem 1rem; color: #55544e; }
+.note-tree ul { margin: .5rem 0 .5rem 1.25rem; padding-left: 1rem; border-left: 1px solid #d8d2c5; }
+.note-tree li { margin: .5rem 0; list-style: none; }
+.note-definition { border-left: 3px solid #58735d; padding-left: .8rem; }
+.note-definition dt { font-weight: 700; }
+.note-definition dd { margin: .25rem 0 0; }
+.note-table { overflow-x: auto; }
+.note-table table { border-collapse: collapse; width: 100%; }
+.note-table th, .note-table td { border: 1px solid #d8d2c5; padding: .55rem; text-align: left; }
+.note-example { background: #f4f1e8; border-radius: 8px; padding: .8rem; }
+.note-takeaways { background: #eef2e8; padding: .8rem 1rem; border-radius: 8px; max-width: 760px; }
+.note-skeleton { border-top: 1px solid #d8d2c5; padding: 1rem 0; }
+
 :root {
   --lucent-bg: #f5f1e8;
   --lucent-surface: #ffffff;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api, type Source } from "../api/client"
 import { SourceCard } from "../components/SourceCard"
 import { Skeleton } from "../components/Skeleton"
@@ -38,6 +39,7 @@ export function Library() {
       <div className="page-header" data-tour="library-heading">
         <h1>Your Library</h1>
         <p className="page-subtitle">Everything you've saved from the web, organized by source.</p>
+        <Link className="btn btn-primary" to="/app/notes">Create notes from a document</Link>
       </div>
 
       <div data-tour="library-content">
