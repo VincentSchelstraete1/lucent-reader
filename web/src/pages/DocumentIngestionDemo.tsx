@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningBlock, type RawImage, type RawPage, type SourceLocation } from "../api/client"
+import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningBlock, type ProgressiveSection, type RawImage, type RawPage, type SourceLocation } from "../api/client"
 import { LearningObjectRenderer } from "../learning/renderers/LearningObjectRenderer"
 import styles from "./documentIngestionDemo.module.css"
 import { GeneratedNoteRenderer } from "../learning/components/GeneratedNoteRenderer"
@@ -7,6 +7,7 @@ import { GeneratedNoteRenderer } from "../learning/components/GeneratedNoteRende
 type IngestionState =
   | { status: "idle" }
   | { status: "uploading" }
+  | { status: "processing"; filename: string; sections: ProgressiveSection[] }
   | { status: "error"; message: string }
   | { status: "success"; result: DocumentIngestionResult }
 
@@ -120,6 +121,10 @@ function SectionNotesInspection({ notes }: { notes: NonNullable<DocumentIngestio
   return <section className={styles.markdownSection} aria-labelledby="section-notes-heading"><details open><summary id="section-notes-heading">Coherent section notes ({notes.length})</summary>{notes.map(note => <article key={note.id} className={styles.pageCard}><h3>{note.title}</h3><p><strong>Big idea:</strong> {note.bigIdea}</p><ul>{note.keyTakeaways.map(item => <li key={item}>{item}</li>)}</ul>{note.components.map(component => <div key={`${note.id}-${component.title}`}><h4>{component.title}</h4><p><small>{component.kind} · source blocks: {component.sourceBlockIds.join(", ")}</small></p>{component.learningObject ? <LearningObjectRenderer object={component.learningObject} /> : <p>{component.text}</p>}</div>)}</article>)}</details></section>
 }
 
+function ProgressiveSections({ sections }: { sections: ProgressiveSection[] }) {
+  return <section className={styles.markdownSection} aria-live="polite"><h2>Generating coherent notes</h2>{sections.map(section => <article key={section.id} className={styles.pageCard}><h3>{section.title || "Untitled section"}</h3>{section.status === "complete" && section.section_note ? <><p><strong>Big idea:</strong> {section.section_note.bigIdea}</p>{section.section_note.components.map(component => <div key={`${section.id}-${component.title}`}><h4>{component.title}</h4>{component.learningObject ? <LearningObjectRenderer object={component.learningObject} /> : <p>{component.text}</p>}</div>)}</> : section.status === "failed" ? <p className="error">Section fallback used.</p> : <p role="status">{section.status === "pending" ? "Waiting…" : "Generating…"}</p>}</article>)}</section>
+}
+
 export function DocumentIngestionDemo() {
   const [file, setFile] = useState<File | null>(null)
   const [state, setState] = useState<IngestionState>({ status: "idle" })
@@ -131,7 +136,20 @@ export function DocumentIngestionDemo() {
     setCopied(false)
     setState({ status: "uploading" })
     try {
-      setState({ status: "success", result: await api.ingestDocument(file) })
+      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        const start = await api.startProgressiveDocument(file)
+        setState({ status: "processing", filename: start.filename, sections: start.sections })
+        let poll = await api.pollProgressiveDocument(start.job_id)
+        while (poll.status === "processing") {
+          setState({ status: "processing", filename: poll.filename, sections: poll.sections })
+          await new Promise(resolve => window.setTimeout(resolve, 250))
+          poll = await api.pollProgressiveDocument(start.job_id)
+        }
+        if (!poll.result) throw new Error("Document generation failed")
+        setState({ status: "success", result: poll.result })
+      } else {
+        setState({ status: "success", result: await api.ingestDocument(file) })
+      }
     } catch (error) {
       setState({ status: "error", message: error instanceof Error ? error.message : "Document extraction failed" })
     }
@@ -177,6 +195,7 @@ export function DocumentIngestionDemo() {
       </form>
 
       {state.status === "uploading" && <p role="status">Uploading and processing the document…</p>}
+      {state.status === "processing" && <ProgressiveSections sections={state.sections} />}
       {state.status === "error" && <p className="error" role="alert">{state.message}</p>}
 
       {state.status === "success" && (
@@ -218,7 +237,8 @@ export function DocumentIngestionDemo() {
               </details>
             )}
           </section>
-          {state.result.generated_note && <GeneratedNoteRenderer note={state.result.generated_note} />}
+          <SectionNotesInspection notes={state.result.section_notes ?? []} />
+          {state.result.generated_note && <details className={styles.markdownSection}><summary>Legacy Block-Level Output (debug/compatibility)</summary><GeneratedNoteRenderer note={state.result.generated_note} /></details>}
 
           <section aria-labelledby="physical-pages">
             <h2 id="physical-pages">Physical pages / slides</h2>
@@ -296,7 +316,6 @@ export function DocumentIngestionDemo() {
             </p>
             <div className={styles.pages}>
               {state.result.learning_blocks.map((block) => <LearningBlockInspection key={block.id} block={block} />)}
-              <SectionNotesInspection notes={state.result.section_notes ?? []} />
             </div>
           </section>
 

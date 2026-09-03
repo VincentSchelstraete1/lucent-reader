@@ -298,6 +298,9 @@ export type DocumentIngestionResult = {
 export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
 export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; teachingPlan: TeachingPlan | null; learningObject: LearningObject; generationFallback: boolean }> }
 export type SectionNote = { id: string; title: string; bigIdea: string; learningGoals: string[]; components: Array<{ kind: string; title: string; text: string; sourceBlockIds: string[]; learningObject?: LearningObject | null }>; keyTakeaways: string[]; sourceBlockIds: string[]; omittedNoise: string[] }
+export type ProgressiveSection = { id: string; title: string | null; learning_block_ids: string[]; status: "pending" | "generating" | "complete" | "failed"; section_note: SectionNote | null; error: string | null }
+export type ProgressiveStart = { job_id: string; filename: string; sections: ProgressiveSection[] }
+export type ProgressivePoll = { job_id: string; filename: string; status: "processing" | "complete" | "failed"; sections: ProgressiveSection[]; result: DocumentIngestionResult | null }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
@@ -337,5 +340,10 @@ export const api = {
     form.append("file", file)
     return postForm<DocumentIngestionResult>(endpoint, form)
   },
+  startProgressiveDocument: (file: File) => {
+    const form = new FormData(); form.append("file", file)
+    return postForm<ProgressiveStart>("/ingestion/progressive", form)
+  },
+  pollProgressiveDocument: (jobId: string) => get<ProgressivePoll>(`/ingestion/progressive/${jobId}`),
   routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text })
 }

@@ -2,7 +2,8 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 import re
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from uuid import uuid4
 from starlette.concurrency import run_in_threadpool
 
 from app.auth_dependencies import get_current_user, require_csrf
@@ -21,12 +22,13 @@ from app.ingestion.pptx_ingestor import PPTX_MIME_TYPE
 from app.models.auth import User
 from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
-from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
+from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently
+from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively
 
 
 router = APIRouter(prefix="/ingestion")
+_PROGRESSIVE_JOBS: dict[str, dict] = {}
 PDF_MEDIA_TYPES = {"application/pdf", "application/x-pdf"}
 DOCX_MEDIA_TYPES = {DOCX_MIME_TYPE}
 PPTX_MEDIA_TYPES = {PPTX_MIME_TYPE}
@@ -182,6 +184,57 @@ async def ingest_pdf(
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
     return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+
+async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
+    job = _PROGRESSIVE_JOBS[job_id]
+    objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
+    async def on_complete(index, note, error):
+        state = job["sections"][index]
+        state["status"] = "complete" if error is None else "failed"
+        state["section_note"] = note.model_dump(by_alias=True)
+        state["error"] = "Section used deterministic fallback" if error else None
+    await generate_sections_progressively(group_learning_blocks(blocks), objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    job["status"] = "complete"
+
+@router.post("/progressive", response_model=ProgressiveStartResponse, dependencies=[Depends(require_csrf)])
+async def start_progressive_pdf(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+    ingestor: DocumentIngestor = Depends(get_document_ingestor),
+    classifier: ClassifierAdapter = Depends(get_classifier),
+    semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
+) -> ProgressiveStartResponse:
+    if file.content_type not in PDF_MEDIA_TYPES:
+        await file.close()
+        raise _error(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "unsupported_file_type", "Only PDF uploads are supported")
+    filename = _safe_filename(file.filename)
+    try:
+        data = await _read_pdf(file)
+    finally:
+        await file.close()
+    try:
+        extracted = await run_in_threadpool(ingestor.ingest_pdf, data, filename=filename)
+    except DocumentExtractionError:
+        raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "pdf_extraction_failed", "The PDF could not be extracted")
+    normalized = await run_in_threadpool(normalize_document, extracted)
+    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
+    base_note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
+    base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [])
+    sections = group_learning_blocks(blocks)
+    job_id = uuid4().hex
+    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
+    for state in _PROGRESSIVE_JOBS[job_id]["sections"]: state["status"] = "generating"
+    background_tasks.add_task(_run_progressive_job, job_id, extracted, blocks, decisions, semantic_generator)
+    return ProgressiveStartResponse(job_id=job_id, filename=filename, sections=[ProgressiveSectionResponse(**state) for state in _PROGRESSIVE_JOBS[job_id]["sections"]])
+
+@router.get("/progressive/{job_id}", response_model=ProgressivePollResponse)
+async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_user)) -> ProgressivePollResponse:
+    job = _PROGRESSIVE_JOBS.get(job_id)
+    if not job:
+        raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
+    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=job["base"].model_copy(update={"section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]]}) if job["status"] == "complete" else None)
 
 
 @router.post(

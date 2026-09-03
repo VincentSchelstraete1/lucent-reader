@@ -121,3 +121,21 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
             return deterministic_section_note(section, objects)
 
     return list(await asyncio.gather(*(one(section) for section in sections)))
+
+async def generate_sections_progressively(sections: list[SectionInput], objects: dict[str, LearningObject], on_complete, *, concurrency: int = 3, use_model: bool = False) -> list[SectionNote]:
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    results: list[SectionNote | None] = [None] * len(sections)
+
+    async def one(index: int, section: SectionInput) -> None:
+        async with semaphore:
+            try:
+                note = await asyncio.to_thread(model_section_note, section) if use_model else deterministic_section_note(section, objects)
+            except Exception as exc:
+                note = deterministic_section_note(section, objects)
+                await on_complete(index, note, str(exc))
+            else:
+                await on_complete(index, note, None)
+            results[index] = note
+
+    await asyncio.gather(*(one(index, section) for index, section in enumerate(sections)))
+    return [note for note in results if note is not None]

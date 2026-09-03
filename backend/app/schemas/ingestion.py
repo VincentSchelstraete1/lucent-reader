@@ -309,3 +309,23 @@ class PdfIngestionResponse(BaseModel):
 
 
 DocumentIngestionResponse = PdfIngestionResponse
+
+class ProgressiveSectionResponse(BaseModel):
+    id: str
+    title: str | None
+    learning_block_ids: list[str]
+    status: Literal["pending", "generating", "complete", "failed"]
+    section_note: SectionNote | None = None
+    error: str | None = None
+
+class ProgressiveStartResponse(BaseModel):
+    job_id: str
+    filename: str
+    sections: list[ProgressiveSectionResponse]
+
+class ProgressivePollResponse(BaseModel):
+    job_id: str
+    filename: str
+    status: Literal["processing", "complete", "failed"]
+    sections: list[ProgressiveSectionResponse]
+    result: PdfIngestionResponse | None = None

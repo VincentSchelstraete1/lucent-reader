@@ -1,5 +1,7 @@
+import asyncio
+
 from app.normalization import SourceReference
-from app.semantic import deterministic_section_note, group_learning_blocks
+from app.semantic import deterministic_section_note, group_learning_blocks, generate_sections_progressively
 from app.semantic.section_notes import SectionInput
 from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
@@ -22,3 +24,17 @@ def test_deterministic_section_note_preserves_component_provenance():
     note = deterministic_section_note(SectionInput("s", "Caches", ["Caches"], ["a"], [block], {}), {"a": obj})
     assert note.components[0].source_block_ids == ["a"]
     assert note.components[0].learning_object.type == "process"
+
+def test_progressive_generation_reports_each_section_independently():
+    first = make_block("a", "First connect. Then send data.")
+    second = make_block("b", "A short explanation.")
+    sections = group_learning_blocks([first, second], max_blocks=1)
+    objects = {}
+    completed = []
+
+    async def on_complete(index, note, error):
+        completed.append((index, note.id, error))
+
+    notes = asyncio.run(generate_sections_progressively(sections, objects, on_complete, concurrency=2, use_model=False))
+    assert [note.id for note in notes] == ["section-0", "section-1"]
+    assert {item[0] for item in completed} == {0, 1}
