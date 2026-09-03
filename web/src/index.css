@@ -44,6 +44,11 @@
 .axis-label { fill: #77736a; font-size: 11px; }
 .vector { fill: none; stroke-width: 4; color: currentColor; transition: all .35s ease; }
 .vector-dashed { stroke-dasharray: 8 6; stroke-width: 3; }
+.vector-label { font-size: 11px; font-weight: 600; paint-order: stroke; stroke: #fbfaf6; stroke-width: 4px; stroke-linejoin: round; }
+.vector-label-v1 { fill: #167a5a; }
+.vector-label-v2 { fill: #9b542c; }
+.vector-label-projection { fill: #806516; }
+.vector-label-u2 { fill: #26215c; }
 .right-angle { fill: none; stroke: #26215c; stroke-width: 2; }
 .step-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .82rem; color: #55544e; }
 .step-legend span { display: inline-flex; align-items: center; gap: .35rem; }
