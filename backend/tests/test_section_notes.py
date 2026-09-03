@@ -9,7 +9,7 @@ from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
 from app.semantic.section_notes import model_section_note, GeneratedSectionNote
-from app.semantic.schema import CausalObject
+from app.semantic.schema import CausalObject, PlainTextObject
 
 
 def make_block(ident, text, ancestry=None):
@@ -172,6 +172,15 @@ def test_deterministic_fallback_downgrades_invalid_visual_to_explanation():
     note = deterministic_section_note(SectionInput("s", "Cache", ["Cache"], [block.id], [block], {}), {block.id: obj})
     assert note.components[0].kind == "explanation"
     assert note.components[0].source_block_ids == [block.id]
+
+
+def test_deterministic_fallback_suppresses_junk_extraction_artifacts():
+    block = make_block("junk", "<UNKNOWN>")
+    obj = PlainTextObject(id=block.id, type="plain_text", title="<UNKNOWN>", learningGoal="", sourceText="<UNKNOWN>", paragraphs=["<UNKNOWN>"])
+    note = deterministic_section_note(SectionInput("s", "<UNKNOWN>", [], [block.id], [block], {}), {block.id: obj})
+    serialized = str(note.model_dump()).lower()
+    assert "<unknown>" not in serialized
+    assert note.components == []
 
 
 def test_model_failure_then_fallback_produces_valid_section_note(monkeypatch):

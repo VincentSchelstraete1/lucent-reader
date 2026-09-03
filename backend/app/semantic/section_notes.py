@@ -304,14 +304,19 @@ def group_learning_blocks(blocks: list[LearningBlock], *, max_blocks: int = 6) -
 
 
 def deterministic_section_note(section: SectionInput, objects: dict[str, LearningObject]) -> SectionNote:
-    available = [objects[b.id] for b in section.blocks if b.id in objects]
-    first_text = section.blocks[0].text.strip() if section.blocks else ""
+    def usable(value: str | None) -> bool:
+        normalized = (value or "").strip().lower()
+        return bool(normalized) and normalized not in {"<unknown>", "$", "n/a", "none"}
+
+    available = [objects[b.id] for b in section.blocks if b.id in objects and usable(b.text)]
+    first_text = next((b.text.strip() for b in section.blocks if usable(b.text)), "")
     components: list[SectionComponent] = []
     for block, obj in zip(section.blocks, [objects.get(b.id) for b in section.blocks]):
-        if obj is None:
+        if obj is None or not usable(block.text):
             continue
         kind = "explanation" if obj.type == "plain_text" else {"process": "flow", "causal": "flow", "hierarchy": "structure", "quantitative": "worked_example", "comparison": "comparison", "concept_map": "relationship_map"}.get(obj.type, "explanation")
-        data = {"kind": kind, "title": obj.title, "text": block.text[:500], "sourceBlockIds": [block.id], "learningObject": obj}
+        title = obj.title if usable(obj.title) else (section.title if usable(section.title) else "Explanation")
+        data = {"kind": kind, "title": title, "text": block.text[:500], "sourceBlockIds": [block.id], "learningObject": obj}
         if kind in {"flow", "relationship_map"}:
             if obj.type == "process":
                 data["nodes"] = [{"id": step["id"], "label": step["label"]} for step in obj.steps]
@@ -333,12 +338,14 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
         except ValueError:
             components.append(ExplanationComponent(
                 kind="explanation",
-                title=obj.title or "Explanation",
+                title=title,
                 text=block.text[:500],
                 sourceBlockIds=[block.id],
                 learningObject=obj,
             ))
-    return SectionNote(id=section.id, title=section.title or (available[0].title if available else "Learning section"), bigIdea=first_text, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=[block.text.strip() for block in section.blocks[:3]], sourceBlockIds=section.learning_block_ids)
+    title = section.title if usable(section.title) else (available[0].title if available else "Learning section")
+    takeaways = [block.text.strip() for block in section.blocks if usable(block.text)][:3]
+    return SectionNote(id=section.id, title=title, bigIdea=first_text or title, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=takeaways or [title], sourceBlockIds=section.learning_block_ids)
 
 
 def safe_deterministic_section_note(section: SectionInput, objects: dict[str, LearningObject]) -> SectionNote:
