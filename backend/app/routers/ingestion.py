@@ -23,7 +23,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet
+from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently
 
 
 router = APIRouter(prefix="/ingestion")
@@ -75,6 +75,19 @@ async def _generate_note(extracted, blocks, decisions, semantic_generator):
         except Exception:
             objects[block.id] = plain_text_fallback(block)
     return assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects, plans)
+
+async def _generate_section_notes(blocks, objects):
+    sections = group_learning_blocks(blocks)
+    return await generate_sections_concurrently(sections, objects, concurrency=3)
+
+async def _generate_outputs(extracted, blocks, decisions, semantic_generator):
+    # Keep the legacy per-block note payload available for the inspector, but
+    # make the user-facing coherent path section-level and model-backed.
+    deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
+    note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
+    objects = {section.learning_block_id: section.learning_object for section in note.sections}
+    section_notes = await generate_sections_concurrently(group_learning_blocks(blocks), objects, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    return note, section_notes
 
 
 def _error(status_code: int, code: str, message: str) -> HTTPException:
@@ -167,8 +180,8 @@ async def ingest_pdf(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    note = await _generate_note(extracted, blocks, decisions, semantic_generator)
-    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note)
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
+    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
 
 
 @router.post(
@@ -200,7 +213,8 @@ async def ingest_docx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, await _generate_note(extracted, blocks, decisions, semantic_generator))
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
 
 
 @router.post(
@@ -232,4 +246,5 @@ async def ingest_pptx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, await _generate_note(extracted, blocks, decisions, semantic_generator))
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
+    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)

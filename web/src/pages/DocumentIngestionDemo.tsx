@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react"
 import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningBlock, type RawImage, type RawPage, type SourceLocation } from "../api/client"
+import { LearningObjectRenderer } from "../learning/renderers/LearningObjectRenderer"
 import styles from "./documentIngestionDemo.module.css"
 import { GeneratedNoteRenderer } from "../learning/components/GeneratedNoteRenderer"
 
@@ -112,6 +113,11 @@ function LearningBlockInspection({ block }: { block: LearningBlock }) {
       </div>
     </details>
   )
+}
+
+function SectionNotesInspection({ notes }: { notes: NonNullable<DocumentIngestionResult["section_notes"]> }) {
+  if (!notes.length) return null
+  return <section className={styles.markdownSection} aria-labelledby="section-notes-heading"><details open><summary id="section-notes-heading">Coherent section notes ({notes.length})</summary>{notes.map(note => <article key={note.id} className={styles.pageCard}><h3>{note.title}</h3><p><strong>Big idea:</strong> {note.bigIdea}</p><ul>{note.keyTakeaways.map(item => <li key={item}>{item}</li>)}</ul>{note.components.map(component => <div key={`${note.id}-${component.title}`}><h4>{component.title}</h4><p><small>{component.kind} · source blocks: {component.sourceBlockIds.join(", ")}</small></p>{component.learningObject ? <LearningObjectRenderer object={component.learningObject} /> : <p>{component.text}</p>}</div>)}</article>)}</details></section>
 }
 
 export function DocumentIngestionDemo() {
@@ -290,6 +296,7 @@ export function DocumentIngestionDemo() {
             </p>
             <div className={styles.pages}>
               {state.result.learning_blocks.map((block) => <LearningBlockInspection key={block.id} block={block} />)}
+              <SectionNotesInspection notes={state.result.section_notes ?? []} />
             </div>
           </section>
 

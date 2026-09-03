@@ -292,10 +292,12 @@ export type DocumentIngestionResult = {
   normalized: NormalizedDocument
   learning_blocks: LearningBlock[]
   generated_note: GeneratedLearningNote | null
+  section_notes?: SectionNote[]
 }
 
 export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
 export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; teachingPlan: TeachingPlan | null; learningObject: LearningObject; generationFallback: boolean }> }
+export type SectionNote = { id: string; title: string; bigIdea: string; learningGoals: string[]; components: Array<{ kind: string; title: string; text: string; sourceBlockIds: string[]; learningObject?: LearningObject | null }>; keyTakeaways: string[]; sourceBlockIds: string[]; omittedNoise: string[] }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
