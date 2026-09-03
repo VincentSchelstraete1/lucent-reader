@@ -19,12 +19,26 @@ export type StepThroughMechanismData = {
 
 const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
 
-function VectorLine({ vector }: { vector: NonNullable<MechanismStage["vectors"]>[number] }) {
-  const markerId = `arrow-${vector.id}`
+function VectorArrow({ vector }: { vector: NonNullable<MechanismStage["vectors"]>[number] }) {
+  const color = vector.color ?? "#1d9e75"
+  const strokeWidth = vector.dashed ? 3 : 4
+  const start = { x: 70, y: 215 }
   const endpoint = toScreen(vector)
+  const dx = endpoint.x - start.x
+  const dy = endpoint.y - start.y
+  const length = Math.sqrt(dx * dx + dy * dy)
+  const ux = dx / Math.max(length, 0.001)
+  const uy = dy / Math.max(length, 0.001)
+  const px = -uy
+  const py = ux
+  const headLength = Math.min(strokeWidth * 3, length * 0.35)
+  const headWidth = strokeWidth * 2.2
+  const baseCenter = { x: endpoint.x - ux * headLength, y: endpoint.y - uy * headLength }
+  const left = { x: baseCenter.x + px * headWidth / 2, y: baseCenter.y + py * headWidth / 2 }
+  const right = { x: baseCenter.x - px * headWidth / 2, y: baseCenter.y - py * headWidth / 2 }
   return <g>
-    <defs><marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill={vector.color ?? "#58735d"} /></marker></defs>
-    <line x1="70" y1="215" x2={endpoint.x} y2={endpoint.y} className={`vector vector-${vector.id} ${vector.dashed ? "vector-dashed" : ""}`} stroke={vector.color ?? "#1d9e75"} markerEnd={`url(#${markerId})`} />
+    <line x1={start.x} y1={start.y} x2={baseCenter.x} y2={baseCenter.y} className={`vector vector-${vector.id} ${vector.dashed ? "vector-dashed" : ""}`} stroke={color} style={{ strokeWidth }} strokeLinecap="round" />
+    <polygon points={`${endpoint.x},${endpoint.y} ${left.x},${left.y} ${right.x},${right.y}`} fill={color} />
     <text x={endpoint.x + 7} y={endpoint.y - 7} className={`vector-label vector-label-${vector.id}`}>{vector.label ?? vector.id}</text>
   </g>
 }
@@ -39,7 +53,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
     <div className="step-visual" aria-live="polite">
       <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
-        {vectors.map((vector) => <VectorLine key={vector.id} vector={vector} />)}
+        {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
         {stage === data.stages.length - 1 && <path d="M70 215 L88 215 L88 197" className="right-angle" />}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
       </svg>
