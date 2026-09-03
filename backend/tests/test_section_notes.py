@@ -87,7 +87,7 @@ def test_section_request_uses_bounded_output_and_no_retries(monkeypatch):
     with pytest.raises(RuntimeError):
         model_section_note(section, model_version="test-policy")
     assert seen["max_retries"] == 0
-    assert seen["timeout"] == 15
+    assert seen["timeout"] == 20
     assert args_seen[3] == 1600
 
 
@@ -137,6 +137,13 @@ def test_generated_schema_requires_kind_specific_fields():
     assert "root" in serialized
     assert "KeyDefinitionComponent" in serialized
     assert "term" in serialized and "definition" in serialized
+
+
+def test_callout_why_it_matters_is_shared_by_generation_and_runtime_contracts():
+    payload = {"title": "Note", "kind": "callout", "text": "Important", "whyItMatters": "This changes the decision.", "sourceBlockIds": ["b"]}
+    generated = GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [payload], "keyTakeaways": [], "omittedNoise": []})
+    canonical = SectionNote.model_validate({"id": "s", "title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [payload], "keyTakeaways": [], "omittedNoise": [], "sourceBlockIds": ["b"]})
+    assert generated.components[0].why_it_matters == canonical.components[0].why_it_matters
 
 
 def test_trips_golden_note_preserves_teaching_structure(monkeypatch):
