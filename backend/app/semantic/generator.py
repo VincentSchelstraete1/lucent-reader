@@ -71,7 +71,7 @@ class DeterministicSemanticGenerator:
                 relationships = [
                     {"source": "concept-0", "target": "concept-1", "relation": "uses", "explanation": "Virtual memory uses page tables to translate addresses."},
                     {"source": "concept-1", "target": "concept-2", "relation": "maps", "explanation": "Page tables map virtual pages to physical frames."},
-                    {"source": "concept-2", "target": "concept-3", "relation": "to", "explanation": "Virtual pages map to physical frames."},
+                    {"source": "concept-2", "target": "concept-3", "relation": "map to", "explanation": "Virtual pages map to physical frames."},
                     {"source": "concept-4", "target": "concept-5", "relation": "caches", "explanation": "The TLB caches recent page-table translations."},
                 ]
                 return ConceptMapObject.model_validate({**_base(block, kind, block.title or "Concept relationships"), "nodes": nodes, "relationships": relationships})
