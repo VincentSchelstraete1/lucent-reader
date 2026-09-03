@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ApiError, api, type StepThroughFixture, type StepThroughResponse } from "../api/client"
+import { ApiError, api, type GenerationDiagnostics, type StepThroughFixture, type StepThroughResponse } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism, summarizeVisualProgram } from "../learning/experiences/StepThroughMechanism"
 import { gramSchmidtGolden } from "../learning/experiences/goldenExamples"
 
@@ -10,6 +10,7 @@ export function StepThroughDev() {
   const [result, setResult] = useState<StepThroughResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ApiError["details"]>([])
+  const [failureDiagnostics, setFailureDiagnostics] = useState<GenerationDiagnostics | null>(null)
   const [status, setStatus] = useState<"idle" | "generating" | "replay_loaded" | "live_succeeded" | "validation_failed" | "truncated" | "timed_out" | "request_failed">("idle")
   const [invocationCallCount, setInvocationCallCount] = useState<0 | 1>(0)
   const fixture = useMemo(() => fixtures.find((item) => item.name === selected), [fixtures, selected])
@@ -28,6 +29,7 @@ export function StepThroughDev() {
     setResult(null)
     setError(null)
     setValidationErrors([])
+    setFailureDiagnostics(null)
     setStatus("idle")
     setInvocationCallCount(0)
   }
@@ -36,6 +38,7 @@ export function StepThroughDev() {
     setResult(null)
     setError(null)
     setValidationErrors([])
+    setFailureDiagnostics(null)
     setStatus("generating")
     setInvocationCallCount(mode === "live" ? 1 : 0)
     try {
@@ -45,6 +48,7 @@ export function StepThroughDev() {
     } catch (err) {
       setResult(null)
       setError(err instanceof Error ? err.message : "Step-through generation failed")
+      setFailureDiagnostics(err instanceof ApiError ? err.diagnostics : null)
       if (err instanceof ApiError && err.code === "invalid_generation") {
         setValidationErrors(err.details)
         setStatus("validation_failed")
@@ -71,7 +75,8 @@ export function StepThroughDev() {
     </div>
     <p className={`step-through-status status-${status}`} aria-live="polite"><strong>Status:</strong> {statusLabel} <span>· Model calls this invocation: {result?.metadata.model_call_count ?? invocationCallCount}</span></p>
     {error && <div className="error" role="alert"><strong>{error}</strong>{validationErrors.length > 0 && <ul>{validationErrors.map((item) => <li key={`${item.location}-${item.type}`}><code>{item.location}</code>: {item.message}</li>)}</ul>}</div>}
-    {result && summary && <section className="step-through-result" aria-live="polite"><dl className="step-through-metrics"><div><dt>Result</dt><dd>{statusLabel}</dd></div><div><dt>Validation</dt><dd>{result.metadata.validation}</dd></div><div><dt>Model calls this invocation</dt><dd>{result.metadata.model_call_count}</dd></div><div><dt>Fixture</dt><dd>{result.metadata.cache_hit ? "replay hit" : "live miss"}</dd></div><div><dt>Origin</dt><dd>{origin}</dd></div><div><dt>Latency</dt><dd>{Math.round(result.metadata.latency_ms)} ms</dd></div><div><dt>Model</dt><dd>{result.metadata.model ?? "none (replay)"}</dd></div><div><dt>Input tokens</dt><dd>{result.metadata.input_tokens ?? "not reported"}</dd></div><div><dt>Output tokens</dt><dd>{result.metadata.output_tokens ?? "not reported"}</dd></div></dl><div className="visual-program-summary"><strong>Visual program</strong><span>{summary.entities} entities</span><span>{summary.stages} stages</span><span>{summary.operations} semantic operations</span><span>{summary.stateChangingOperations} state-changing operations</span><span>scene: {summary.scene}</span><span>renderable stages: {summary.availableStages}/{summary.stages}</span></div><details><summary>Generated semantic JSON</summary><pre>{JSON.stringify(result.mechanism, null, 2)}</pre></details><h2>{result.mechanism.title}</h2><StepThroughMechanism data={rendererData!} /></section>}
+    {failureDiagnostics && <dl className="step-through-metrics failure-metrics"><div><dt>Finish reason</dt><dd>{failureDiagnostics.stop_reason ?? "not reported"}</dd></div><div><dt>Input tokens</dt><dd>{failureDiagnostics.input_tokens ?? "not reported"}</dd></div><div><dt>Output tokens</dt><dd>{failureDiagnostics.output_tokens ?? "not reported"} / {failureDiagnostics.max_tokens ?? "unknown limit"}</dd></div><div><dt>Parsed</dt><dd>{failureDiagnostics.parsed ? "yes" : "no"}</dd></div><div><dt>Truncated</dt><dd>{failureDiagnostics.truncated ? "yes" : "no"}</dd></div>{failureDiagnostics.top_level_keys && <div><dt>Returned keys</dt><dd>{failureDiagnostics.top_level_keys.join(", ") || "none"}</dd></div>}</dl>}
+    {result && summary && <section className="step-through-result" aria-live="polite"><dl className="step-through-metrics"><div><dt>Result</dt><dd>{statusLabel}</dd></div><div><dt>Validation</dt><dd>{result.metadata.validation}</dd></div><div><dt>Parsed</dt><dd>{result.metadata.parsed ? "yes" : "no"}</dd></div><div><dt>Truncated</dt><dd>{result.metadata.truncated ? "yes" : "no"}</dd></div><div><dt>Finish reason</dt><dd>{result.metadata.stop_reason ?? "replay"}</dd></div><div><dt>Model calls this invocation</dt><dd>{result.metadata.model_call_count}</dd></div><div><dt>Fixture</dt><dd>{result.metadata.cache_hit ? "replay hit" : "live miss"}</dd></div><div><dt>Origin</dt><dd>{origin}</dd></div><div><dt>Latency</dt><dd>{Math.round(result.metadata.latency_ms)} ms</dd></div><div><dt>Model</dt><dd>{result.metadata.model ?? "none (replay)"}</dd></div><div><dt>Input tokens</dt><dd>{result.metadata.input_tokens ?? "not reported"}</dd></div><div><dt>Output tokens</dt><dd>{result.metadata.output_tokens ?? "not reported"} / {result.metadata.max_tokens ?? "no model limit"}</dd></div></dl><div className="visual-program-summary"><strong>Visual program</strong><span>{summary.entities} entities</span><span>{summary.stages} stages</span><span>{summary.operations} semantic operations</span><span>{summary.stateChangingOperations} state-changing operations</span><span>scene: {summary.scene}</span><span>renderable stages: {summary.availableStages}/{summary.stages}</span></div><details><summary>Generated semantic JSON</summary><pre>{JSON.stringify(result.mechanism, null, 2)}</pre></details><h2>{result.mechanism.title}</h2><StepThroughMechanism data={rendererData!} /></section>}
     {!result && selected === "gram-schmidt" && <section className="step-through-result"><p className="step-through-muted">The built-in golden replay is also available as a visual reference.</p><StepThroughMechanism data={gramSchmidtGolden} /></section>}
     {fixture && <p className="step-through-hash">Source hash: {fixture.source_hash}</p>}
   </section>

@@ -1,5 +1,6 @@
 import os
 import logging
+from dataclasses import dataclass
 from anthropic import Anthropic
 from pydantic import ValidationError
 
@@ -11,15 +12,25 @@ client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class StructuredToolResult:
+    data: dict
+    model: str
+    stop_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+
+
 class StructuredToolTruncatedError(ValueError):
     """Raised when a structured tool response exhausts its output budget."""
 
-    def __init__(self, *, input_tokens: int | None, output_tokens: int | None, max_tokens: int):
+    def __init__(self, *, input_tokens: int | None, output_tokens: int | None, max_tokens: int, top_level_keys: list[str] | None = None):
         super().__init__("Structured tool output was truncated at max_tokens")
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.max_tokens = max_tokens
         self.stop_reason = "max_tokens"
+        self.top_level_keys = top_level_keys or []
 
 
 LENGTH_INSTRUCTIONS = {
@@ -187,7 +198,15 @@ QUIZ_QUESTIONS_SCHEMA = {
 }
 
 
-def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int, timeout: float | None = None, max_retries: int | None = None) -> dict:
+def _run_structured_tool(
+    prompt: str,
+    tool_name: str,
+    schema: dict,
+    max_tokens: int,
+    timeout: float | None = None,
+    max_retries: int | None = None,
+    include_metadata: bool = False,
+) -> dict | StructuredToolResult:
     request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
     message = request_client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -215,16 +234,25 @@ def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: 
         max_tokens,
     )
 
+    tool_input = next((block.input for block in message.content if block.type == "tool_use"), None)
     if getattr(message, "stop_reason", None) == "max_tokens":
         raise StructuredToolTruncatedError(
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
             max_tokens=max_tokens,
+            top_level_keys=sorted(tool_input) if isinstance(tool_input, dict) else [],
         )
 
-    for block in message.content:
-        if block.type == "tool_use":
-            return block.input
+    if isinstance(tool_input, dict):
+        if include_metadata:
+            return StructuredToolResult(
+                data=tool_input,
+                model=getattr(message, "model", "unknown"),
+                stop_reason=getattr(message, "stop_reason", None),
+                input_tokens=getattr(usage, "input_tokens", None),
+                output_tokens=getattr(usage, "output_tokens", None),
+            )
+        return tool_input
 
     raise ValueError("Model did not return structured tool output")
 

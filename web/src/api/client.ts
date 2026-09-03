@@ -74,19 +74,23 @@ export class ApiError extends Error {
   status: number
   code: string | null
   details: Array<{ location: string; message: string; type: string }>
-  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = []) {
+  diagnostics: GenerationDiagnostics | null
+  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = [], diagnostics: GenerationDiagnostics | null = null) {
     super(message || `${path} failed: ${status}`)
     this.status = status
     this.code = code ?? null
     this.details = details
+    this.diagnostics = diagnostics
   }
 }
 
+export type GenerationDiagnostics = { stop_reason?: string | null; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; parsed?: boolean; truncated?: boolean; top_level_keys?: string[] }
+
 async function apiError(path: string, response: Response): Promise<ApiError> {
   try {
-    const payload = await response.json() as { detail?: string | { code?: string; message?: string; validation_errors?: Array<{ location: string; message: string; type: string }> } }
+    const payload = await response.json() as { detail?: string | { code?: string; message?: string; validation_errors?: Array<{ location: string; message: string; type: string }>; diagnostics?: GenerationDiagnostics } }
     if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail)
-    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors)
+    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors, payload.detail.diagnostics ?? null)
   } catch {
     // Some existing endpoints intentionally return no JSON error body.
   }
@@ -315,7 +319,7 @@ export type StepThroughMechanism = {
   conclusion: string
 }
 export type StepThroughFixture = { name: string; source_text: string; source_hash: string; replay_available: boolean }
-export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "sample_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; validation: "passed" | "failed"; error?: string | null }
+export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "sample_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; stop_reason?: string | null; parsed: boolean; truncated: boolean; validation: "passed" | "failed"; error?: string | null }
 export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: StepThroughMetadata }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.

@@ -15,15 +15,15 @@ from pydantic import ValidationError
 
 from app.auth_dependencies import get_current_user, require_csrf
 from app.models.auth import User
-from app.schemas.step_through import StepThroughMechanism
-from app.services.anthropic_service import StructuredToolTruncatedError, _run_structured_tool
+from app.schemas.step_through import GeneratedStepThroughMechanism, StepThroughMechanism
+from app.services.anthropic_service import StructuredToolResult, StructuredToolTruncatedError, _run_structured_tool
 
 router = APIRouter(prefix="/dev/step-through", tags=["Development"])
 logger = logging.getLogger(__name__)
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "dev_fixtures" / "step_through"
 MODEL = "claude-haiku-4-5-20251001"
 SCHEMA_VERSION = "step-through-v3"
-PROMPT_VERSION = "visual-dsl-v1"
+PROMPT_VERSION = "visual-dsl-compact-v2"
 LIVE_MAX_TOKENS = 1800
 LIVE_TIMEOUT_SECONDS = 25
 LIVE_MAX_RETRIES = 0
@@ -65,6 +65,10 @@ class StepThroughMetadata(BaseModel):
     latency_ms: float
     input_tokens: int | None = None
     output_tokens: int | None = None
+    max_tokens: int | None = None
+    stop_reason: str | None = None
+    parsed: bool = True
+    truncated: bool = False
     validation: Literal["passed", "failed"]
     error: str | None = None
 
@@ -173,18 +177,27 @@ def _save_recorded(name: str, source_text: str, mechanism: StepThroughMechanism)
 
 
 def _prompt(source_text: str) -> str:
-    return f"""Turn this one short source section into a selective semantic visual program that teaches a mechanism.
+    return f"""Create one COMPACT semantic visual program for this short source section.
 
-Return every required field: sceneType, title, learningGoal, entities, stages, and conclusion. Use 2-5 meaningful stages. Every entity needs a stable machine id, a semantic kind, and a learner-facing label. IDs are references only and must never substitute for labels.
+Teach only the central mechanism. Return every required field and use 2-4 stages unless a fifth stage is essential. Prefer fewer meaningful stages over exhaustive narration.
 
-Choose exactly one supported sceneType:
-- sequence_exchange_scene for ordered exchanges between actors. Messages identify sender, receiver, a short display label, and may separately explain reason and result.
-- ordered_items_scene for ordered collections. Each stage visual identifies a before state, one semantic operation (compare, swap, move, highlight, or mark_complete), the operation reason/result, and an after state whenever order or completion changes. Use statuses and named regions to express active, selected, changed, or completed subsets. Do not ask the renderer to infer algorithm-specific completion.
-- vector_scene only for genuine vector mathematics. Identify active entities, semantic operations (project, subtract, highlight, reveal), and relationships without coordinates.
+Compactness rules:
+- entity labels are short; IDs are references, never learner-facing text
+- stage explanation: one sentence, ideally <=25 words
+- operation reason/result: one short sentence each, ideally <=20 words
+- notice: optional, <=18 words, only when it adds a distinct observation
+- conclusion: one sentence, ideally <=35 words
+- omit optional fields that repeat the explanation, reason, result, or conclusion
+- never restate the source paragraph or duplicate the same idea across fields
 
-Each stage should distinguish what happened from why it happened. Use notice for what the learner should look at and insight for a concise conclusion. A state-changing ordered operation must provide enough before/after semantic state to make the change visible. Prefer fewer stages with visible conceptual change over redundant snapshots. If none of the supported grammars genuinely fits, the request should fail validation rather than forcing unrelated content into a scene.
+Choose exactly one sceneType and matching visualProgram:
+- sequence_exchange_scene: declare actorIds and messages ONCE in visualProgram. Stages contain only visibleMessageIds and the emphasizedMessageId.
+- ordered_items_scene: declare initialOrder ONCE. Use ordered_items_observe for compare/highlight, ordered_items_reorder for swap/move with resultingOrder, and ordered_items_complete for mark_complete with completedEntityIds. Every operation needs a reason; state-changing operations also need a result.
+- vector_scene: stages reference shared entity IDs with concise project/subtract/highlight/reveal operations and relationships.
 
-Generate meaning only. Never include x/y coordinates, dimensions, SVG, HTML, CSS, colors, font sizes, pixel positions, animation instructions, or executable code. Stay grounded in the supplied source and do not invent unsupported rules.
+Each stage must make a visible conceptual change or decision. Preserve the minimum state, reason, and result needed to understand what changed and why. Do not add commentary merely to fill fields.
+
+Generate semantics only. Never include coordinates, dimensions, SVG, HTML, CSS, colors, font sizes, pixel positions, animation instructions, or executable code. Stay source-grounded; do not invent facts or topic-specific rules.
 
 Source section:
 {source_text}"""
@@ -213,22 +226,28 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
         if mechanism is None:
             raise HTTPException(status_code=404, detail={"code": "fixture_not_found", "message": "No replay fixture matches this source. Choose Live generate once."})
         kind = "golden_manual" if is_golden else "sample_manual" if is_builtin_source and request.fixture_name in {"tcp-handshake", "bubble-sort", "insertion-sort"} else "recorded_live"
-        return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, validation="passed"))
+        return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, parsed=True, truncated=False, validation="passed"))
 
+    tool_result: StructuredToolResult | None = None
     try:
-        raw = _run_structured_tool(
+        result = _run_structured_tool(
             _prompt(request.source_text),
             "step_through_mechanism",
-            StepThroughMechanism.generation_schema(),
+            GeneratedStepThroughMechanism.generation_schema(),
             LIVE_MAX_TOKENS,
             timeout=LIVE_TIMEOUT_SECONDS,
             max_retries=LIVE_MAX_RETRIES,
+            include_metadata=True,
         )
-        mechanism = StepThroughMechanism.model_validate(raw)
+        if not isinstance(result, StructuredToolResult):
+            raise TypeError("structured generation did not return request metadata")
+        tool_result = result
+        generated = GeneratedStepThroughMechanism.model_validate(result.data)
+        mechanism = generated.to_canonical()
     except ValidationError as exc:
         logger.warning("step_through_generation_failed fixture=%s stage=validation exception_type=%s", request.fixture_name, type(exc).__name__)
         errors = [{"location": ".".join(str(part) for part in error["loc"]), "message": error["msg"], "type": error["type"]} for error in exc.errors(include_url=False, include_input=False)]
-        raise HTTPException(status_code=422, detail={"code": "invalid_generation", "message": "Live generation returned semantic data that failed validation.", "validation_errors": errors}) from exc
+        raise HTTPException(status_code=422, detail={"code": "invalid_generation", "message": "Live generation returned semantic data that failed validation.", "validation_errors": errors, "diagnostics": {"stop_reason": tool_result.stop_reason if tool_result else None, "input_tokens": tool_result.input_tokens if tool_result else None, "output_tokens": tool_result.output_tokens if tool_result else None, "max_tokens": LIVE_MAX_TOKENS, "parsed": tool_result is not None, "truncated": False}}) from exc
     except StructuredToolTruncatedError as exc:
         logger.warning(
             "step_through_generation_failed fixture=%s stage=provider_truncation exception_type=%s input_tokens=%s output_tokens=%s max_tokens=%s max_retries=%s",
@@ -244,18 +263,19 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
             detail={
                 "code": "generation_truncated",
                 "message": f"Claude exhausted the {exc.max_tokens}-token output budget before completing the visual program. No retry was attempted.",
+                "diagnostics": {"stop_reason": exc.stop_reason, "input_tokens": exc.input_tokens, "output_tokens": exc.output_tokens, "max_tokens": exc.max_tokens, "parsed": False, "truncated": True, "top_level_keys": exc.top_level_keys},
             },
         ) from exc
     except APITimeoutError as exc:
         logger.warning("step_through_generation_failed fixture=%s stage=provider_timeout exception_type=%s timeout_seconds=%s max_retries=%s", request.fixture_name, type(exc).__name__, LIVE_TIMEOUT_SECONDS, LIVE_MAX_RETRIES)
-        raise HTTPException(status_code=504, detail={"code": "generation_timeout", "message": f"Claude did not return within {LIVE_TIMEOUT_SECONDS} seconds. No retry was attempted; run Live generate once again if you want to retry."}) from exc
+        raise HTTPException(status_code=504, detail={"code": "generation_timeout", "message": f"Claude did not return within {LIVE_TIMEOUT_SECONDS} seconds. No retry was attempted; run Live generate once again if you want to retry.", "diagnostics": {"stop_reason": "timeout", "input_tokens": None, "output_tokens": None, "max_tokens": LIVE_MAX_TOKENS, "parsed": False, "truncated": False}}) from exc
     except (APIConnectionError, APIStatusError) as exc:
         logger.warning("step_through_generation_failed fixture=%s stage=provider exception_type=%s max_retries=%s", request.fixture_name, type(exc).__name__, LIVE_MAX_RETRIES)
-        raise HTTPException(status_code=502, detail={"code": "provider_error", "message": f"Claude generation request failed: {type(exc).__name__}. No automatic retry was attempted."}) from exc
+        raise HTTPException(status_code=502, detail={"code": "provider_error", "message": f"Claude generation request failed: {type(exc).__name__}. No automatic retry was attempted.", "diagnostics": {"stop_reason": "provider_error", "input_tokens": None, "output_tokens": None, "max_tokens": LIVE_MAX_TOKENS, "parsed": False, "truncated": False}}) from exc
     except Exception as exc:
         logger.exception("step_through_generation_failed fixture=%s stage=runtime exception_type=%s", request.fixture_name, type(exc).__name__)
         raise HTTPException(status_code=500, detail={"code": "generation_failed", "message": f"Step-through generation failed: {type(exc).__name__}."}) from exc
     latency_ms = (time.perf_counter() - started) * 1000
     if request.save_fixture:
         _save_recorded(request.fixture_name, request.source_text, mechanism)
-    return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="live", fixture_kind="recorded_live", cache_hit=False, model_call_count=1, model=MODEL, latency_ms=latency_ms, validation="passed"))
+    return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="live", fixture_kind="recorded_live", cache_hit=False, model_call_count=1, model=tool_result.model, latency_ms=latency_ms, input_tokens=tool_result.input_tokens, output_tokens=tool_result.output_tokens, max_tokens=LIVE_MAX_TOKENS, stop_reason=tool_result.stop_reason, parsed=True, truncated=False, validation="passed"))
