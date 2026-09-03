@@ -341,6 +341,19 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
     return SectionNote(id=section.id, title=section.title or (available[0].title if available else "Learning section"), bigIdea=first_text, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=[block.text.strip() for block in section.blocks[:3]], sourceBlockIds=section.learning_block_ids)
 
 
+def safe_deterministic_section_note(section: SectionInput, objects: dict[str, LearningObject]) -> SectionNote:
+    """Return a valid, source-grounded note even when a specialized fallback fails."""
+    try:
+        return deterministic_section_note(section, objects)
+    except Exception:
+        block = next(iter(section.blocks), None)
+        source_id = block.id if block else (section.learning_block_ids[0] if section.learning_block_ids else section.id)
+        text = (block.text.strip() if block else "") or section.title or "This section could not be generated."
+        title = section.title or "Learning section"
+        component = ExplanationComponent(kind="explanation", title=title, text=text[:1000], sourceBlockIds=[source_id])
+        return SectionNote(id=section.id, title=title, bigIdea=text[:500], learningGoals=["Review the source-grounded explanation."], components=[component], keyTakeaways=[text[:300]], sourceBlockIds=section.learning_block_ids or [source_id])
+
+
 def model_section_note(section: SectionInput, *, model_version: str = "section-v1") -> SectionNote:
     """Generate one coherent section note. The cache is process-local V1 and
     deliberately versioned so prompt/schema changes invalidate old results."""
@@ -380,7 +393,7 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
                 except Exception as exc:
                     logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
                     pass
-            return deterministic_section_note(section, objects)
+            return safe_deterministic_section_note(section, objects)
 
     return list(await asyncio.gather(*(one(section) for section in sections)))
 
@@ -393,7 +406,7 @@ async def generate_sections_progressively(sections: list[SectionInput], objects:
             try:
                 note = await asyncio.to_thread(model_section_note, section) if use_model else deterministic_section_note(section, objects)
             except Exception as exc:
-                note = deterministic_section_note(section, objects)
+                note = safe_deterministic_section_note(section, objects)
                 logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
                 await on_complete(index, note, str(exc))
             else:

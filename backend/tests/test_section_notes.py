@@ -177,3 +177,19 @@ def test_model_failure_then_fallback_produces_valid_section_note(monkeypatch):
     assert len(notes) == 1
     assert notes[0].components[0].kind == "explanation"
     assert completed[0][1] == "provider unavailable"
+
+
+def test_progressive_job_survives_fallback_failure(monkeypatch):
+    block = make_block("fallback-crash", "Source text remains available.")
+    section = SectionInput("section-fallback-crash", "Fallback", ["Fallback"], [block.id], [block], {})
+    monkeypatch.setattr("app.semantic.section_notes.model_section_note", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("model failed")))
+    monkeypatch.setattr("app.semantic.section_notes.deterministic_section_note", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad visual fallback")))
+    completed = []
+
+    async def on_complete(index, note, error):
+        completed.append((note, error))
+
+    notes = asyncio.run(generate_sections_progressively([section], {}, on_complete, concurrency=1, use_model=True))
+    assert len(notes) == 1
+    assert notes[0].components[0].kind == "explanation"
+    assert completed[0][1] == "model failed"
