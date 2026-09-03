@@ -3,6 +3,10 @@
 
 .notes-import { border: 1px solid #d8d2c5; border-radius: 12px; padding: 1rem; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: #fbfaf6; }
 .notes-import label { font-weight: 600; width: 100%; }
+.notes-history { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: 1.25rem 0; }
+.notes-history span { color: #6c746e; font-size: .85rem; margin-right: .25rem; }
+.notes-history button { border: 1px solid #c8d4cc; border-radius: 999px; background: #fff; color: #315d4d; padding: .45rem .75rem; cursor: pointer; }
+.notes-history button.active { background: #dcefe5; border-color: #78b89d; }
 .notes-progress, .notes-output { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
 .note-section { border-top: 1px solid #d8d2c5; padding-top: 1.25rem; }
 .note-kicker { text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: #58735d; margin-bottom: .25rem; }

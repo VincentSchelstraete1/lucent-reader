@@ -148,6 +148,21 @@ def test_trips_golden_note_preserves_teaching_structure(monkeypatch):
     assert note.key_takeaways
 
 
+def test_section_cache_key_includes_source_content(monkeypatch):
+    import app.semantic.section_notes as module
+    module._SECTION_CACHE.clear()
+    calls = []
+    def generated(*args, **kwargs):
+        calls.append(args[0])
+        return {"title": "Same title", "bigIdea": "Grounded idea", "learningGoals": [], "components": [{"kind": "explanation", "title": "Explanation", "text": "Grounded text", "sourceBlockIds": ["x"]}], "keyTakeaways": [], "omittedNoise": []}
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", generated)
+    a = make_block("x", "Gram Schmidt orthogonalizes vectors.")
+    b = make_block("y", "Electromagnetic fields propagate waves.")
+    model_section_note(SectionInput("a", "Same", [], [a.id], [a], {}), model_version="cache-source-test")
+    model_section_note(SectionInput("b", "Same", [], [b.id], [b], {}), model_version="cache-source-test")
+    assert len(calls) == 2
+
+
 def test_deterministic_fallback_downgrades_invalid_visual_to_explanation():
     block = make_block("causal", "A cache miss requires main memory access.")
     obj = CausalObject(
