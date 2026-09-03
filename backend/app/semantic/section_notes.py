@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -12,6 +14,7 @@ from app.routing import RepresentationDecision
 from .schema import LearningObject, PlainTextObject
 
 _SECTION_CACHE: dict[str, SectionNote] = {}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     source = "\n\n".join(f"[{block.id}] {block.text}" for block in section.blocks)
     key = hashlib.sha256(f"{model_version}:{section.title}:{source}".encode()).hexdigest()
     if key in _SECTION_CACHE:
+        logger.info("section_generation_cache_hit section_id=%s title=%r model=claude-haiku-4-5-20251001", section.id, section.title)
         return _SECTION_CACHE[key].model_copy()
     schema = {"type": "object", "properties": {
         "title": {"type": "string"}, "bigIdea": {"type": "string"},
@@ -159,8 +163,19 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
         "components": {"type": "array", "items": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]}, "title": {"type": "string"}, "text": {"type": "string"}, "sourceBlockIds": {"type": "array", "items": {"type": "string"}}, "whyItMatters": {"type": "string"}, "term": {"type": "string"}, "definition": {"type": "string"}, "significance": {"type": "string"}, "nodes": {"type": "array", "items": {"type": "object"}}, "edges": {"type": "array", "items": {"type": "object"}}, "root": {"type": "object"}, "items": {"type": "array", "items": {"type": "object"}}, "dimensions": {"type": "array", "items": {"type": "string"}}, "conclusion": {"type": "string"}, "problem": {"type": "string"}, "knownValues": {"type": "array", "items": {"type": "object"}}, "steps": {"type": "array", "items": {"type": "object"}}, "result": {"type": "string"}, "interpretation": {"type": "string"}, "equation": {"type": "string"}, "variables": {"type": "array", "items": {"type": "object"}}, "calloutType": {"type": "string"}, "takeaway": {"type": "string"}}, "required": ["kind", "title", "sourceBlockIds"]}},
         "keyTakeaways": {"type": "array", "items": {"type": "string"}}, "omittedNoise": {"type": "array", "items": {"type": "string"}}
     }, "required": ["title", "bigIdea", "learningGoals", "components", "keyTakeaways", "omittedNoise"]}
-    raw = _run_structured_tool("Design study notes that teach this coherent section; do not merely summarize it. First identify the learner's mental model, essential relationships, terminology, mechanisms, equations, examples, and removable repetition. Then compose a varied sequence from these components: explanation, key_definition, flow, structure, relationship_map, comparison, worked_example, equation, callout, takeaway. Use a visual component only when its semantic structure is clearer than prose. Keep node labels under about 8 words and edge relations under 4 words. Every component must cite sourceBlockIds from the supplied blocks. Preserve technical detail, stay grounded, and mark no unsupported facts as source-derived.\n\n" + source, "section_learning_note", schema, 1800, timeout=15)
-    note = SectionNote.model_validate({**raw, "id": section.id, "sourceBlockIds": section.learning_block_ids})
+    started = time.perf_counter()
+    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false", section.id, section.title)
+    try:
+        raw = _run_structured_tool("Design study notes that teach this coherent section; do not merely summarize it. First identify the learner's mental model, essential relationships, terminology, mechanisms, equations, examples, and removable repetition. Then compose a varied sequence from these components: explanation, key_definition, flow, structure, relationship_map, comparison, worked_example, equation, callout, takeaway. Use a visual component only when its semantic structure is clearer than prose. Keep node labels under about 8 words and edge relations under 4 words. Every component must cite sourceBlockIds from the supplied blocks. Preserve technical detail, stay grounded, and mark no unsupported facts as source-derived.\n\n" + source, "section_learning_note", schema, 1800, timeout=15)
+    except Exception as exc:
+        logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
+        raise
+    try:
+        note = SectionNote.model_validate({**raw, "id": section.id, "sourceBlockIds": section.learning_block_ids})
+    except Exception as exc:
+        logger.exception("section_generation_failure section_id=%s title=%r stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
+        raise
+    logger.info("section_generation_success section_id=%s title=%r model=claude-haiku-4-5-20251001 latency_ms=%.1f fallback=false components=%d", section.id, section.title, (time.perf_counter() - started) * 1000, len(note.components))
     _SECTION_CACHE[key] = note
     return note.model_copy()
 
@@ -173,7 +188,8 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
             if use_model:
                 try:
                     return await asyncio.to_thread(model_section_note, section)
-                except Exception:
+                except Exception as exc:
+                    logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
                     pass
             return deterministic_section_note(section, objects)
 
@@ -189,6 +205,7 @@ async def generate_sections_progressively(sections: list[SectionInput], objects:
                 note = await asyncio.to_thread(model_section_note, section) if use_model else deterministic_section_note(section, objects)
             except Exception as exc:
                 note = deterministic_section_note(section, objects)
+                logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
                 await on_complete(index, note, str(exc))
             else:
                 await on_complete(index, note, None)

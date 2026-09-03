@@ -8,6 +8,7 @@ from app.semantic.section_notes import SectionComponent
 from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
+from app.semantic.section_notes import model_section_note
 
 
 def make_block(ident, text, ancestry=None):
@@ -46,3 +47,12 @@ def test_structured_components_reject_orphan_relationships_and_accept_definition
         SectionComponent(kind="flow", title="Broken", sourceBlockIds=["a"], nodes=[{"id": "a", "label": "A"}], edges=[{"source": "a", "target": "missing", "relation": "causes"}])
     definition = SectionComponent(kind="key_definition", title="TLB", term="TLB", definition="Caches recent translations.", sourceBlockIds=["a"])
     assert definition.definition
+
+def test_model_section_failure_isolated_to_deterministic_fallback(monkeypatch):
+    block = make_block("failure", "A short section that should remain readable.")
+    section = SectionInput("section-failure", "Failure", ["Failure"], [block.id], [block], {})
+    def fail(*args, **kwargs):
+        raise RuntimeError("provider unavailable")
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", fail)
+    with pytest.raises(RuntimeError):
+        model_section_note(section, model_version="test-failure")
