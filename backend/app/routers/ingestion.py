@@ -23,7 +23,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicPedagogicalPlanner, AnthropicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet
+from app.semantic import AnthropicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet
 
 
 router = APIRouter(prefix="/ingestion")
@@ -54,7 +54,7 @@ def get_classifier() -> ClassifierAdapter:
 
 @lru_cache(maxsize=1)
 def get_semantic_generator() -> SemanticGenerator:
-    return HybridSemanticGenerator(AnthropicSemanticGenerator(), planner=PedagogicalPlanner(AnthropicPedagogicalPlanner()))
+    return HybridSemanticGenerator(AnthropicSemanticGenerator(), planner=PedagogicalPlanner())
 
 
 def _segment_and_route(
@@ -69,9 +69,9 @@ async def _generate_note(extracted, blocks, decisions, semantic_generator):
     for index, block in enumerate(blocks):
         context = build_context_packet(block, previous=blocks[index - 1] if index else None, next_block=blocks[index + 1] if index + 1 < len(blocks) else None, document_title=extracted.filename)
         try:
-            plan = await run_in_threadpool(semantic_generator.plan, block, decisions[block.id], context)
+            plan, obj = await run_in_threadpool(semantic_generator.generate_with_plan, block, decisions[block.id], context)
             plans[block.id] = plan
-            objects[block.id] = await run_in_threadpool(semantic_generator.generate, block, decisions[block.id], plan)
+            objects[block.id] = obj
         except Exception:
             objects[block.id] = plain_text_fallback(block)
     return assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects, plans)

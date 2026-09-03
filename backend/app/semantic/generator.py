@@ -6,12 +6,13 @@ from dataclasses import replace
 from app.segmentation import LearningBlock
 from app.routing import RepresentationDecision
 from .schema import LearningObject, PlainTextObject
-from .teaching import ContextPacket, TeachingPlan
+from .teaching import ContextPacket, TeachingPlan, DeterministicPedagogicalPlanner
 from .planner import PedagogicalPlanner
 
 class SemanticGenerator(Protocol):
     def plan(self, block: LearningBlock, decision: RepresentationDecision, context: ContextPacket | None = None) -> TeachingPlan: ...
     def generate(self, block: LearningBlock, decision: RepresentationDecision, plan: TeachingPlan | None = None) -> LearningObject: ...
+    def generate_with_plan(self, block: LearningBlock, decision: RepresentationDecision, context: ContextPacket | None = None) -> tuple[TeachingPlan, LearningObject]: ...
 
 def _base(block, kind, title):
     return {"id": sha256(f"{kind}:{block.id}".encode()).hexdigest()[:16], "type": kind, "title": title, "learningGoal": "Understand the source passage", "sourceText": block.text, "sourceReferences": [], "interactions": []}
@@ -99,6 +100,18 @@ class DeterministicSemanticGenerator:
 class HybridSemanticGenerator:
     def __init__(self, model_generator=None, planner=None): self.model_generator = model_generator; self.planner = planner or PedagogicalPlanner()
     def plan(self, block, decision, context=None): return self.planner.plan(block, decision, context)
+    def generate_with_plan(self, block, decision, context=None):
+        # Reliable deterministic representations do not need a model call. For
+        # model-backed types, the provider returns the teaching metadata and
+        # semantic object together, avoiding the old plan-then-generate double call.
+        if decision.type in {"process", "comparison", "plain_text"} or self.model_generator is None:
+            plan = self.planner.plan(block, decision, context)
+            effective = replace(decision, type=plan.final_representation) if plan.final_representation != decision.type else decision
+            return plan, DeterministicSemanticGenerator().generate(block, effective)
+        if hasattr(self.model_generator, "generate_with_plan"):
+            return self.model_generator.generate_with_plan(block, decision, context)
+        plan = self.planner.plan(block, decision, context)
+        return plan, self.generate(block, decision, plan)
     def generate(self, block, decision, plan=None):
         if plan and plan.final_representation != decision.type:
             decision = replace(decision, type=plan.final_representation)
@@ -116,7 +129,77 @@ class AnthropicSemanticGenerator:
     """Server-only structured extractor. Importing the Anthropic client is lazy so
     deterministic tests and local routing do not require a provider key."""
     def plan(self, block, decision, context=None):
-        return PedagogicalPlanner().plan(block, decision, context)
+        # Kept for compatibility with callers that inspect a plan directly.
+        # Production generation uses generate_with_plan(), which makes one call.
+        return DeterministicPedagogicalPlanner().plan(block, decision, context)
+
+    def generate_with_plan(self, block, decision, context=None):
+        from app.semantic.teaching import DeterministicPedagogicalPlanner
+        from .schema import ProcessObject, ComparisonObject, CausalObject, ConceptMapObject, HierarchyObject, QuantitativeObject, PlainTextObject
+        from app.services.anthropic_service import _run_structured_tool
+        plan = DeterministicPedagogicalPlanner().plan(block, decision, context)
+        common = {"id":{"type":"string"},"type":{"type":"string","enum":["plain_text","process","comparison","causal","concept_map","hierarchy","quantitative"]},"title":{"type":"string"},"learningGoal":{"type":"string"},"sourceText":{"type":"string"}}
+        schema = {"type":"object","properties":{
+            "learningGoal":{"type":"string"}, "finalRepresentation":{"type":"string","enum":["plain_text","process","comparison","causal","concept_map","hierarchy","quantitative"]}, "rationale":{"type":"string"},
+            "learningObject":{"type":"object","properties":{**common,"steps":{"type":"array","items":{"type":"object"}},"connections":{"type":"array","items":{"type":"object"}},"items":{"type":"array","items":{"type":"object"}},"nodes":{"type":"array","items":{"type":"object"}},"edges":{"type":"array","items":{"type":"object"}},"relationships":{"type":"array","items":{"type":"object"}},"root":{"type":"object"},"formula":{"type":"string"},"variables":{"type":"array","items":{"type":"object"}},"givenValues":{"type":"array","items":{"type":"object"}},"substitutions":{"type":"array","items":{"type":"string"}},"derivationSteps":{"type":"array","items":{"type":"string"}},"result":{"type":"string"},"interpretation":{"type":"string"},"paragraphs":{"type":"array","items":{"type":"string"}},"keyPoints":{"type":"array","items":{"type":"string"}},"definitions":{"type":"array","items":{"type":"object"}},"explanation":{"type":"string"}},"required":["id","type","title","learningGoal","sourceText"]}},
+            "required":["learningGoal","finalRepresentation","rationale","learningObject"]}
+        prompt = ("Choose whether this passage benefits from visualization, then produce one grounded semantic LearningObject. "
+                  "You may choose plain_text. Keep the final type within the taxonomy and use only the passage and bounded context. "
+                  "For concept maps select 3-7 concepts and label every edge with a meaningful verb; for causal objects use concise visible node labels and natural relation phrases (never combine quantifiers with verbs, e.g. do not write 'fewer reduces'). "
+                  "For quantitative objects include formula, variable meanings, supplied values, substitution, derivation, result and interpretation when present. Do not copy the passage as the explanation. Return only the requested structure.\n\n"
+                  f"Router recommendation: {decision.type}\nContext: {(context.model_dump_json() if context else '{}')}\nPassage:\n{block.text}")
+        raw = _run_structured_tool(prompt, "learning_representation", schema, 1400, timeout=12)
+        final_type = raw.get("finalRepresentation", decision.type)
+        classes = {"process": ProcessObject, "comparison": ComparisonObject, "causal": CausalObject, "concept_map": ConceptMapObject, "hierarchy": HierarchyObject, "quantitative": QuantitativeObject, "plain_text": PlainTextObject}
+        learning_data = raw["learningObject"]
+        if final_type == "causal":
+            nodes = []
+            for index, node in enumerate(learning_data.get("nodes", [])):
+                node = dict(node)
+                node["id"] = str(node.get("id") or f"node-{index}")
+                node["label"] = str(node.get("label") or node.get("name") or node.get("text") or "Step")
+                nodes.append(node)
+            learning_data["nodes"] = nodes
+            valid_ids = {node["id"] for node in nodes}
+            edges = []
+            for edge in learning_data.get("edges", []):
+                edge = dict(edge)
+                edge["from"] = str(edge.get("from") or edge.get("source") or "")
+                edge["to"] = str(edge.get("to") or edge.get("target") or "")
+                edge["label"] = str(edge.get("label") or edge.get("relation") or "causes")
+                if edge["from"] in valid_ids and edge["to"] in valid_ids:
+                    edges.append(edge)
+            learning_data["edges"] = edges
+        elif final_type == "concept_map":
+            nodes = []
+            by_label = {}
+            for index, node in enumerate(learning_data.get("nodes", [])[:7]):
+                node = dict(node)
+                label = str(node.get("label") or node.get("name") or "Concept").strip()
+                key = re.sub(r"^the\s+", "", label, flags=re.I).casefold()
+                if key in by_label:
+                    continue
+                node["id"] = f"concept-{len(nodes)}"
+                node["label"] = label
+                by_label[key] = node["id"]
+                nodes.append(node)
+            relationships = []
+            for relationship in learning_data.get("relationships", []):
+                relationship = dict(relationship)
+                source = str(relationship.get("source") or relationship.get("from") or "")
+                target = str(relationship.get("target") or relationship.get("to") or "")
+                source_id = source if source in {n["id"] for n in nodes} else by_label.get(re.sub(r"^the\s+", "", source, flags=re.I).casefold())
+                target_id = target if target in {n["id"] for n in nodes} else by_label.get(re.sub(r"^the\s+", "", target, flags=re.I).casefold())
+                relation = str(relationship.get("relation") or relationship.get("label") or "uses")
+                if source_id and target_id and source_id != target_id and relation.casefold() != "related to":
+                    relationships.append({**relationship, "source": source_id, "target": target_id, "relation": relation})
+            learning_data["nodes"], learning_data["relationships"] = nodes, relationships
+        try:
+            obj = classes[final_type].model_validate(learning_data)
+        except Exception:
+            raise ValueError("Model returned an invalid learning object")
+        plan = TeachingPlan(learningGoal=raw["learningGoal"], recommendedRepresentation=decision.type, finalRepresentation=final_type, rationale=raw["rationale"], coreIdeas=[], usefulContext=[], representationPlan=[], contextPacket=context, override=final_type != decision.type)
+        return plan, obj
 
     def generate(self, block, decision, plan=None):
         from app.services.anthropic_service import _run_structured_tool

@@ -46,10 +46,10 @@ def route_canvas_text(
 ) -> RoutingResponse:
     block = _canvas_learning_block(request.text.strip())
     decision: RepresentationDecision = route_learning_block_hybrid(block, classifier)
-    plan = semantic_generator.plan(block, decision, build_context_packet(block))
     try:
-        learning_object = semantic_generator.generate(block, decision, plan)
+        plan, learning_object = semantic_generator.generate_with_plan(block, decision, build_context_packet(block))
     except Exception:
+        plan = semantic_generator.plan(block, decision, build_context_packet(block))
         learning_object = plain_text_fallback(block)
     return RoutingResponse(
         decision=RepresentationDecisionResponse.from_decision(decision),
