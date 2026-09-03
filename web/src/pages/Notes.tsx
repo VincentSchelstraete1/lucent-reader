@@ -5,13 +5,13 @@ type State = { status: "idle" | "uploading" | "processing" | "complete" | "error
 
 function ComponentView({ component }: { component: SectionNote["components"][number] }) {
   const c = component as any
-  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState<number | null>(null)
   if (c.kind === "flow" || c.kind === "relationship_map") {
     const nodes = c.nodes ?? []; const edges = c.edges ?? []
-    return <div className="note-flow" aria-label={c.title}>{nodes.map((node: any, index: number) => <div key={String(node.id)}><button className="note-node" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{String(node.label)}</button>{open && node.explanation && <p className="note-detail">{String(node.explanation)}</p>}{index < nodes.length - 1 && <div className="note-edge"><span>↓</span><strong>{String(edges[index]?.relation ?? "then")}</strong></div>}</div>)}</div>
+    return <div className="note-flow" aria-label={c.title}>{nodes.map((node: any, index: number) => <div key={String(node.id)}><button className="note-node" type="button" onClick={() => setSelected(selected === index ? null : index)} aria-expanded={selected === index}>{String(node.label)}</button>{selected === index && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.transitionExplanation ?? c.text ?? c.learningObject?.learningGoal ?? "This step is part of the section's learning sequence.")}</p>}{index < nodes.length - 1 && <div className="note-edge"><span>↓</span><strong>{String(edges[index]?.relation ?? "then")}</strong></div>}</div>)}</div>
   }
   if (c.kind === "structure" && c.root) {
-    const tree = (node: any): JSX.Element => <li><button className="note-node" type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{String(node.label)}</button>{open && node.explanation && <p className="note-detail">{String(node.explanation)}</p>}{Array.isArray(node.children) && <ul>{node.children.map((child: any) => <Fragment key={String(child.id)}>{tree(child)}</Fragment>)}</ul>}</li>
+    const tree = (node: any, index = 0): JSX.Element => <li><button className="note-node" type="button" onClick={() => setSelected(selected === index ? null : index)} aria-expanded={selected === index}>{String(node.label)}</button>{selected === index && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.text ?? "This item is part of the structure shown above.")}</p>}{Array.isArray(node.children) && <ul>{node.children.map((child: any, childIndex: number) => <Fragment key={String(child.id)}>{tree(child, index + childIndex + 1)}</Fragment>)}</ul>}</li>
     return <ul className="note-tree">{tree(c.root)}</ul>
   }
   if (c.kind === "key_definition") return <dl className="note-definition"><dt>{c.term}</dt><dd>{c.definition}</dd></dl>
