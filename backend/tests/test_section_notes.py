@@ -8,7 +8,7 @@ from app.semantic.section_notes import SectionComponent
 from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
-from app.semantic.section_notes import model_section_note
+from app.semantic.section_notes import model_section_note, GeneratedSectionNote
 from app.semantic.schema import CausalObject
 
 
@@ -74,8 +74,37 @@ def test_model_structure_without_root_is_rejected(monkeypatch):
         }
 
     monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", malformed)
-    with pytest.raises(ValueError, match="structure components require a root"):
+    with pytest.raises(ValueError, match="root"):
         model_section_note(section, model_version="test-missing-root")
+
+
+@pytest.mark.parametrize("component", [
+    {"kind": "explanation", "title": "Explain", "text": "Text", "sourceBlockIds": ["b"]},
+    {"kind": "key_definition", "title": "Term", "term": "Term", "definition": "Meaning", "sourceBlockIds": ["b"]},
+    {"kind": "flow", "title": "Flow", "nodes": [{"id": "a"}], "edges": [{"source": "a", "target": "a"}], "sourceBlockIds": ["b"]},
+    {"kind": "structure", "title": "Tree", "root": {"id": "r"}, "sourceBlockIds": ["b"]},
+    {"kind": "relationship_map", "title": "Map", "nodes": [{"id": "a"}], "edges": [{"source": "a", "target": "a"}], "sourceBlockIds": ["b"]},
+    {"kind": "comparison", "title": "Compare", "items": [{"name": "A"}], "sourceBlockIds": ["b"]},
+    {"kind": "worked_example", "title": "Example", "steps": [{"description": "Step"}], "sourceBlockIds": ["b"]},
+    {"kind": "equation", "title": "Equation", "equation": "x = 1", "sourceBlockIds": ["b"]},
+    {"kind": "callout", "title": "Note", "text": "Important", "sourceBlockIds": ["b"]},
+    {"kind": "takeaway", "title": "Remember", "takeaway": "Key point", "sourceBlockIds": ["b"]},
+])
+def test_generated_section_note_accepts_minimum_valid_component(component):
+    note = GeneratedSectionNote.model_validate({
+        "title": "Section", "bigIdea": "Idea", "learningGoals": [],
+        "components": [component], "keyTakeaways": [], "omittedNoise": [],
+    })
+    assert note.components[0].kind == component["kind"]
+
+
+def test_generated_schema_requires_kind_specific_fields():
+    schema = GeneratedSectionNote.model_json_schema(by_alias=True)
+    serialized = str(schema)
+    assert "GeneratedStructure" in serialized
+    assert "root" in serialized
+    assert "GeneratedDefinition" in serialized
+    assert "term" in serialized and "definition" in serialized
 
 
 def test_deterministic_fallback_downgrades_invalid_visual_to_explanation():

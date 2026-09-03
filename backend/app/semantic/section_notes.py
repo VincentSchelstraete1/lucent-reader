@@ -5,7 +5,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -92,6 +92,103 @@ class SectionNote(BaseModel):
     omitted_noise: list[str] = Field(default_factory=list, alias="omittedNoise")
 
 
+# Model-output contract.  This is deliberately separate from the richer
+# runtime SectionComponent (which may carry an already-built LearningObject),
+# but it is the single source used both to generate the Anthropic JSON schema
+# and to validate the returned payload before conversion to SectionNote.
+class _GeneratedBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    title: str
+    source_block_ids: list[str] = Field(alias="sourceBlockIds", min_length=1)
+
+
+class GeneratedExplanation(_GeneratedBase):
+    kind: Literal["explanation"]
+    text: str = Field(min_length=1)
+    why_it_matters: str | None = Field(default=None, alias="whyItMatters")
+
+
+class GeneratedDefinition(_GeneratedBase):
+    kind: Literal["key_definition"]
+    term: str = Field(min_length=1)
+    definition: str = Field(min_length=1)
+    significance: str | None = None
+
+
+class GeneratedFlow(_GeneratedBase):
+    kind: Literal["flow"]
+    nodes: list[dict] = Field(min_length=1)
+    edges: list[dict] = Field(min_length=1)
+    text: str = ""
+
+
+class GeneratedStructure(_GeneratedBase):
+    kind: Literal["structure"]
+    root: dict
+    text: str = ""
+
+
+class GeneratedRelationshipMap(_GeneratedBase):
+    kind: Literal["relationship_map"]
+    nodes: list[dict] = Field(min_length=1)
+    edges: list[dict] = Field(min_length=1)
+    text: str = ""
+
+
+class GeneratedComparison(_GeneratedBase):
+    kind: Literal["comparison"]
+    items: list[dict] = Field(min_length=1)
+    dimensions: list[str] = Field(default_factory=list)
+    conclusion: str | None = None
+
+
+class GeneratedWorkedExample(_GeneratedBase):
+    kind: Literal["worked_example"]
+    problem: str | None = None
+    known_values: list[dict] = Field(default_factory=list, alias="knownValues")
+    steps: list[dict] = Field(min_length=1)
+    result: str | None = None
+    interpretation: str | None = None
+
+
+class GeneratedEquation(_GeneratedBase):
+    kind: Literal["equation"]
+    equation: str = Field(min_length=1)
+    variables: list[dict] = Field(default_factory=list)
+    result: str | None = None
+    interpretation: str | None = None
+
+
+class GeneratedCallout(_GeneratedBase):
+    kind: Literal["callout"]
+    text: str = Field(min_length=1)
+    callout_type: str | None = Field(default=None, alias="calloutType")
+
+
+class GeneratedTakeaway(_GeneratedBase):
+    kind: Literal["takeaway"]
+    takeaway: str = Field(min_length=1)
+    text: str = ""
+
+
+GeneratedComponent = Annotated[Union[
+    GeneratedExplanation, GeneratedDefinition, GeneratedFlow,
+    GeneratedStructure, GeneratedRelationshipMap, GeneratedComparison,
+    GeneratedWorkedExample, GeneratedEquation, GeneratedCallout,
+    GeneratedTakeaway,
+], Field(discriminator="kind")]
+
+
+class GeneratedSectionNote(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    title: str
+    big_idea: str = Field(alias="bigIdea")
+    learning_goals: list[str] = Field(alias="learningGoals")
+    components: list[GeneratedComponent]
+    key_takeaways: list[str] = Field(alias="keyTakeaways")
+    omitted_noise: list[str] = Field(alias="omittedNoise")
+
+
 def group_learning_blocks(blocks: list[LearningBlock], *, max_blocks: int = 6) -> list[SectionInput]:
     """Group adjacent blocks conservatively using existing document structure."""
     sections: list[SectionInput] = []
@@ -170,28 +267,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     if key in _SECTION_CACHE:
         logger.info("section_generation_cache_hit section_id=%s title=%r model=claude-haiku-4-5-20251001", section.id, section.title)
         return _SECTION_CACHE[key].model_copy()
-    component_properties = {"kind": {"type": "string", "enum": ["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]}, "title": {"type": "string"}, "text": {"type": "string"}, "sourceBlockIds": {"type": "array", "items": {"type": "string"}}, "whyItMatters": {"type": "string"}, "term": {"type": "string"}, "definition": {"type": "string"}, "significance": {"type": "string"}, "nodes": {"type": "array", "items": {"type": "object"}}, "edges": {"type": "array", "items": {"type": "object"}}, "root": {"type": "object"}, "items": {"type": "array", "items": {"type": "object"}}, "dimensions": {"type": "array", "items": {"type": "string"}}, "conclusion": {"type": "string"}, "problem": {"type": "string"}, "knownValues": {"type": "array", "items": {"type": "object"}}, "steps": {"type": "array", "items": {"type": "object"}}, "result": {"type": "string"}, "interpretation": {"type": "string"}, "equation": {"type": "string"}, "variables": {"type": "array", "items": {"type": "object"}}, "calloutType": {"type": "string"}, "takeaway": {"type": "string"}}
-    component_schema = {
-        "type": "object",
-        "properties": component_properties,
-        "required": ["kind", "title", "sourceBlockIds"],
-        # Keep the model contract aligned with SectionComponent's semantic
-        # invariants.  Conditional requirements prevent a structure without a
-        # root (or a visual without graph data) from reaching validation.
-        "allOf": [
-            {"if": {"properties": {"kind": {"const": "structure"}}}, "then": {"required": ["root"]}},
-            {"if": {"properties": {"kind": {"enum": ["flow", "relationship_map"]}}}, "then": {"required": ["nodes", "edges"]}},
-            {"if": {"properties": {"kind": {"const": "key_definition"}}}, "then": {"required": ["term", "definition"]}},
-            {"if": {"properties": {"kind": {"const": "worked_example"}}}, "then": {"required": ["steps"]}},
-            {"if": {"properties": {"kind": {"const": "equation"}}}, "then": {"required": ["equation"]}},
-        ],
-    }
-    schema = {"type": "object", "properties": {
-        "title": {"type": "string"}, "bigIdea": {"type": "string"},
-        "learningGoals": {"type": "array", "items": {"type": "string"}},
-        "components": {"type": "array", "items": component_schema},
-        "keyTakeaways": {"type": "array", "items": {"type": "string"}}, "omittedNoise": {"type": "array", "items": {"type": "string"}}
-    }, "required": ["title", "bigIdea", "learningGoals", "components", "keyTakeaways", "omittedNoise"]}
+    schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     started = time.perf_counter()
     logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false", section.id, section.title)
     try:
@@ -200,7 +276,8 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
     try:
-        note = SectionNote.model_validate({**raw, "id": section.id, "sourceBlockIds": section.learning_block_ids})
+        generated = GeneratedSectionNote.model_validate(raw)
+        note = SectionNote.model_validate({**generated.model_dump(by_alias=True), "id": section.id, "sourceBlockIds": section.learning_block_ids})
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
