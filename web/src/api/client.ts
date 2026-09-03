@@ -73,18 +73,20 @@ export type QuizAttempt = {
 export class ApiError extends Error {
   status: number
   code: string | null
-  constructor(path: string, status: number, message?: string, code?: string) {
+  details: Array<{ location: string; message: string; type: string }>
+  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = []) {
     super(message || `${path} failed: ${status}`)
     this.status = status
     this.code = code ?? null
+    this.details = details
   }
 }
 
 async function apiError(path: string, response: Response): Promise<ApiError> {
   try {
-    const payload = await response.json() as { detail?: string | { code?: string; message?: string } }
+    const payload = await response.json() as { detail?: string | { code?: string; message?: string; validation_errors?: Array<{ location: string; message: string; type: string }> } }
     if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail)
-    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code)
+    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors)
   } catch {
     // Some existing endpoints intentionally return no JSON error body.
   }
@@ -307,8 +309,8 @@ export type StepThroughMechanism = {
   sceneType: "vector_scene" | "sequence_exchange_scene" | "ordered_items_scene"
   title: string
   learningGoal: string
-  entities: Array<{ id: string; label: string; color?: string | null }>
-  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: unknown }>
+  entities: Array<{ id: string; kind: "item" | "actor" | "vector" | "node" | "quantity"; label: string; description?: string | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; notice?: string | null; insight?: string | null; visual?: unknown }>
   prediction?: { prompt: string; options: string[]; answer: number; reveal: string } | null
   conclusion: string
 }

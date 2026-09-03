@@ -1,17 +1,23 @@
 import { useState } from "react"
 
 export type MechanismEntity = { id: string; label: string; color?: string }
+export type EntityStatus = "default" | "active" | "selected" | "compared" | "changed" | "completed" | "inactive"
 export type MechanismStage = {
   title: string
   explanation: string
   equation?: string
   activeEntityIds?: string[]
+  notice?: string
+  insight?: string
   vectors?: { id: string; x: number; y: number; color?: string; dashed?: boolean; label?: string }[]
   visual?: StageVisual
 }
-export type SequenceExchangeScene = { type: "sequence_exchange_scene"; actors: { id: string; label: string }[]; messages: { id: string; sender: string; receiver: string; label: string; explanation?: string | null }[]; visibleMessageIds: string[]; emphasizedMessageId?: string | null }
-export type VectorScene = { type: "vector_scene"; activeEntityIds: string[] }
-export type OrderedItemsScene = { type: "ordered_items_scene"; items: { id: string; label: string }[]; operations: { type: "compare" | "swap" | "highlight" | "markComplete"; itemIds: string[]; explanation?: string | null }[]; emphasizedItemIds: string[] }
+export type SequenceExchangeScene = { type: "sequence_exchange_scene"; actors: { id: string; label: string }[]; messages: { id: string; sender: string; receiver: string; label: string; reason?: string | null; result?: string | null }[]; visibleMessageIds: string[]; emphasizedMessageId?: string | null }
+export type VectorScene = { type: "vector_scene"; activeEntityIds: string[]; operations?: Array<{ type: "project" | "subtract" | "highlight" | "reveal"; entityIds: string[]; reason?: string | null; result?: string | null }>; relationships?: Array<{ source: string; target: string; relation: "perpendicular_to" | "projects_onto" | "parallel_to"; explanation?: string | null }> }
+export type SemanticRegion = { id: string; label: string; entityIds: string[]; status: "active" | "selected" | "completed" | "input" | "output"; explanation?: string | null }
+export type OrderedCollectionState = { items: Array<{ entityId: string; status: EntityStatus }>; regions: SemanticRegion[] }
+export type OrderedOperation = { type: "compare" | "swap" | "move" | "highlight" | "mark_complete"; entityIds: string[]; reason?: string | null; result?: string | null }
+export type OrderedItemsScene = { type: "ordered_items_scene"; before: OrderedCollectionState; operation: OrderedOperation; after?: OrderedCollectionState | null; notice?: string | null }
 export type StageVisual = SequenceExchangeScene | VectorScene | OrderedItemsScene
 export type MechanismPrediction = { prompt: string; options: string[]; answer: number; reveal: string }
 export type StepThroughMechanismData = {
@@ -28,8 +34,8 @@ export type GeneratedStepThroughMechanism = {
   sceneType: string
   title: string
   learningGoal: string
-  entities: Array<{ id: string; label: string; color?: string | null }>
-  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: unknown }>
+  entities: Array<{ id: string; kind: "item" | "actor" | "vector" | "node" | "quantity"; label: string; description?: string | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; notice?: string | null; insight?: string | null; visual?: unknown }>
   prediction?: MechanismPrediction | null
   conclusion: string
 }
@@ -38,12 +44,14 @@ export function generatedMechanismToRendererData(mechanism: GeneratedStepThrough
   return {
     sceneType: mechanism.sceneType,
     learningGoal: mechanism.learningGoal,
-    entities: mechanism.entities.map((entity) => ({ ...entity, color: entity.color ?? undefined })),
+    entities: mechanism.entities.map((entity) => ({ id: entity.id, label: entity.label })),
     stages: mechanism.stages.map((stage) => ({
       title: stage.title,
       explanation: stage.explanation,
       equation: stage.equation ?? undefined,
       activeEntityIds: stage.activeEntityIds,
+      notice: stage.notice ?? undefined,
+      insight: stage.insight ?? undefined,
       visual: stage.visual as StageVisual | undefined,
     })),
     prediction: mechanism.prediction ?? undefined,
@@ -51,33 +59,73 @@ export function generatedMechanismToRendererData(mechanism: GeneratedStepThrough
   }
 }
 
-function OrderedItemsVisual({ scene }: { scene: OrderedItemsScene }) {
-  const emphasized = new Set(scene.emphasizedItemIds)
-  const activeItems = new Set(scene.operations.flatMap((operation) => operation.itemIds))
-  return <svg viewBox="0 0 420 250" role="img" aria-label="Ordered items process diagram">
-    <g className="ordered-items-row">{scene.items.slice(0, 8).map((item, index) => <g key={item.id}><rect x={22 + index * 49} y="78" width="42" height="42" rx="8" fill={emphasized.has(item.id) ? "#d9eee5" : "#fbfaf6"} stroke={activeItems.has(item.id) ? "#1d9e75" : "#d8d2c5"} strokeWidth={emphasized.has(item.id) ? 3 : 2} /><text x={43 + index * 49} y="103" textAnchor="middle" className="ordered-item-label">{item.label}</text></g>)}</g>
-    <g className="ordered-operations">{scene.operations.map((operation, index) => <text key={`${operation.type}-${index}`} x="210" y={154 + index * 19} textAnchor="middle" className="ordered-operation-label">{operation.type === "markComplete" ? "✓ complete" : `${operation.type}: ${operation.itemIds.join(" ↔ ")}`}</text>)}</g>
-  </svg>
+const OPERATION_LABELS: Record<OrderedOperation["type"], string> = {
+  compare: "Compare",
+  swap: "Swap",
+  move: "Move",
+  highlight: "Focus on",
+  mark_complete: "Mark complete",
+}
+
+function entityLabel(id: string, entities: MechanismEntity[]) {
+  return entities.find((entity) => entity.id === id)?.label ?? "Unknown item"
+}
+
+function OrderedStateRow({ state, entities, label }: { state: OrderedCollectionState; entities: MechanismEntity[]; label?: string }) {
+  return <div className="ordered-state">
+    {label && <p className="ordered-state-label">{label}</p>}
+    <div className="ordered-items-row" role="list" aria-label={label ?? "Ordered items"}>
+      {state.items.map((item) => <div key={item.entityId} className={`ordered-item status-${item.status}`} role="listitem">
+        <span className="ordered-item-value">{entityLabel(item.entityId, entities)}</span>
+        {item.status === "completed" && <span className="ordered-item-status" aria-label="completed">✓</span>}
+      </div>)}
+    </div>
+    {state.regions.length > 0 && <div className="ordered-regions">{state.regions.map((region) => <div key={region.id} className={`ordered-region region-${region.status}`}>
+      <strong>{region.label}</strong>
+      <span>{region.entityIds.map((id) => entityLabel(id, entities)).join(", ")}</span>
+      {region.explanation && <small>{region.explanation}</small>}
+    </div>)}</div>}
+  </div>
+}
+
+function OrderedItemsVisual({ scene, entities }: { scene: OrderedItemsScene; entities: MechanismEntity[] }) {
+  const labels = scene.operation.entityIds.map((id) => entityLabel(id, entities))
+  const operationText = `${OPERATION_LABELS[scene.operation.type]} ${labels.join(scene.operation.type === "move" ? "" : " and ")}`.trim()
+  return <div className="ordered-transition" role="img" aria-label={`${operationText}. ${scene.operation.reason ?? ""}`}>
+    <OrderedStateRow state={scene.before} entities={entities} label={scene.after ? "Before" : undefined} />
+    <div className="ordered-operation" aria-label="State transition">
+      <span className="ordered-operation-arrow" aria-hidden="true">↓</span>
+      <strong>{operationText}</strong>
+      {scene.operation.reason && <p>{scene.operation.reason}</p>}
+    </div>
+    {scene.after && <OrderedStateRow state={scene.after} entities={entities} label="After" />}
+    {scene.operation.result && <p className="ordered-result"><strong>Result:</strong> {scene.operation.result}</p>}
+    {scene.notice && <p className="scene-notice"><strong>Notice:</strong> {scene.notice}</p>}
+  </div>
 }
 
 function SequenceExchangeVisual({ scene }: { scene: SequenceExchangeScene }) {
-  const actorX = (index: number) => 120 + index * 180
+  const actorX = (index: number) => scene.actors.length === 1 ? 210 : 60 + index * (300 / (scene.actors.length - 1))
   const actorIndex = new Map(scene.actors.map((actor, index) => [actor.id, index]))
-  return <svg viewBox="0 0 420 250" role="img" aria-label="Sequence exchange diagram">
-    {scene.actors.slice(0, 2).map((actor, index) => <g key={actor.id}><rect x={actorX(index) - 48} y="12" width="96" height="30" rx="8" fill="#fbfaf6" stroke="#58735d" strokeWidth="2" /><text x={actorX(index)} y="32" textAnchor="middle" className="vector-label">{actor.label}</text><line x1={actorX(index)} y1="48" x2={actorX(index)} y2="228" className="axis" /></g>)}
+  const visibleMessages = scene.messages.filter((message) => scene.visibleMessageIds.includes(message.id))
+  const height = Math.max(145, 88 + visibleMessages.length * 48)
+  const emphasized = scene.messages.find((message) => message.id === scene.emphasizedMessageId)
+  return <div className="sequence-exchange"><svg viewBox={`0 0 420 ${height}`} role="img" aria-label="Sequence exchange diagram">
+    {scene.actors.map((actor, index) => <g key={actor.id}><rect x={actorX(index) - 44} y="12" width="88" height="30" rx="8" fill="#fbfaf6" stroke="#58735d" strokeWidth="2" /><text x={actorX(index)} y="32" textAnchor="middle" className="vector-label">{actor.label}</text><line x1={actorX(index)} y1="48" x2={actorX(index)} y2={height - 16} className="sequence-lifeline" /></g>)}
     {scene.messages.map((message, index) => {
       if (!scene.visibleMessageIds.includes(message.id)) return null
       const from = actorIndex.get(message.sender), to = actorIndex.get(message.receiver)
       if (from === undefined || to === undefined) return null
-      const y = 78 + index * 48
+      const visibleIndex = visibleMessages.findIndex((item) => item.id === message.id)
+      const y = 78 + visibleIndex * 48
       const x1 = actorX(from), x2 = actorX(to), direction = x2 >= x1 ? 1 : -1
       const tip = x2 - direction * 2
       const head = `${tip},${y} ${tip - direction * 10},${y - 5} ${tip - direction * 10},${y + 5}`
       const emphasized = scene.emphasizedMessageId === message.id
       return <g key={message.id} className={emphasized ? "sequence-message sequence-message-emphasized" : "sequence-message"}><line x1={x1} y1={y} x2={tip} y2={y} stroke="#58735d" strokeWidth={emphasized ? 3 : 2} /><polygon points={head} fill="#58735d" /><text x={(x1 + x2) / 2} y={y - 9} textAnchor="middle" className="sequence-message-label">{message.label}</text></g>
     })}
-    <text x="24" y="224" className="axis-label">time ↓</text>
-  </svg>
+    <text x="12" y={height - 10} className="axis-label">time ↓</text>
+  </svg>{emphasized && (emphasized.reason || emphasized.result) && <div className="sequence-teaching-detail"><strong>{emphasized.label}</strong>{emphasized.reason && <span>{emphasized.reason}</span>}{emphasized.result && <span className="sequence-result">Result: {emphasized.result}</span>}</div>}</div>
 }
 
 const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
@@ -106,28 +154,51 @@ function VectorArrow({ vector }: { vector: NonNullable<MechanismStage["vectors"]
   </g>
 }
 
+const SUPPORTED_SCENES = new Set(["vector_scene", "sequence_exchange_scene", "ordered_items_scene"])
+
+export function visualUnavailableReason(data: StepThroughMechanismData, stage: MechanismStage): string | null {
+  if (!SUPPORTED_SCENES.has(data.sceneType)) return `Unsupported scene type: ${data.sceneType || "missing"}`
+  if (data.sceneType === "vector_scene") return stage.vectors?.length ? null : "Vector semantics do not include deterministic geometry for this stage."
+  if (!stage.visual) return "This stage has no visual semantic program."
+  if (stage.visual.type !== data.sceneType) return `Stage visual ${stage.visual.type} does not match ${data.sceneType}.`
+  return null
+}
+
+export function summarizeVisualProgram(data: StepThroughMechanismData) {
+  const sequenceMessageIds = new Set<string>()
+  let operations = 0
+  data.stages.forEach((stage) => {
+    if (stage.visual?.type === "ordered_items_scene") operations += 1
+    if (stage.visual?.type === "sequence_exchange_scene") stage.visual.messages.forEach((message) => sequenceMessageIds.add(message.id))
+    if (stage.visual?.type === "vector_scene") operations += stage.visual.operations?.length ?? 0
+  })
+  operations += sequenceMessageIds.size
+  const stateChangingOperations = data.stages.filter((stage) => stage.visual?.type === "ordered_items_scene" && ["swap", "move", "mark_complete"].includes(stage.visual.operation.type)).length
+  const availableStages = data.stages.filter((stage) => visualUnavailableReason(data, stage) === null).length
+  return { scene: data.sceneType, entities: data.entities.length, stages: data.stages.length, operations, stateChangingOperations, availableStages }
+}
+
+function VisualUnavailable({ reason }: { reason: string }) {
+  return <div className="visual-unavailable" role="status"><strong>Visual unavailable</strong><span>{reason}</span><small>The teaching explanation remains available below.</small></div>
+}
+
 export function StepThroughMechanism({ data }: { data: StepThroughMechanismData }) {
   const [stage, setStage] = useState(0)
   const [choice, setChoice] = useState<number | null>(null)
   const current = data.stages[stage]
   const vectors = current.vectors ?? []
+  const unavailable = visualUnavailableReason(data, current)
   return <section className="step-mechanism" aria-label={data.learningGoal}>
     <p className="step-goal">Learning goal: {data.learningGoal}</p>
     <div className="step-visual" aria-live="polite">
-      {data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
+      {unavailable ? <VisualUnavailable reason={unavailable} /> : data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} entities={data.entities} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
-        {!vectors.length && (current.activeEntityIds ?? data.entities.map((entity) => entity.id)).slice(0, 4).map((entityId, index, activeIds) => {
-          const entity = data.entities.find((item) => item.id === entityId)
-          if (!entity) return null
-          const x = 105 + index * 92
-          return <g key={entity.id}><rect x={x - 38} y="105" width="76" height="40" rx="10" fill="#fbfaf6" stroke={entity.color ?? "#58735d"} strokeWidth="2" /><text x={x} y="129" textAnchor="middle" className="vector-label">{entity.label}</text>{index < activeIds.length - 1 && <path d={`M${x + 39} 125 L${x + 53} 125`} stroke="#58735d" strokeWidth="2" markerEnd="none" />}</g>
-        })}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
-      </svg> : <div className="visual-unavailable" role="status"><strong>Visual unavailable</strong><span>This mechanism has no supported visual scene. The step explanation remains available below.</span></div>}
-      <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>
+      </svg> : <VisualUnavailable reason="The selected scene cannot be rendered." />}
+      {data.sceneType === "vector_scene" && !unavailable && <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>}
     </div>
-    <div className="step-copy"><p className="step-count">Step {stage + 1} of {data.stages.length}</p><h3>{current.title}</h3><p>{current.explanation}</p>{current.equation && <code className="step-equation">{current.equation}</code>}</div>
+    <div className="step-copy"><p className="step-count">Step {stage + 1} of {data.stages.length}</p><h3>{current.title}</h3><p>{current.explanation}</p>{current.equation && <code className="step-equation">{current.equation}</code>}{current.notice && <p className="step-notice"><strong>Notice:</strong> {current.notice}</p>}{current.insight && <p className="step-insight"><strong>Insight:</strong> {current.insight}</p>}</div>
     <div className="step-controls"><button type="button" onClick={() => setStage(Math.max(0, stage - 1))} disabled={stage === 0}>Previous</button><button type="button" onClick={() => setStage(Math.min(data.stages.length - 1, stage + 1))} disabled={stage === data.stages.length - 1}>Next</button></div>
     {data.prediction && stage === data.stages.length - 1 && <div className="step-prediction"><h3>Pause and predict</h3><p>{data.prediction.prompt}</p><div className="prediction-options">{data.prediction.options.map((option, index) => <button key={option} type="button" className={choice === index ? "selected" : ""} onClick={() => setChoice(index)}>{option}</button>)}</div>{choice !== null && <p className={`prediction-result ${choice === data.prediction!.answer ? "correct" : ""}`} aria-live="polite">{choice === data.prediction.answer ? "Correct. " : "Not quite. "}{data.prediction.reveal}</p>}</div>}
     {stage === data.stages.length - 1 && <p className="step-conclusion"><strong>General idea:</strong> {data.conclusion}</p>}
