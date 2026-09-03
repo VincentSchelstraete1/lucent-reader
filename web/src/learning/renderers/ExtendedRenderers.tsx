@@ -4,7 +4,12 @@ import type { CausalLearningObject, ConceptMapLearningObject, HierarchyLearningO
 const box: CSSProperties = { border: "1px solid #d8d2c5", borderRadius: 10, padding: 12, background: "#fbfaf6" }
 
 export function CausalRenderer({ object }: { object: CausalLearningObject }) {
-  return <div style={{ display: "grid", gap: 8 }}>{object.edges.map(edge => <div key={`${edge.from}-${edge.to}`} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}><span style={box}>{object.nodes.find(n => n.id === edge.from)?.label}</span><span aria-label={edge.label || "causes"}>— {edge.label || "causes"} →</span><span style={box}>{object.nodes.find(n => n.id === edge.to)?.label}</span>{edge.mechanism && <small>{edge.mechanism}</small>}</div>)}{object.edges.length === 0 && object.nodes.map(node => <p key={node.id} style={box}>{node.label}</p>)}</div>
+  const nodeById = new Map(object.nodes.map(node => [node.id, node]))
+  const validEdges = object.edges.filter(edge => nodeById.has(edge.from) && nodeById.has(edge.to))
+  return <div style={{ display: "grid", gap: 8 }}>
+    {validEdges.map(edge => <div key={`${edge.from}-${edge.to}`} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}><span style={box}>{nodeById.get(edge.from)?.label}</span><span aria-label={edge.label || "causes"}>— {edge.label || "causes"} →</span><span style={box}>{nodeById.get(edge.to)?.label}</span>{(edge.mechanism || edge.explanation) && <small>{edge.mechanism || edge.explanation}</small>}</div>)}
+    {validEdges.length === 0 && object.nodes.map(node => <p key={node.id} style={box}><strong>{node.label}</strong>{node.explanation ? ` — ${node.explanation}` : ""}</p>)}
+  </div>
 }
 
 export function ConceptMapRenderer({ object }: { object: ConceptMapLearningObject }) {
