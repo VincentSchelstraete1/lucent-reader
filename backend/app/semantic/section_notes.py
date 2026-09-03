@@ -377,7 +377,7 @@ def safe_deterministic_section_note(section: SectionInput, objects: dict[str, Le
         return SectionNote(id=section.id, title=title, bigIdea=text[:500], learningGoals=["Review the source-grounded explanation."], components=[component], keyTakeaways=[text[:300]], sourceBlockIds=section.learning_block_ids or [source_id])
 
 
-def model_section_note(section: SectionInput, *, model_version: str = "section-v1") -> SectionNote:
+def model_section_note(section: SectionInput, *, model_version: str = "section-v2-golden") -> SectionNote:
     """Generate one coherent section note. The cache is process-local V1 and
     deliberately versioned so prompt/schema changes invalidate old results."""
     from app.services.anthropic_service import _run_structured_tool
