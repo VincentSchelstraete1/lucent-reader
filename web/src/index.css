@@ -35,6 +35,32 @@
 .note-reveal { border: 1px solid #58735d; border-radius: 999px; background: #fff; color: #315d4d; padding: .45rem .8rem; cursor: pointer; font: inherit; }
 .note-takeaways { background: #eef2e8; padding: .8rem 1rem; border-radius: 8px; max-width: 760px; }
 .note-skeleton { border-top: 1px solid #d8d2c5; padding: 1rem 0; }
+.golden-experience { margin-top: 3rem; border-top: 1px solid #d8d2c5; padding-top: 1.5rem; }
+.step-mechanism { max-width: 760px; }
+.step-goal { color: #55544e; max-width: 65ch; }
+.step-visual { background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: .75rem 1rem .5rem; }
+.step-visual svg { width: 100%; height: auto; display: block; }
+.axis { stroke: #b7b2a6; stroke-width: 1; }
+.axis-label { fill: #77736a; font-size: 11px; }
+.vector { fill: none; stroke-width: 4; color: currentColor; transition: all .35s ease; }
+.vector-dashed { stroke-dasharray: 8 6; stroke-width: 3; }
+.right-angle { fill: none; stroke: #26215c; stroke-width: 2; }
+.step-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .82rem; color: #55544e; }
+.step-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+.step-legend i { width: .65rem; height: .65rem; border-radius: 50%; display: inline-block; }
+.step-copy { padding: .8rem 0 .2rem; }
+.step-count { color: #58735d; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+.step-copy h3 { margin: .2rem 0 .4rem; }
+.step-equation { display: inline-block; background: #fff; border: 1px solid #e4ded0; padding: .55rem .7rem; border-radius: 6px; font-size: 1rem; }
+.step-controls, .prediction-options { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .7rem; }
+.step-controls button, .prediction-options button { border: 1px solid #58735d; border-radius: 999px; padding: .45rem .8rem; background: #fff; color: #315d4d; font: inherit; cursor: pointer; }
+.step-controls button:disabled { opacity: .45; cursor: default; }
+.prediction-options button.selected { background: #dcefe5; }
+.step-prediction { margin-top: 1.3rem; padding: 1rem; background: #fdf1d9; border-radius: 10px; }
+.step-prediction h3 { margin-top: 0; }
+.prediction-result { margin-bottom: 0; }
+.prediction-result.correct { color: #315d4d; }
+.step-conclusion { margin-top: 1.2rem; max-width: 65ch; }
 
 :root {
   --lucent-bg: #f5f1e8;
