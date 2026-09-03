@@ -17,6 +17,18 @@ export type StepThroughMechanismData = {
   conclusion: string
 }
 
+const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
+
+function VectorLine({ vector }: { vector: NonNullable<MechanismStage["vectors"]>[number] }) {
+  const markerId = `arrow-${vector.id}`
+  const endpoint = toScreen(vector)
+  return <g>
+    <defs><marker id={markerId} markerWidth="6" markerHeight="6" refX="5" refY="3" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill={vector.color ?? "#58735d"} /></marker></defs>
+    <line x1="70" y1="215" x2={endpoint.x} y2={endpoint.y} className={`vector vector-${vector.id} ${vector.dashed ? "vector-dashed" : ""}`} stroke={vector.color ?? "#1d9e75"} markerEnd={`url(#${markerId})`} />
+    <text x={endpoint.x + 7} y={endpoint.y - 7} className={`vector-label vector-label-${vector.id}`}>{vector.label ?? vector.id}</text>
+  </g>
+}
+
 export function StepThroughMechanism({ data }: { data: StepThroughMechanismData }) {
   const [stage, setStage] = useState(0)
   const [choice, setChoice] = useState<number | null>(null)
@@ -27,9 +39,8 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
     <div className="step-visual" aria-live="polite">
       <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
-        {vectors.map((vector) => <g key={vector.id}><line x1="70" y1="215" x2={70 + vector.x} y2={215 - vector.y} className={`vector vector-${vector.id} ${vector.dashed ? "vector-dashed" : ""}`} stroke={vector.color ?? "#1d9e75"} markerEnd="url(#arrow)" /><text x={70 + vector.x + 7} y={215 - vector.y - 7} className={`vector-label vector-label-${vector.id}`}>{vector.label ?? vector.id}</text></g>)}
-        <defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#58735d" /></marker></defs>
-        {stage >= 2 && <path d="M70 215 L150 215 L150 165" className="right-angle" />}
+        {vectors.map((vector) => <VectorLine key={vector.id} vector={vector} />)}
+        {stage === data.stages.length - 1 && <path d="M70 215 L88 215 L88 197" className="right-angle" />}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
       </svg>
       <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>
