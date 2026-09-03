@@ -10,7 +10,7 @@ export function StepThroughDev() {
   const [result, setResult] = useState<StepThroughResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ApiError["details"]>([])
-  const [status, setStatus] = useState<"idle" | "generating" | "replay_loaded" | "live_succeeded" | "validation_failed" | "request_failed">("idle")
+  const [status, setStatus] = useState<"idle" | "generating" | "replay_loaded" | "live_succeeded" | "validation_failed" | "truncated" | "timed_out" | "request_failed">("idle")
   const [invocationCallCount, setInvocationCallCount] = useState<0 | 1>(0)
   const fixture = useMemo(() => fixtures.find((item) => item.name === selected), [fixtures, selected])
 
@@ -48,6 +48,10 @@ export function StepThroughDev() {
       if (err instanceof ApiError && err.code === "invalid_generation") {
         setValidationErrors(err.details)
         setStatus("validation_failed")
+      } else if (err instanceof ApiError && err.code === "generation_truncated") {
+        setStatus("truncated")
+      } else if (err instanceof ApiError && err.code === "generation_timeout") {
+        setStatus("timed_out")
       } else {
         setStatus("request_failed")
       }
@@ -57,9 +61,9 @@ export function StepThroughDev() {
   const rendererData = result ? (result.metadata.fixture_kind === "golden_manual" ? gramSchmidtGolden : generatedMechanismToRendererData(result.mechanism)) : null
   const summary = rendererData ? summarizeVisualProgram(rendererData) : null
   const origin = result?.metadata.fixture_kind === "golden_manual" ? "Golden / manual" : result?.metadata.fixture_kind === "sample_manual" ? "Manual regression sample" : result?.metadata.fixture_kind === "recorded_live" ? "Recorded live model output" : "—"
-  const statusLabel = { idle: "Ready", generating: "Generating…", replay_loaded: "Replay loaded", live_succeeded: "Live generation succeeded", validation_failed: "Live generation failed validation", request_failed: "Generation request failed" }[status]
+  const statusLabel = { idle: "Ready", generating: "Generating…", replay_loaded: "Replay loaded", live_succeeded: "Live generation succeeded", validation_failed: "Live generation failed validation", truncated: "Live generation was truncated (no retry)", timed_out: "Live generation timed out (no retry)", request_failed: "Generation request failed" }[status]
   return <section className="page step-through-dev">
-    <header className="page-header"><p className="note-kicker">Development tool</p><h1>Step-through generator</h1><p className="page-subtitle">Generate one semantic mechanism with zero or one model call, then replay it for free.</p></header>
+    <header className="page-header"><p className="note-kicker">Development tool</p><h1>Step-through generator</h1><p className="page-subtitle">Generate one semantic mechanism with zero or one model call, then replay it for free. Live policy: 25-second limit, zero retries.</p></header>
     <div className="step-through-toolbar">
       <label>Source fixture<select value={selected} onChange={(event) => choose(event.target.value)}>{fixtures.map((item) => <option key={item.name} value={item.name}>{item.name}{item.replay_available ? " · replay available" : ""}</option>)}</select></label>
       <label>Source section<textarea value={source} onChange={(event) => setSource(event.target.value)} rows={6} /></label>

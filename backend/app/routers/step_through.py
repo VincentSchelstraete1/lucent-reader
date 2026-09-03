@@ -8,6 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
+from anthropic import APIConnectionError, APIStatusError, APITimeoutError
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError
@@ -15,7 +16,7 @@ from pydantic import ValidationError
 from app.auth_dependencies import get_current_user, require_csrf
 from app.models.auth import User
 from app.schemas.step_through import StepThroughMechanism
-from app.services.anthropic_service import _run_structured_tool
+from app.services.anthropic_service import StructuredToolTruncatedError, _run_structured_tool
 
 router = APIRouter(prefix="/dev/step-through", tags=["Development"])
 logger = logging.getLogger(__name__)
@@ -23,6 +24,9 @@ FIXTURE_DIR = Path(__file__).resolve().parents[1] / "dev_fixtures" / "step_throu
 MODEL = "claude-haiku-4-5-20251001"
 SCHEMA_VERSION = "step-through-v3"
 PROMPT_VERSION = "visual-dsl-v1"
+LIVE_MAX_TOKENS = 1800
+LIVE_TIMEOUT_SECONDS = 25
+LIVE_MAX_RETRIES = 0
 
 SOURCE_FIXTURES = {
     "gram-schmidt": "Gram-Schmidt starts with a set of vectors. Keep the first vector as the first basis direction. For each later vector, project it onto every earlier orthogonal direction, subtract those projections, and keep the remaining perpendicular component. Normalize the resulting vectors when an orthonormal basis is needed.",
@@ -212,15 +216,45 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
         return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, validation="passed"))
 
     try:
-        raw = _run_structured_tool(_prompt(request.source_text), "step_through_mechanism", StepThroughMechanism.generation_schema(), 1800, timeout=15, max_retries=0)
+        raw = _run_structured_tool(
+            _prompt(request.source_text),
+            "step_through_mechanism",
+            StepThroughMechanism.generation_schema(),
+            LIVE_MAX_TOKENS,
+            timeout=LIVE_TIMEOUT_SECONDS,
+            max_retries=LIVE_MAX_RETRIES,
+        )
         mechanism = StepThroughMechanism.model_validate(raw)
     except ValidationError as exc:
         logger.warning("step_through_generation_failed fixture=%s stage=validation exception_type=%s", request.fixture_name, type(exc).__name__)
         errors = [{"location": ".".join(str(part) for part in error["loc"]), "message": error["msg"], "type": error["type"]} for error in exc.errors(include_url=False, include_input=False)]
         raise HTTPException(status_code=422, detail={"code": "invalid_generation", "message": "Live generation returned semantic data that failed validation.", "validation_errors": errors}) from exc
+    except StructuredToolTruncatedError as exc:
+        logger.warning(
+            "step_through_generation_failed fixture=%s stage=provider_truncation exception_type=%s input_tokens=%s output_tokens=%s max_tokens=%s max_retries=%s",
+            request.fixture_name,
+            type(exc).__name__,
+            exc.input_tokens,
+            exc.output_tokens,
+            exc.max_tokens,
+            LIVE_MAX_RETRIES,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "generation_truncated",
+                "message": f"Claude exhausted the {exc.max_tokens}-token output budget before completing the visual program. No retry was attempted.",
+            },
+        ) from exc
+    except APITimeoutError as exc:
+        logger.warning("step_through_generation_failed fixture=%s stage=provider_timeout exception_type=%s timeout_seconds=%s max_retries=%s", request.fixture_name, type(exc).__name__, LIVE_TIMEOUT_SECONDS, LIVE_MAX_RETRIES)
+        raise HTTPException(status_code=504, detail={"code": "generation_timeout", "message": f"Claude did not return within {LIVE_TIMEOUT_SECONDS} seconds. No retry was attempted; run Live generate once again if you want to retry."}) from exc
+    except (APIConnectionError, APIStatusError) as exc:
+        logger.warning("step_through_generation_failed fixture=%s stage=provider exception_type=%s max_retries=%s", request.fixture_name, type(exc).__name__, LIVE_MAX_RETRIES)
+        raise HTTPException(status_code=502, detail={"code": "provider_error", "message": f"Claude generation request failed: {type(exc).__name__}. No automatic retry was attempted."}) from exc
     except Exception as exc:
-        logger.warning("step_through_generation_failed fixture=%s stage=%s exception_type=%s", request.fixture_name, "model_or_validation", type(exc).__name__)
-        raise HTTPException(status_code=422, detail={"code": "invalid_generation", "message": f"Live generation failed validation or provider request: {type(exc).__name__}"}) from exc
+        logger.exception("step_through_generation_failed fixture=%s stage=runtime exception_type=%s", request.fixture_name, type(exc).__name__)
+        raise HTTPException(status_code=500, detail={"code": "generation_failed", "message": f"Step-through generation failed: {type(exc).__name__}."}) from exc
     latency_ms = (time.perf_counter() - started) * 1000
     if request.save_fixture:
         _save_recorded(request.fixture_name, request.source_text, mechanism)

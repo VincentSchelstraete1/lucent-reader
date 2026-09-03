@@ -11,6 +11,17 @@ client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 logger = logging.getLogger(__name__)
 
 
+class StructuredToolTruncatedError(ValueError):
+    """Raised when a structured tool response exhausts its output budget."""
+
+    def __init__(self, *, input_tokens: int | None, output_tokens: int | None, max_tokens: int):
+        super().__init__("Structured tool output was truncated at max_tokens")
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.max_tokens = max_tokens
+        self.stop_reason = "max_tokens"
+
+
 LENGTH_INSTRUCTIONS = {
     "much_shorter": "Condense it significantly - cut anything that isn't essential to the main point.",
     "shorter": "Make it noticeably shorter than the original while keeping the key details.",
@@ -203,6 +214,13 @@ def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: 
         getattr(usage, "output_tokens", "unknown"),
         max_tokens,
     )
+
+    if getattr(message, "stop_reason", None) == "max_tokens":
+        raise StructuredToolTruncatedError(
+            input_tokens=getattr(usage, "input_tokens", None),
+            output_tokens=getattr(usage, "output_tokens", None),
+            max_tokens=max_tokens,
+        )
 
     for block in message.content:
         if block.type == "tool_use":
