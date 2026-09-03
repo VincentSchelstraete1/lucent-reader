@@ -271,7 +271,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     started = time.perf_counter()
     logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false", section.id, section.title)
     try:
-        raw = _run_structured_tool("Design concise, source-grounded study notes for this coherent section, not a generic summary. Use only components that materially improve learning; prefer 2-5 strong components over many weak ones. Keep explanations concise, preserve essential technical detail, and do not create a visual merely because a component type exists. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 800, timeout=15, max_retries=0)
+        raw = _run_structured_tool("Design concise, source-grounded study notes for this coherent section, not a generic summary. Use only components that materially improve learning; prefer 2-5 strong components over many weak ones. Keep explanations concise, preserve essential technical detail, and do not create a visual merely because a component type exists. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 1000, timeout=15, max_retries=0)
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
