@@ -174,8 +174,9 @@ QUIZ_QUESTIONS_SCHEMA = {
 }
 
 
-def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int, timeout: float | None = None) -> dict:
-    message = client.messages.create(
+def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int, timeout: float | None = None, max_retries: int | None = None) -> dict:
+    request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
+    message = request_client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=max_tokens,
         tools=[

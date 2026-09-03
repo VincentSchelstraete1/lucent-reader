@@ -59,6 +59,25 @@ def test_model_section_failure_isolated_to_deterministic_fallback(monkeypatch):
         model_section_note(section, model_version="test-failure")
 
 
+def test_section_request_uses_bounded_output_and_no_retries(monkeypatch):
+    block = make_block("policy", "A short section.")
+    section = SectionInput("section-policy", "Policy", [], [block.id], [block], {})
+    seen = {}
+
+    args_seen = []
+    def fail(*args, **kwargs):
+        args_seen.extend(args)
+        seen.update(kwargs)
+        raise RuntimeError("probe")
+
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", fail)
+    with pytest.raises(RuntimeError):
+        model_section_note(section, model_version="test-policy")
+    assert seen["max_retries"] == 0
+    assert seen["timeout"] == 15
+    assert args_seen[3] == 800
+
+
 def test_model_structure_without_root_is_rejected(monkeypatch):
     block = make_block("structure", "Memory contains cache.")
     section = SectionInput("section-structure", "Memory", ["Memory"], [block.id], [block], {})
