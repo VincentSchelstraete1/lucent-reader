@@ -302,6 +302,19 @@ export type ProgressiveSection = { id: string; title: string | null; learning_bl
 export type ProgressiveStart = { job_id: string; filename: string; sections: ProgressiveSection[] }
 export type ProgressivePoll = { job_id: string; filename: string; status: "processing" | "complete" | "failed"; sections: ProgressiveSection[]; result: DocumentIngestionResult | null }
 
+export type StepThroughMechanism = {
+  type: "step_through_mechanism"
+  title: string
+  learningGoal: string
+  entities: Array<{ id: string; label: string; color?: string | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[] }>
+  prediction?: { prompt: string; options: string[]; answer: number; reveal: string } | null
+  conclusion: string
+}
+export type StepThroughFixture = { name: string; source_text: string; source_hash: string; replay_available: boolean }
+export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; validation: "passed" | "failed"; error?: string | null }
+export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: StepThroughMetadata }
+
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
 
@@ -345,5 +358,7 @@ export const api = {
     return postForm<ProgressiveStart>("/ingestion/progressive", form)
   },
   pollProgressiveDocument: (jobId: string) => get<ProgressivePoll>(`/ingestion/progressive/${jobId}`),
-  routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text })
+  routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text }),
+  getStepThroughFixtures: () => get<StepThroughFixture[]>("/dev/step-through/fixtures"),
+  generateStepThrough: (request: { fixture_name: string; source_text: string; mode: "replay" | "live"; save_fixture?: boolean }) => post<StepThroughResponse>("/dev/step-through/generate", request)
 }

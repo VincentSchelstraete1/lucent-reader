@@ -17,6 +17,31 @@ export type StepThroughMechanismData = {
   conclusion: string
 }
 
+export type GeneratedStepThroughMechanism = {
+  type: "step_through_mechanism"
+  title: string
+  learningGoal: string
+  entities: Array<{ id: string; label: string; color?: string | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[] }>
+  prediction?: MechanismPrediction | null
+  conclusion: string
+}
+
+export function generatedMechanismToRendererData(mechanism: GeneratedStepThroughMechanism): StepThroughMechanismData {
+  return {
+    learningGoal: mechanism.learningGoal,
+    entities: mechanism.entities.map((entity) => ({ ...entity, color: entity.color ?? undefined })),
+    stages: mechanism.stages.map((stage) => ({
+      title: stage.title,
+      explanation: stage.explanation,
+      equation: stage.equation ?? undefined,
+      activeEntityIds: stage.activeEntityIds,
+    })),
+    prediction: mechanism.prediction ?? undefined,
+    conclusion: mechanism.conclusion,
+  }
+}
+
 const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
 
 function VectorArrow({ vector }: { vector: NonNullable<MechanismStage["vectors"]>[number] }) {
@@ -54,6 +79,12 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
       <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
+        {!vectors.length && (current.activeEntityIds ?? data.entities.map((entity) => entity.id)).slice(0, 4).map((entityId, index, activeIds) => {
+          const entity = data.entities.find((item) => item.id === entityId)
+          if (!entity) return null
+          const x = 105 + index * 92
+          return <g key={entity.id}><rect x={x - 38} y="105" width="76" height="40" rx="10" fill="#fbfaf6" stroke={entity.color ?? "#58735d"} strokeWidth="2" /><text x={x} y="129" textAnchor="middle" className="vector-label">{entity.label}</text>{index < activeIds.length - 1 && <path d={`M${x + 39} 125 L${x + 53} 125`} stroke="#58735d" strokeWidth="2" markerEnd="none" />}</g>
+        })}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
       </svg>
       <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>

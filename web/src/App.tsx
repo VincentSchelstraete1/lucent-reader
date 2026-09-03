@@ -11,6 +11,7 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute"
 import { LearningCanvasDemo } from "./learning/components/LearningCanvasDemo"
 import { DocumentIngestionDemo } from "./pages/DocumentIngestionDemo"
 import { Notes } from "./pages/Notes"
+import { StepThroughDev } from "./pages/StepThroughDev"
 
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
@@ -24,6 +25,7 @@ function AppLayout() {
         <Link to="/app/learning-canvas" className="app-header-link">Learning Canvas</Link>
         <Link to="/app/notes" className="app-header-link">Notes</Link>
         {import.meta.env.DEV && <Link to="/app/dev/ingestion" className="app-header-link">Document ingestion</Link>}
+        {import.meta.env.DEV && <Link to="/app/dev/step-through" className="app-header-link">Step-through</Link>}
       </header>
       <main>
         <Outlet />
@@ -51,6 +53,7 @@ export function App() {
             <Route path="/quizzes/:quizId" element={<QuizPage />} />
             <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
             {import.meta.env.DEV && <Route path="/app/dev/ingestion" element={<DocumentIngestionDemo />} />}
+            {import.meta.env.DEV && <Route path="/app/dev/step-through" element={<StepThroughDev />} />}
           </Route>
         </Route>
 
