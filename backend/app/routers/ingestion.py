@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import PurePosixPath
+import json
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -8,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth_dependencies import get_current_user, require_csrf
 from app.config import settings
+from app.database import SessionLocal, get_db
 from app.ingestion import (
     DocumentExtractionError,
     DocumentIngestor,
@@ -20,11 +22,15 @@ from app.ingestion import (
 from app.ingestion.docx_ingestor import DOCX_MIME_TYPE
 from app.ingestion.pptx_ingestor import PPTX_MIME_TYPE
 from app.models.auth import User
+from app.models.document import Document
+from app.models.note import Note
+from app.models.source import Source
 from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
 from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
+from sqlalchemy import select
 
 
 router = APIRouter(prefix="/ingestion")
@@ -102,6 +108,66 @@ def _safe_filename(filename: str | None, *, default: str = "upload.pdf") -> str:
     return (cleaned or default)[:255]
 
 
+def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> PdfIngestionResponse:
+    """Persist the completed SectionNote result through Lucent's existing
+    Source -> Document -> Note ownership model.
+
+    Re-uploading the same named source refreshes its document/note rather than
+    creating an ambiguous duplicate. Different filenames and formats remain
+    isolated by the per-user Source identity.
+    """
+    source_key = f"{response.source_type}:{response.filename}"[:255]
+    source = db.execute(select(Source).where(
+        Source.user_id == user_id,
+        Source.type == "upload",
+        Source.url == source_key,
+    )).scalar_one_or_none()
+    if source is None:
+        source = Source(user_id=user_id, type="upload", url=source_key)
+        db.add(source)
+        db.flush()
+
+    document = db.execute(select(Document).where(
+        Document.source_id == source.id,
+        Document.title == response.filename,
+    )).scalar_one_or_none()
+    if document is None:
+        document = Document(source_id=source.id, title=response.filename, content=response.markdown)
+        db.add(document)
+        db.flush()
+    else:
+        document.content = response.markdown
+
+    payload = json.dumps({
+        "filename": response.filename,
+        "sourceType": response.source_type,
+        "sectionNotes": [note.model_dump(by_alias=True) for note in response.section_notes],
+    })
+    note = db.execute(select(Note).where(
+        Note.document_id == document.id,
+        Note.content_type == "section_note",
+    )).scalar_one_or_none()
+    if note is None:
+        note = Note(
+            title=response.filename,
+            content=payload,
+            content_type="section_note",
+            document_id=document.id,
+        )
+        db.add(note)
+        db.flush()
+    else:
+        note.title = response.filename
+        note.content = payload
+
+    db.commit()
+    return response.model_copy(update={
+        "source_id": source.id,
+        "document_id": document.id,
+        "note_id": note.id,
+    })
+
+
 async def _read_pdf(upload: UploadFile) -> bytes:
     data = bytearray()
     while chunk := await upload.read(READ_CHUNK_BYTES):
@@ -152,7 +218,8 @@ async def _read_office_upload(upload: UploadFile, *, format_label: str) -> bytes
 )
 async def ingest_pdf(
     file: UploadFile = File(...),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db = Depends(get_db),
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
@@ -183,7 +250,8 @@ async def ingest_pdf(
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    return PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    response = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    return _persist_learning_note(db, user_id=user.id, response=response)
 
 async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
     job = _PROGRESSIVE_JOBS[job_id]
@@ -193,14 +261,22 @@ async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semant
         state["status"] = "complete" if error is None else "failed"
         state["section_note"] = SectionNote.model_validate(note)
         state["error"] = "Section used deterministic fallback" if error else None
-    await generate_sections_progressively(group_learning_blocks(blocks), objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
+    await generate_sections_progressively(sections, objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    result = PdfIngestionResponse.model_validate({
+        **job["base"].model_dump(by_alias=True),
+        "section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]],
+    })
+    with SessionLocal() as db:
+        result = _persist_learning_note(db, user_id=job["user_id"], response=result)
+    job["result"] = result
     job["status"] = "complete"
 
 @router.post("/progressive", response_model=ProgressiveStartResponse, dependencies=[Depends(require_csrf)])
 async def start_progressive_pdf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
@@ -222,9 +298,9 @@ async def start_progressive_pdf(
     deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
     base_note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
     base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [])
-    sections = group_learning_blocks(blocks)
+    sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     job_id = uuid4().hex
-    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
+    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "user_id": user.id, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
     for state in _PROGRESSIVE_JOBS[job_id]["sections"]: state["status"] = "generating"
     background_tasks.add_task(_run_progressive_job, job_id, extracted, blocks, decisions, semantic_generator)
     return ProgressiveStartResponse(job_id=job_id, filename=filename, sections=[ProgressiveSectionResponse(**state) for state in _PROGRESSIVE_JOBS[job_id]["sections"]])
@@ -234,10 +310,9 @@ async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_us
     job = _PROGRESSIVE_JOBS.get(job_id)
     if not job:
         raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
-    result = None
-    if job["status"] == "complete":
-        result = PdfIngestionResponse.model_validate({**job["base"].model_dump(by_alias=True), "section_notes": [SectionNote.model_validate(state["section_note"]).model_dump(by_alias=True) for state in job["sections"] if state["section_note"]]})
-    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=result)
+    if job["user_id"] != _user.id:
+        raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
+    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=job["result"])
 
 
 @router.post(
@@ -247,7 +322,8 @@ async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_us
 )
 async def ingest_docx(
     file: UploadFile = File(...),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db = Depends(get_db),
     ingestor: DocxDocumentIngestor = Depends(get_docx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
@@ -270,7 +346,8 @@ async def ingest_docx(
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    return _persist_learning_note(db, user_id=user.id, response=response)
 
 
 @router.post(
@@ -280,7 +357,8 @@ async def ingest_docx(
 )
 async def ingest_pptx(
     file: UploadFile = File(...),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db = Depends(get_db),
     ingestor: PptxDocumentIngestor = Depends(get_pptx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
@@ -303,4 +381,5 @@ async def ingest_pptx(
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    return DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    return _persist_learning_note(db, user_id=user.id, response=response)

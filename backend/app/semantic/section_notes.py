@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union
@@ -35,9 +36,19 @@ def is_low_value_section(section: SectionInput) -> bool:
     text = "\n".join(block.text for block in section.blocks).strip()
     if not text or len(text) < 8:
         return True
-    if title and (len(title) <= 1 or title.lower().rstrip(":") in {"references", "bibliography", "contents", "table of contents"}):
+    normalized_title = title.lower().rstrip(":")
+    if title and (len(title) <= 1 or normalized_title in {"references", "bibliography", "contents", "table of contents", "agenda", "today's topics"}):
         return True
-    if title and any(marker in title.lower() for marker in ("references", "bibliography")):
+    if title and any(marker in normalized_title for marker in ("references", "bibliography", "course administration", "course logistics", "grading and deadlines")):
+        return True
+    normalized_text = " ".join(text.lower().split())
+    if normalized_text in {normalized_title, "<unknown>", "unknown"}:
+        return True
+    # Suppress short title/agenda furniture without suppressing concise real
+    # definitions. These signals describe administrative metadata rather than
+    # a specific course or document.
+    administrative_terms = ("due date", "regrade", "office hours", "extension request", "homework deadline")
+    if len(normalized_text) < 700 and sum(term in normalized_text for term in administrative_terms) >= 2:
         return True
     return False
 
@@ -104,7 +115,9 @@ class GraphNode(BaseModel):
 class GraphEdge(BaseModel):
     source: str = Field(min_length=1)
     target: str = Field(min_length=1)
-    relation: str = Field(min_length=1, max_length=80)
+    # Express the visual-label bound in JSON Schema as well as runtime
+    # validation so the provider sees the same contract Claude is judged by.
+    relation: str = Field(min_length=1, max_length=40, pattern=r"^\S+(?:\s+\S+){0,3}$")
     explanation: str | None = None
 
     @model_validator(mode="after")
@@ -281,7 +294,7 @@ class SectionNote(BaseModel):
 
 
 class GeneratedSectionNote(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     title: str
     big_idea: str = Field(alias="bigIdea")
     learning_goals: list[str] = Field(alias="learningGoals")
@@ -327,14 +340,21 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
         return bool(normalized) and normalized not in {"<unknown>", "$", "n/a", "none"}
 
     available = [objects[b.id] for b in section.blocks if b.id in objects and usable(b.text)]
+    def sentences(value: str) -> list[str]:
+        cleaned = " ".join(value.split())
+        return [piece.strip() for piece in re.split(r"(?<=[.!?])\s+|\s*[•]\s*", cleaned) if piece.strip()]
+
     first_text = next((b.text.strip() for b in section.blocks if usable(b.text)), "")
+    first_sentences = sentences(first_text)
+    big_idea = (first_sentences[0] if first_sentences else first_text)[:320]
     components: list[SectionComponent] = []
     for block, obj in zip(section.blocks, [objects.get(b.id) for b in section.blocks]):
         if obj is None or not usable(block.text):
             continue
         kind = "explanation" if obj.type == "plain_text" else {"process": "flow", "causal": "flow", "hierarchy": "structure", "quantitative": "worked_example", "comparison": "comparison", "concept_map": "relationship_map"}.get(obj.type, "explanation")
         title = obj.title if usable(obj.title) else (section.title if usable(section.title) else "Explanation")
-        data = {"kind": kind, "title": title, "text": block.text[:500], "sourceBlockIds": [block.id], "learningObject": obj}
+        compact_text = " ".join(sentences(block.text)[:3])[:600]
+        data = {"kind": kind, "title": title, "text": compact_text, "sourceBlockIds": [block.id], "learningObject": obj}
         if kind in {"flow", "relationship_map"}:
             if obj.type == "process":
                 data["nodes"] = [{"id": step["id"], "label": step["label"]} for step in obj.steps]
@@ -357,7 +377,7 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
             components.append(ExplanationComponent(
                 kind="explanation",
                 title=title,
-                text=block.text[:500],
+                text=compact_text,
                 sourceBlockIds=[block.id],
                 learningObject=obj,
             ))
@@ -371,11 +391,11 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
             continue
         text = " ".join(block.text.split())
         takeaway = text.split(".", 1)[0].strip() if "." in text else text
-        if takeaway and takeaway not in takeaways:
+        if takeaway and takeaway != big_idea and takeaway not in takeaways:
             takeaways.append(takeaway[:240])
         if len(takeaways) == 3:
             break
-    return SectionNote(id=section.id, title=title, bigIdea=first_text or title, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=takeaways or [title], sourceBlockIds=section.learning_block_ids)
+    return SectionNote(id=section.id, title=title, bigIdea=big_idea or title, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=takeaways, sourceBlockIds=section.learning_block_ids)
 
 
 def safe_deterministic_section_note(section: SectionInput, objects: dict[str, LearningObject]) -> SectionNote:
@@ -391,7 +411,7 @@ def safe_deterministic_section_note(section: SectionInput, objects: dict[str, Le
         return SectionNote(id=section.id, title=title, bigIdea=text[:500], learningGoals=["Review the source-grounded explanation."], components=[component], keyTakeaways=[text[:300]], sourceBlockIds=section.learning_block_ids or [source_id])
 
 
-def model_section_note(section: SectionInput, *, model_version: str = "section-v2-golden") -> SectionNote:
+def model_section_note(section: SectionInput, *, model_version: str = "section-v3-grounded") -> SectionNote:
     """Generate one coherent section note. The cache is process-local V1 and
     deliberately versioned so prompt/schema changes invalidate old results."""
     from app.services.anthropic_service import _run_structured_tool
@@ -406,14 +426,18 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     try:
         prompt = ("Design a source-grounded learning experience for this coherent section; do not merely summarize or split the source into prose cards. "
                   "First identify the central mental model and the conceptual bottleneck a learner must overcome. Then compose a short, coherent sequence "
-                  "of only the components that materially improve understanding (usually 2–5 strong components; never emit every type by default). "
-                  "Use an explanation only for ideas that are genuinely clearer as prose. For a process, mechanism, or causal chain prefer a FLOW with 2+ concise nodes, "
-                  "meaningful short verb relations, and a separate brief explanation of why transitions matter. For containment or levels prefer a connected STRUCTURE "
+                  "of only the components that materially improve understanding (usually 2–4 strong components; never emit every type by default). "
+                  "SOURCE BOUNDARY: every factual claim, property, example, recommendation, and takeaway must be stated in the supplied blocks or follow by direct arithmetic from supplied values. "
+                  "Do not add plausible background knowledge, design advice, examples, properties, or causes from memory. If the source does not explain why, omit that explanation. "
+                  "Check numerical comparisons and arithmetic exactly; do not turn a derived result into a broader optimization claim. "
+                  "Use an explanation only for ideas that are genuinely clearer as prose, adds information beyond bigIdea, and fits in 1–2 concise sentences. For a process, mechanism, or causal chain prefer a FLOW with 2+ concise nodes, "
+                  "meaningful 1–3 word verb relations, putting any longer meaning in the edge explanation, and a separate brief explanation of why transitions matter. For containment or levels prefer a connected STRUCTURE "
                   "with an explicit root and children. For equations or numerical reasoning prefer EQUATION or WORKED_EXAMPLE with variables, supplied values, ordered "
                   "substitution/derivation steps, result, and interpretation. For systems of concepts use a selective connected RELATIONSHIP_MAP (3–7 concepts) with "
                   "specific relations such as uses, maps, caches, contains, enables, or depends on; never use generic related to. Preserve technical terminology, mechanisms, "
-                  "equations, units, and caveats supported by the source. Remove repetition and extraction noise. Keep labels concise and explanations to a few sentences. "
-                  "Every component must cite sourceBlockIds from the supplied blocks, and all required fields must be present.\n\n" + source)
+                  "equations, units, and caveats supported by the source. Preserve actual graph topology: mutually exclusive outcomes branch from their decision node and must never be chained together. "
+                  "Remove repetition and extraction noise. Keep labels concise. keyTakeaways should contain at most 2 distinct, source-supported conclusions and must not repeat bigIdea verbatim. "
+                  "Every component must cite sourceBlockIds from the supplied blocks, and all required fields must be present. Return no fields outside the schema.\n\n" + source)
         raw = _run_structured_tool(prompt, "section_learning_note", schema, SECTION_NOTE_MAX_TOKENS, timeout=SECTION_NOTE_TIMEOUT_SECONDS, max_retries=0)
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)

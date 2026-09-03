@@ -188,9 +188,10 @@ QUIZ_QUESTIONS_SCHEMA = {
                     "question": {"type": "string"},
                     "choices": {"type": "array", "items": {"type": "string"}},
                     "correct_index": {"type": "integer"},
-                    "explanation": {"type": "string"}
+                    "explanation": {"type": "string"},
+                    "section_id": {"type": ["string", "null"]}
                 },
-                "required": ["question", "choices", "correct_index", "explanation"]
+                "required": ["question", "choices", "correct_index", "explanation", "section_id"]
             }
         }
     },
@@ -279,12 +280,18 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
         raise ValueError(f"Model returned an invalid structured note: {e}") from e
 
 
-def generate_quiz_questions(title: str, content: str, num_questions: int = 5) -> GeneratedQuizQuestions:
+def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *, section_ids: list[str] | None = None) -> GeneratedQuizQuestions:
+    section_instruction = (
+        "Each source section begins with a [section:<id>] marker. Set section_id to the exact id for the section that supports the answer. "
+        if section_ids else
+        "Set section_id to null because no note-section markers are available. "
+    )
     prompt = (
         f"Write {num_questions} multiple-choice quiz questions that test understanding "
-        "of the document below. Each question needs exactly 4 answer choices, the "
+        "of the document below. Prefer central concepts, mechanisms, relationships, and application over wording trivia. "
+        "Each question needs exactly 4 answer choices, the "
         "0-based index of the correct choice, and a short explanation of why that "
-        "answer is correct. Base every question only on the document's content.\n\n"
+        f"answer is correct. {section_instruction}Base every question only on the document's content.\n\n"
         f"Document title: {title}\n\n"
         f"Document content:\n{content}"
     )

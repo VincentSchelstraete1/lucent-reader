@@ -1,5 +1,10 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { api, type Quiz } from "../api/client"
+
+export function missedQuestions(quiz: Quiz, answers: Array<number | null>) {
+  return quiz.questions.map((item, questionIndex) => ({ item, questionIndex, answer: answers[questionIndex] ?? null })).filter(({ item, answer }) => answer !== item.correct_index)
+}
 
 export function QuizPlayer({ quiz }: { quiz: Quiz }) {
   const [index, setIndex] = useState(0)
@@ -7,6 +12,7 @@ export function QuizPlayer({ quiz }: { quiz: Quiz }) {
   const [correctCount, setCorrectCount] = useState(0)
   const [finished, setFinished] = useState(false)
   const [attemptSaved, setAttemptSaved] = useState(false)
+  const [answers, setAnswers] = useState<Array<number | null>>(() => quiz.questions.map(() => null))
 
   const question = quiz.questions[index]
   const isLast = index === quiz.questions.length - 1
@@ -14,6 +20,7 @@ export function QuizPlayer({ quiz }: { quiz: Quiz }) {
   function selectChoice(choiceIndex: number) {
     if (selected !== null) return
     setSelected(choiceIndex)
+    setAnswers((current) => current.map((answer, questionIndex) => questionIndex === index ? choiceIndex : answer))
     if (choiceIndex === question.correct_index) {
       setCorrectCount((c) => c + 1)
     }
@@ -39,23 +46,24 @@ export function QuizPlayer({ quiz }: { quiz: Quiz }) {
     setCorrectCount(0)
     setFinished(false)
     setAttemptSaved(false)
+    setAnswers(quiz.questions.map(() => null))
   }
 
   if (finished) {
+    const missed = missedQuestions(quiz, answers)
     return (
       <div className="quiz-result">
         <h2>
           {correctCount} / {quiz.questions.length}
         </h2>
-        <p className="page-subtitle">
+        <p className="quiz-score-message">
           {correctCount === quiz.questions.length
             ? "Perfect score!"
             : "Nice work - review the explanations above and try again anytime."}
         </p>
         {!attemptSaved && <p className="empty">(Result not saved - couldn't reach the server.)</p>}
-        <button className="btn btn-primary" onClick={retake}>
-          Retake quiz
-        </button>
+        {missed.length > 0 && <section className="quiz-review" aria-labelledby="review-heading"><p className="note-kicker">Targeted review</p><h3 id="review-heading">Revisit what tripped you up</h3>{missed.map(({ item, questionIndex, answer }) => <article key={questionIndex}><p className="quiz-review-question">{item.question}</p><p><strong>Your answer:</strong> {answer === null ? "No answer" : item.choices[answer]}</p><p><strong>Correct answer:</strong> {item.choices[item.correct_index]}</p><p>{item.explanation}</p>{item.section_id && <Link className="quiz-review-link" to={`/app/notes?document_id=${quiz.document_id}#${item.section_id}`}>Review this concept in your notes →</Link>}</article>)}</section>}
+        <div className="quiz-result-actions"><Link className="btn" to={`/app/notes?document_id=${quiz.document_id}`}>Back to notes</Link><button className="btn btn-primary" onClick={retake}>Retake quiz</button></div>
       </div>
     )
   }

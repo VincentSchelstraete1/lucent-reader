@@ -27,6 +27,8 @@ def test_low_value_section_filter_is_conservative():
     assert is_low_value_section(SectionInput("p", "P", [], ["p"], [make_block("p", "Page furniture")], {}))
     assert is_low_value_section(SectionInput("r", "References", [], ["r"], [make_block("r", "A bibliography entry with a citation.")], {}))
     assert not is_low_value_section(SectionInput("e", "Definition", [], ["e"], [make_block("e", "An inner product defines geometry on a vector space.")], {}))
+    assert is_low_value_section(SectionInput("a", "Course Administration", [], ["a"], [make_block("a", "Homework deadline and regrade details.")], {}))
+    assert is_low_value_section(SectionInput("t", "QR Factorization", [], ["t"], [make_block("t", "QR Factorization")], {}))
 
 
 def test_progressive_section_normalizes_note_to_typed_instance():
@@ -137,6 +139,32 @@ def test_generated_schema_requires_kind_specific_fields():
     assert "root" in serialized
     assert "KeyDefinitionComponent" in serialized
     assert "term" in serialized and "definition" in serialized
+    assert "^\\S+(?:\\s+\\S+){0,3}$" in serialized
+
+
+def test_generated_section_note_rejects_unknown_top_level_fields():
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        GeneratedSectionNote.model_validate({
+            "title": "Section", "bigIdea": "Idea", "learningGoals": [],
+            "components": [], "keyTakeaways": [], "omittedNoise": [],
+            "plausibleButUnsupported": "must not slip through",
+        })
+
+
+def test_section_prompt_enforces_source_boundary_and_branch_topology(monkeypatch):
+    block = make_block("branch", "A check can succeed or fail.")
+    section = SectionInput("section-branch", "Decision", [], [block.id], [block], {})
+    captured = {}
+
+    def inspect_prompt(*args, **kwargs):
+        captured["prompt"] = args[0]
+        raise RuntimeError("stop after prompt inspection")
+
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", inspect_prompt)
+    with pytest.raises(RuntimeError):
+        model_section_note(section, model_version="source-boundary-test")
+    assert "SOURCE BOUNDARY" in captured["prompt"]
+    assert "mutually exclusive outcomes branch" in captured["prompt"]
 
 
 def test_callout_why_it_matters_is_shared_by_generation_and_runtime_contracts():

@@ -1,3 +1,6 @@
+import json
+
+
 def _make_document(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/quiz"}).json()
     return client.post("/documents", json={
@@ -19,6 +22,29 @@ def test_generate_and_retrieve_quiz(client, mock_quiz):
     get_response = client.get(f"/quizzes/{quiz['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["id"] == quiz["id"]
+
+
+def test_quiz_uses_saved_section_note_and_links_questions_for_review(client, mock_quiz):
+    document = _make_document(client)
+    client.post("/notes", json={
+        "title": "Section note",
+        "content_type": "section_note",
+        "document_id": document["id"],
+        "content": json.dumps({
+            "filename": "lecture.pdf",
+            "sectionNotes": [{
+                "id": "section-cache",
+                "title": "Cache behavior",
+                "bigIdea": "A cache keeps frequently used data nearby.",
+                "components": [{"kind": "explanation", "text": "Cache hits avoid slower memory."}],
+                "keyTakeaways": ["Hits avoid slower memory."],
+            }],
+        }),
+    })
+
+    quiz = client.post(f"/documents/{document['id']}/quizzes").json()
+
+    assert {question["section_id"] for question in quiz["questions"]} == {"section-cache"}
 
 def test_quiz_attempt(client, mock_quiz):
     document = _make_document(client)

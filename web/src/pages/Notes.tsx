@@ -1,43 +1,106 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
-import { StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
-import { gramSchmidtGolden } from "../learning/experiences/goldenExamples"
 
-type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: DocumentIngestionResult; message?: string }
+type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string }
+type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
+
+function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
+  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type }
+}
+
+function recordFromSavedNote(note: { id: number; title: string; document_id: number | null; content: string }): LearningNoteRecord | null {
+  try {
+    const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; sectionNotes?: SectionNote[] }
+    if (!Array.isArray(payload.sectionNotes)) return null
+    return { filename: payload.filename || note.title, source_type: payload.sourceType, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id }
+  } catch { return null }
+}
 
 function ComponentView({ component }: { component: SectionNote["components"][number] }) {
   const c = component as any
-  const [selected, setSelected] = useState<number | null>(null)
-  if (c.kind === "flow" || c.kind === "relationship_map") {
-    const nodes = c.nodes ?? []; const edges = c.edges ?? []
-    return <div className="note-flow" aria-label={c.title}><p className="note-hint">Select a step to see why it matters.</p>{nodes.map((node: any, index: number) => <div key={String(node.id)}><button className={`note-node${selected === index ? " selected" : ""}`} type="button" onClick={() => setSelected(selected === index ? null : index)} aria-expanded={selected === index}>{String(node.label)}</button>{selected === index && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.transitionExplanation ?? c.text ?? c.learningObject?.learningGoal ?? "This step is part of the section's learning sequence.")}</p>}{index < nodes.length - 1 && <div className="note-edge"><span>↓</span><strong>{String(edges[index]?.relation ?? "then")}</strong></div>}</div>)}</div>
+  const [selected, setSelected] = useState<number | string | null>(null)
+  if (c.kind === "relationship_map") {
+    const nodes = new Map((c.nodes ?? []).map((node: any) => [String(node.id), node]))
+    return <div className="note-relationships" aria-label={c.title}>{(c.edges ?? []).map((edge: any, index: number) => {
+      const source = nodes.get(String(edge.source)) as any
+      const target = nodes.get(String(edge.target)) as any
+      const detail = edge.explanation ?? source?.explanation ?? target?.explanation
+      return <div className="note-relationship" key={`${edge.source}-${edge.target}-${index}`}><button type="button" onClick={() => setSelected(selected === index ? null : index)} aria-expanded={selected === index}><span>{String(source?.label ?? edge.source)}</span><span className="note-relationship-arrow"><strong>{String(edge.relation)}</strong><i aria-hidden="true">→</i></span><span>{String(target?.label ?? edge.target)}</span></button>{selected === index && detail && <p className="note-detail" aria-live="polite">{String(detail)}</p>}</div>
+    })}{c.whyItMatters && <p className="note-why"><strong>Why this matters</strong>{String(c.whyItMatters)}</p>}</div>
+  }
+  if (c.kind === "flow") {
+    const nodeMap = new Map<string, any>((c.nodes ?? []).map((node: any) => [String(node.id), node]))
+    const edges = c.edges ?? []
+    const targets = new Set(edges.map((edge: any) => String(edge.target)))
+    const roots = [...nodeMap.keys()].filter((id) => !targets.has(id))
+    const renderNode = (nodeId: string, path: Set<string>): JSX.Element | null => {
+      const node = nodeMap.get(nodeId)
+      if (!node || path.has(nodeId)) return null
+      const children = edges.filter((edge: any) => String(edge.source) === nodeId)
+      const nextPath = new Set(path).add(nodeId)
+      return <div className="flow-branch" key={`${[...path].join("-")}-${nodeId}`}><button className={`note-node${selected === nodeId ? " selected" : ""}`} type="button" onClick={() => setSelected(selected === nodeId ? null : nodeId)} aria-expanded={selected === nodeId}>{String(node.label)}</button>{selected === nodeId && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.transitionExplanation ?? "This step changes the path shown below.")}</p>}{children.length > 0 && <div className={`flow-children${children.length > 1 ? " flow-split" : ""}`}>{children.map((edge: any, index: number) => <div className="flow-child" key={`${nodeId}-${edge.target}-${index}`}><div className="note-edge"><span aria-hidden="true">↓</span><strong>{String(edge.relation)}</strong></div>{renderNode(String(edge.target), nextPath)}</div>)}</div>}</div>
+    }
+    return <div className="note-flow" aria-label={c.title}><p className="note-hint">Select a step for its role in the mechanism.</p>{(roots.length ? roots : [...nodeMap.keys()].slice(0, 1)).map((root) => renderNode(root, new Set()))}{c.transitionExplanation && <p className="note-why"><strong>What the path means</strong>{String(c.transitionExplanation)}</p>}</div>
   }
   if (c.kind === "structure" && c.root) {
     const tree = (node: any, index = 0): JSX.Element => <li><button className="note-node" type="button" onClick={() => setSelected(selected === index ? null : index)} aria-expanded={selected === index}>{String(node.label)}</button>{selected === index && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.text ?? "This item is part of the structure shown above.")}</p>}{Array.isArray(node.children) && <ul>{node.children.map((child: any, childIndex: number) => <Fragment key={String(child.id)}>{tree(child, index + childIndex + 1)}</Fragment>)}</ul>}</li>
-    return <ul className="note-tree">{tree(c.root)}</ul>
+    return <><ul className="note-tree">{tree(c.root)}</ul>{c.whyItMatters && <p className="note-why"><strong>Why this structure matters</strong>{String(c.whyItMatters)}</p>}</>
   }
   if (c.kind === "key_definition") return <dl className="note-definition"><dt>{c.term}</dt><dd>{c.definition}</dd></dl>
   if (c.kind === "comparison") return <div className="note-table"><table><thead><tr><th>Concept</th>{(c.dimensions ?? []).map((d: string) => <th key={d}>{d}</th>)}</tr></thead><tbody>{(c.items ?? []).map((item: any) => <tr key={String(item.id ?? item.name)}><th>{String(item.name)}</th>{(c.dimensions ?? []).map((d: string) => <td key={d}>{String(item.values?.[d] ?? "—")}</td>)}</tr>)}</tbody></table></div>
-  if (c.kind === "worked_example" || c.kind === "equation") {
+  if (c.kind === "equation") {
+    const variables = c.variables ?? []
+    const knownValues = c.knownValues ?? []
+    return <div className="note-equation-breakdown"><code className="note-equation">{c.equation}</code>{variables.length > 0 && <dl className="note-values">{variables.map((value: any, i: number) => <Fragment key={i}><dt>{String(value.symbol ?? value.name ?? "Term")}</dt><dd>{String(value.meaning ?? value.description ?? value.value ?? "")}</dd></Fragment>)}</dl>}{knownValues.length > 0 && <div className="equation-known"><span>Given</span>{knownValues.map((value: any, index: number) => <code key={index}>{String(value.symbol ?? value.name ?? "value")} = {String(value.value ?? value.meaning ?? "")}</code>)}</div>}{c.substitution && <div className="equation-step"><span>Substitute</span><code>{c.substitution}</code></div>}{c.result && <div className="equation-step equation-result"><span>Result</span><code>{c.result}</code></div>}{c.interpretation && <p className="note-why"><strong>Interpretation</strong>{c.interpretation}</p>}</div>
+  }
+  if (c.kind === "worked_example") {
     const steps = c.steps ?? []
-    const visible = selected === null ? 0 : Math.min(selected + 1, steps.length)
+    const visible = typeof selected === "number" ? Math.min(selected + 1, steps.length) : 0
     return <div className="note-example">{c.problem && <p className="note-example-problem">{c.problem}</p>}{c.equation && <code className="note-equation">{c.equation}</code>}{(c.knownValues ?? []).length > 0 && <dl className="note-values">{c.knownValues.map((value: any, i: number) => <Fragment key={i}><dt>{String(value.name ?? value.symbol ?? "Value")}</dt><dd>{String(value.value ?? value.meaning ?? value.description ?? "")}</dd></Fragment>)}</dl>}<ol>{steps.slice(0, visible).map((step: any, i: number) => <li key={String(step.order ?? i)}>{String(step.description ?? step.label ?? step)}</li>)}</ol>{steps.length > 0 && <button className="note-reveal" type="button" onClick={() => setSelected(visible >= steps.length ? null : visible)}>{visible >= steps.length ? "Start again" : visible === 0 ? "Reveal the reasoning" : "Reveal next step"}</button>}{visible >= steps.length && c.result && <p><strong>Result:</strong> {c.result}</p>}{visible >= steps.length && c.interpretation && <p><strong>Meaning:</strong> {c.interpretation}</p>}</div>
   }
+  if (c.kind === "callout") return <aside className={`note-callout note-callout-${c.calloutType ?? "important"}`}><p>{c.text}</p>{c.whyItMatters && <small>{c.whyItMatters}</small>}</aside>
   return <p>{c.text || c.takeaway || c.definition}</p>
 }
 
-function NoteView({ notes }: { notes: SectionNote[] }) {
-  return <div className="notes-output">{notes.map((note) => <article className="note-section" key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component) => <section className="note-component" key={`${note.id}-${component.title}`}><h3>{component.title}</h3><ComponentView component={component} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
+export function NoteView({ notes }: { notes: SectionNote[] }) {
+  return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
 }
 
 export function Notes() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [file, setFile] = useState<File | null>(null)
   const [state, setState] = useState<State>({ status: "idle" })
-  const [history, setHistory] = useState<DocumentIngestionResult[]>([])
+  const [history, setHistory] = useState<LearningNoteRecord[]>([])
   const [selectedHistory, setSelectedHistory] = useState(0)
+  const [quizStatus, setQuizStatus] = useState<"idle" | "working" | "error">("idle")
   const runRef = useRef(0)
-  useEffect(() => { const saved = sessionStorage.getItem("lucent-note-history"); if (saved) { try { const parsed = JSON.parse(saved) as DocumentIngestionResult[]; if (Array.isArray(parsed)) { setHistory(parsed); setState({ status: "complete", result: parsed[0] }) } } catch { sessionStorage.removeItem("lucent-note-history") } } }, [])
-  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; setHistory((previous) => { const next = [result, ...previous.filter((item) => item.filename !== result.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); sessionStorage.setItem("lucent-last-note", JSON.stringify(result)); return next }); setSelectedHistory(0); setState({ status: "complete", result }) }
+  useEffect(() => {
+    let cancelled = false
+    api.getNotes().then((notes) => {
+      if (cancelled) return
+      const persisted = notes.filter((note) => note.content_type === "section_note").map(recordFromSavedNote).filter((item): item is LearningNoteRecord => item !== null).reverse()
+      const requestedDocument = Number(searchParams.get("document_id"))
+      const selected = persisted.find((item) => item.document_id === requestedDocument) ?? persisted[0]
+      if (persisted.length) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setState({ status: "complete", result: selected }) }
+      else { setHistory([]); setState({ status: "idle" }) }
+      window.setTimeout(() => { if (window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }) }, 0)
+    }).catch(() => {
+      const saved = sessionStorage.getItem("lucent-note-history")
+      if (saved) { try { const parsed = JSON.parse(saved) as LearningNoteRecord[]; if (Array.isArray(parsed) && parsed.length) { setHistory(parsed); setState({ status: "complete", result: parsed[0] }) } } catch { sessionStorage.removeItem("lucent-note-history") } }
+    })
+    return () => { cancelled = true }
+  }, [searchParams])
+  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }) }
+
+  async function startQuiz() {
+    const documentId = state.result?.document_id
+    if (!documentId) { setQuizStatus("error"); return }
+    setQuizStatus("working")
+    try { const quiz = await api.generateQuiz(documentId); navigate(`/quizzes/${quiz.id}`) }
+    catch { setQuizStatus("error") }
+  }
   async function upload() {
     if (!file) return
     const run = ++runRef.current
@@ -59,5 +122,5 @@ export function Notes() {
   const sections = state.sections ?? []
   const notes = state.result?.section_notes ?? []
   const availableHistory = history.length ? history : state.result ? [state.result] : []
-    return <div className="page notes-page"><header className="page-header"><h1>Notes</h1><p className="page-subtitle">Turn a document into clear, structured notes.</p></header><section className="notes-import"><label htmlFor="notes-file">Import a PDF, DOCX, or PPTX</label><input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} /><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>{state.status === "error" && <p className="error" role="alert">{state.message}</p>}</section>{state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}{availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Recent notes</span>{availableHistory.map((item, index) => <button key={item.filename} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}{state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2>{sections.map((section) => <article className="note-skeleton" key={section.id}><h3>{section.title || "Untitled section"}</h3><p>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Using a concise fallback while this section finishes." : section.status === "generating" ? "Generating…" : "Waiting…"}</p>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}{state.status === "complete" && state.result && <><h2 className="notes-document-title">{state.result.filename}</h2>{notes.length ? <NoteView notes={notes} /> : <p className="empty">No sections were produced for this document.</p>}</>}<section className="golden-experience"><p className="note-kicker">Interactive study prototype</p><h2>Gram–Schmidt: remove overlap to create a perpendicular direction</h2><StepThroughMechanism data={gramSchmidtGolden} /></section></div>
+    return <div className="page notes-page"><header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header><section className="notes-import"><label htmlFor="notes-file">Import learning material</label><p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p><input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} /><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>{state.status === "error" && <p className="error" role="alert">{state.message}</p>}</section>{state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}{availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}{state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}{state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"}</p></div><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} /> : <p className="empty">No sections were produced for this document.</p>}</>}</div>
 }

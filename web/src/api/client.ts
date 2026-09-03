@@ -52,6 +52,7 @@ export type QuizQuestion = {
   choices: string[]
   correct_index: number
   explanation: string
+  section_id?: string | null
 }
 
 export type Quiz = {
@@ -299,6 +300,9 @@ export type DocumentIngestionResult = {
   learning_blocks: LearningBlock[]
   generated_note: GeneratedLearningNote | null
   section_notes?: SectionNote[]
+  source_id?: number | null
+  document_id?: number | null
+  note_id?: number | null
 }
 
 export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
@@ -342,6 +346,7 @@ export const api = {
   getDocuments: () => get<Document[]>("/documents"),
   getDocument: (id: number) => get<Document>(`/documents/${id}`),
   getNotes: () => get<Note[]>("/notes"),
+  getNote: (id: number) => get<Note>(`/notes/${id}`),
   generateNote: (documentId: number) => post<Note>(`/documents/${documentId}/generate-note`),
   generateQuiz: (documentId: number) => post<Quiz>(`/documents/${documentId}/quizzes`),
   getQuizzesForDocument: (documentId: number) => get<Quiz[]>(`/documents/${documentId}/quizzes`),

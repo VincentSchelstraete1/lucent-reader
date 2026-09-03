@@ -70,7 +70,7 @@ def stub_ingestor():
     app.dependency_overrides.pop(get_document_ingestor, None)
 
 
-def test_valid_pdf_returns_structured_raw_document_without_persistence(client, stub_ingestor):
+def test_valid_pdf_returns_structured_document_and_persists_learning_note(client, stub_ingestor):
     pdf = b"%PDF-1.4\nfixture bytes"
     response = client.post(
         "/ingestion/pdf",
@@ -87,8 +87,14 @@ def test_valid_pdf_returns_structured_raw_document_without_persistence(client, s
     assert result["pages"][0]["blocks"][0]["text"] == "Page one"
     assert result["images"] == []
     assert stub_ingestor.calls == [(pdf, "lecture.pdf")]
-    assert client.get("/sources").json() == []
-    assert client.get("/documents").json() == []
+    assert isinstance(result["source_id"], int)
+    assert isinstance(result["document_id"], int)
+    assert isinstance(result["note_id"], int)
+    assert client.get("/sources").json()[0]["url"] == "pdf:lecture.pdf"
+    assert client.get("/documents").json()[0]["content"] == "# Extracted\n\nRaw body"
+    stored_note = client.get(f"/notes/{result['note_id']}").json()
+    assert stored_note["content_type"] == "section_note"
+    assert '"sectionNotes"' in stored_note["content"]
 
 
 def test_page_extractor_preserves_physical_page_count_text_and_order():

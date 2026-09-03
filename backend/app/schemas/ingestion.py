@@ -255,6 +255,12 @@ class PdfIngestionResponse(BaseModel):
     learning_blocks: list[LearningBlockResponse] = []
     generated_note: GeneratedNote | None = None
     section_notes: list[SectionNote] = []
+    # Existing library records created for the completed learning note. These
+    # make ingestion output reusable by the product Notes/quiz loop without
+    # coupling the semantic pipeline to a second storage model.
+    source_id: int | None = None
+    document_id: int | None = None
+    note_id: int | None = None
 
     @classmethod
     def from_documents(cls, document: RawDocument, normalized: NormalizedDocument) -> "PdfIngestionResponse":
