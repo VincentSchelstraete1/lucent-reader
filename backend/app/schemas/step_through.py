@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,6 +31,46 @@ class MechanismStage(BaseModel):
     state_changes: list[StateChange] = Field(default_factory=list, alias="stateChanges")
     equation: str | None = Field(default=None, max_length=240)
     active_entity_ids: list[str] = Field(default_factory=list, alias="activeEntityIds")
+    visual: StageVisual | None = None
+
+
+class SequenceActor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=80)
+
+
+class SequenceMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    sender: str = Field(min_length=1)
+    receiver: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=40)
+    explanation: str | None = Field(default=None, max_length=300)
+
+
+class SequenceExchangeScene(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: Literal["sequence_exchange_scene"]
+    actors: list[SequenceActor] = Field(min_length=2, max_length=4)
+    messages: list[SequenceMessage] = Field(min_length=1, max_length=12)
+    visible_message_ids: list[str] = Field(alias="visibleMessageIds", min_length=1)
+    emphasized_message_id: str | None = Field(default=None, alias="emphasizedMessageId")
+
+
+class VectorScene(BaseModel):
+    """Semantic vector scene; layout remains a frontend concern."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: Literal["vector_scene"]
+    active_entity_ids: list[str] = Field(alias="activeEntityIds", min_length=1)
+
+
+StageVisual = SequenceExchangeScene | VectorScene
 
 
 class MechanismPrediction(BaseModel):

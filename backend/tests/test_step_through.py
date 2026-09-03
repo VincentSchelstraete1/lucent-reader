@@ -21,3 +21,31 @@ def test_step_through_unknown_replay_does_not_call_provider(client):
         "mode": "replay",
     })
     assert response.status_code == 404
+
+
+def test_sequence_exchange_visual_is_strict_and_semantic_only():
+    payload = {
+        "title": "Handshake",
+        "learningGoal": "Understand the exchange",
+        "entities": [{"id": "client", "label": "Client"}, {"id": "server", "label": "Server"}],
+        "stages": [{
+            "title": "SYN",
+            "explanation": "The client initiates.",
+            "visual": {
+                "type": "sequence_exchange_scene",
+                "actors": [{"id": "client", "label": "Client"}, {"id": "server", "label": "Server"}],
+                "messages": [{"id": "syn", "sender": "client", "receiver": "server", "label": "SYN"}],
+                "visibleMessageIds": ["syn"],
+            },
+        }, {"title": "Done", "explanation": "The exchange completes."}],
+        "conclusion": "The peers synchronize.",
+    }
+    mechanism = StepThroughMechanism.model_validate(payload)
+    assert mechanism.stages[0].visual.type == "sequence_exchange_scene"
+    payload["stages"][0]["visual"]["coordinates"] = {"x": 1}
+    try:
+        StepThroughMechanism.model_validate(payload)
+    except Exception:
+        pass
+    else:
+        raise AssertionError("presentation coordinates must be rejected")

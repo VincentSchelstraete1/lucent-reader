@@ -47,6 +47,9 @@
 .step-through-metrics dd { margin: 0; font-weight: 600; }
 .step-through-result pre { overflow: auto; padding: 1rem; background: #f1efe8; border-radius: 8px; }
 .step-through-muted, .step-through-hash { color: #68736b; font-size: .85rem; }
+.sequence-message-label { font-size: 12px; font-weight: 700; fill: #26215c; paint-order: stroke; stroke: #fbfaf6; stroke-width: 4px; }
+.sequence-message-emphasized line { stroke: #1d9e75; }
+.sequence-message-emphasized polygon { fill: #1d9e75; }
 .step-mechanism { max-width: 760px; }
 .step-goal { color: #55544e; max-width: 65ch; }
 .step-visual { background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: .75rem 1rem .5rem; }

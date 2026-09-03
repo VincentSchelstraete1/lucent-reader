@@ -21,7 +21,7 @@ router = APIRouter(prefix="/dev/step-through", tags=["Development"])
 logger = logging.getLogger(__name__)
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "dev_fixtures" / "step_through"
 MODEL = "claude-haiku-4-5-20251001"
-SCHEMA_VERSION = "step-through-v1"
+SCHEMA_VERSION = "step-through-v2"
 PROMPT_VERSION = "step-through-generation-v1"
 
 SOURCE_FIXTURES = {
@@ -107,6 +107,8 @@ def _load_recorded(name: str, source_hash: str) -> StepThroughMechanism | None:
     if not path.is_file():
         return None
     payload = json.loads(path.read_text())
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        return None
     return StepThroughMechanism.model_validate(payload["mechanism"])
 
 
@@ -125,7 +127,8 @@ def _save_recorded(name: str, source_text: str, mechanism: StepThroughMechanism)
 
 def _prompt(source_text: str) -> str:
     return ("Turn this one short source section into a semantic step-through mechanism that teaches the process, not a summary. "
-            "Return only the structured object. Use 2-8 ordered stages. Keep labels concise. Explain why each important state change matters. "
+            "Return every required field: title, learningGoal, entities, stages, and conclusion. Use 2-5 ordered stages. Keep labels concise and each stage explanation short. Explain why each important state change matters. "
+            "Choose a stage visual grammar when it improves understanding. For actor/message exchanges, use visual.type=sequence_exchange_scene with actors, messages (sender, receiver, short label), visibleMessageIds, and an emphasizedMessageId; do not use coordinates or Cartesian axes. For vector mathematics, visual.type=vector_scene may identify activeEntityIds. "
             "You may include a prediction question when the learner can reason before the reveal. "
             "Generate meaning only: never include coordinates, SVG, HTML, CSS, colors, layout, animation, or pixel positions. Stay grounded in the source.\n\n"
             f"Source section:\n{source_text}")
@@ -135,7 +138,7 @@ def _prompt(source_text: str) -> str:
 def list_fixtures(_user: User = Depends(get_current_user)) -> list[StepThroughFixture]:
     result = []
     for name, source in SOURCE_FIXTURES.items():
-        result.append(StepThroughFixture(name=name, source_text=source, source_hash=_hash_source(source), replay_available=name == "gram-schmidt" or _fixture_path(name, _hash_source(source)).is_file()))
+        result.append(StepThroughFixture(name=name, source_text=source, source_hash=_hash_source(source), replay_available=name == "gram-schmidt" or _load_recorded(name, _hash_source(source)) is not None))
     return result
 
 
@@ -144,14 +147,17 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
     source_hash = _hash_source(request.source_text)
     started = time.perf_counter()
     if request.mode == "replay":
-        mechanism = _golden_mechanism() if request.fixture_name == "gram-schmidt" and request.source_text == SOURCE_FIXTURES["gram-schmidt"] else _load_recorded(request.fixture_name, source_hash)
+        mechanism = _load_recorded(request.fixture_name, source_hash)
+        is_golden = mechanism is None and request.fixture_name == "gram-schmidt" and request.source_text == SOURCE_FIXTURES["gram-schmidt"]
+        if is_golden:
+            mechanism = _golden_mechanism()
         if mechanism is None:
             raise HTTPException(status_code=404, detail={"code": "fixture_not_found", "message": "No replay fixture matches this source. Choose Live generate once."})
-        kind = "golden_manual" if request.fixture_name == "gram-schmidt" and request.source_text == SOURCE_FIXTURES["gram-schmidt"] else "recorded_live"
+        kind = "golden_manual" if is_golden else "recorded_live"
         return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, validation="passed"))
 
     try:
-        raw = _run_structured_tool(_prompt(request.source_text), "step_through_mechanism", StepThroughMechanism.generation_schema(), 1000, timeout=15, max_retries=0)
+        raw = _run_structured_tool(_prompt(request.source_text), "step_through_mechanism", StepThroughMechanism.generation_schema(), 1800, timeout=15, max_retries=0)
         mechanism = StepThroughMechanism.model_validate(raw)
     except ValidationError as exc:
         logger.warning("step_through_generation_failed fixture=%s stage=validation exception_type=%s", request.fixture_name, type(exc).__name__)

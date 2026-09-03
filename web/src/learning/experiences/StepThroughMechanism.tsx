@@ -7,7 +7,11 @@ export type MechanismStage = {
   equation?: string
   activeEntityIds?: string[]
   vectors?: { id: string; x: number; y: number; color?: string; dashed?: boolean; label?: string }[]
+  visual?: StageVisual
 }
+export type SequenceExchangeScene = { type: "sequence_exchange_scene"; actors: { id: string; label: string }[]; messages: { id: string; sender: string; receiver: string; label: string; explanation?: string | null }[]; visibleMessageIds: string[]; emphasizedMessageId?: string | null }
+export type VectorScene = { type: "vector_scene"; activeEntityIds: string[] }
+export type StageVisual = SequenceExchangeScene | VectorScene
 export type MechanismPrediction = { prompt: string; options: string[]; answer: number; reveal: string }
 export type StepThroughMechanismData = {
   learningGoal: string
@@ -22,7 +26,7 @@ export type GeneratedStepThroughMechanism = {
   title: string
   learningGoal: string
   entities: Array<{ id: string; label: string; color?: string | null }>
-  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[] }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; visual?: StageVisual | null }>
   prediction?: MechanismPrediction | null
   conclusion: string
 }
@@ -36,10 +40,31 @@ export function generatedMechanismToRendererData(mechanism: GeneratedStepThrough
       explanation: stage.explanation,
       equation: stage.equation ?? undefined,
       activeEntityIds: stage.activeEntityIds,
+      visual: stage.visual ?? undefined,
     })),
     prediction: mechanism.prediction ?? undefined,
     conclusion: mechanism.conclusion,
   }
+}
+
+function SequenceExchangeVisual({ scene }: { scene: SequenceExchangeScene }) {
+  const actorX = (index: number) => 120 + index * 180
+  const actorIndex = new Map(scene.actors.map((actor, index) => [actor.id, index]))
+  return <svg viewBox="0 0 420 250" role="img" aria-label="Sequence exchange diagram">
+    {scene.actors.slice(0, 2).map((actor, index) => <g key={actor.id}><rect x={actorX(index) - 48} y="12" width="96" height="30" rx="8" fill="#fbfaf6" stroke="#58735d" strokeWidth="2" /><text x={actorX(index)} y="32" textAnchor="middle" className="vector-label">{actor.label}</text><line x1={actorX(index)} y1="48" x2={actorX(index)} y2="228" className="axis" /></g>)}
+    {scene.messages.map((message, index) => {
+      if (!scene.visibleMessageIds.includes(message.id)) return null
+      const from = actorIndex.get(message.sender), to = actorIndex.get(message.receiver)
+      if (from === undefined || to === undefined) return null
+      const y = 78 + index * 48
+      const x1 = actorX(from), x2 = actorX(to), direction = x2 >= x1 ? 1 : -1
+      const tip = x2 - direction * 2
+      const head = `${tip},${y} ${tip - direction * 10},${y - 5} ${tip - direction * 10},${y + 5}`
+      const emphasized = scene.emphasizedMessageId === message.id
+      return <g key={message.id} className={emphasized ? "sequence-message sequence-message-emphasized" : "sequence-message"}><line x1={x1} y1={y} x2={tip} y2={y} stroke="#58735d" strokeWidth={emphasized ? 3 : 2} /><polygon points={head} fill="#58735d" /><text x={(x1 + x2) / 2} y={y - 9} textAnchor="middle" className="sequence-message-label">{message.label}</text></g>
+    })}
+    <text x="24" y="224" className="axis-label">time ↓</text>
+  </svg>
 }
 
 const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
@@ -76,7 +101,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
   return <section className="step-mechanism" aria-label={data.learningGoal}>
     <p className="step-goal">Learning goal: {data.learningGoal}</p>
     <div className="step-visual" aria-live="polite">
-      <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
+      {current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
         {!vectors.length && (current.activeEntityIds ?? data.entities.map((entity) => entity.id)).slice(0, 4).map((entityId, index, activeIds) => {
@@ -86,7 +111,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
           return <g key={entity.id}><rect x={x - 38} y="105" width="76" height="40" rx="10" fill="#fbfaf6" stroke={entity.color ?? "#58735d"} strokeWidth="2" /><text x={x} y="129" textAnchor="middle" className="vector-label">{entity.label}</text>{index < activeIds.length - 1 && <path d={`M${x + 39} 125 L${x + 53} 125`} stroke="#58735d" strokeWidth="2" markerEnd="none" />}</g>
         })}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
-      </svg>
+      </svg>}
       <div className="step-legend">{data.entities.filter((entity) => !current.activeEntityIds || current.activeEntityIds.includes(entity.id)).map((entity) => <span key={entity.id}><i style={{ background: entity.color ?? "#1d9e75" }} />{entity.label}</span>)}</div>
     </div>
     <div className="step-copy"><p className="step-count">Step {stage + 1} of {data.stages.length}</p><h3>{current.title}</h3><p>{current.explanation}</p>{current.equation && <code className="step-equation">{current.equation}</code>}</div>
