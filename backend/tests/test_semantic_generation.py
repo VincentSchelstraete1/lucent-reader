@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.semantic import DeterministicSemanticGenerator, DeterministicPedagogicalPlanner, assemble_note
+from app.semantic import DeterministicSemanticGenerator, DeterministicPedagogicalPlanner, HybridSemanticGenerator, assemble_note
 from app.routing import RepresentationDecision
 from app.normalization import SourceReference
 
@@ -41,3 +41,17 @@ def test_planner_explains_representation_purpose_and_can_downgrade_weak_map():
     strong = planner.plan(block("The TLB caches page-table translations.", "map2"), decision("concept_map", "map2"))
     assert strong.final_representation == "concept_map"
     assert strong.representation_plan
+
+def test_hybrid_model_path_uses_one_combined_generation_call():
+    calls = []
+    class FakeModel:
+        def generate_with_plan(self, current_block, current_decision, context):
+            calls.append((current_block.id, current_decision.type))
+            obj = DeterministicSemanticGenerator().generate(current_block, current_decision)
+            plan = DeterministicPedagogicalPlanner().plan(current_block, current_decision, context)
+            return plan, obj
+
+    current = block("Rain causes flooding, which leads to delays.", "one-call")
+    result = HybridSemanticGenerator(FakeModel()).generate_with_plan(current, decision("causal", "one-call"), None)
+    assert result[1].type == "causal"
+    assert calls == [("one-call", "causal")]
