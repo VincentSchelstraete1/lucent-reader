@@ -6,8 +6,9 @@ const box: CSSProperties = { border: "1px solid #d8d2c5", borderRadius: 10, padd
 export function CausalRenderer({ object }: { object: CausalLearningObject }) {
   const nodeById = new Map(object.nodes.map(node => [node.id, node]))
   const validEdges = object.edges.filter(edge => nodeById.has(edge.from) && nodeById.has(edge.to))
+  const ordered = validEdges.length ? [validEdges[0].from, ...validEdges.map(edge => edge.to)] : []
   return <div style={{ display: "grid", gap: 8 }}>
-    {validEdges.map(edge => <div key={`${edge.from}-${edge.to}`} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}><span style={box}>{nodeById.get(edge.from)?.label}</span><span aria-label={edge.label || "causes"}>— {edge.label || "causes"} →</span><span style={box}>{nodeById.get(edge.to)?.label}</span>{(edge.mechanism || edge.explanation) && <small>{edge.mechanism || edge.explanation}</small>}</div>)}
+    {validEdges.length > 0 && <ol aria-label="Causal chain" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", justifyItems: "center" }}>{ordered.map((id, index) => { const node = nodeById.get(id); const edge = validEdges[index - 1]; return <li key={id} style={{ display: "grid", justifyItems: "center", gap: 5, width: "min(100%, 420px)" }}><details style={{ ...box, width: "100%" }}><summary style={{ cursor: "pointer", fontWeight: 600 }}>{node?.label || "Concept"}</summary>{node?.explanation && <p>{node.explanation}</p>}</details>{edge && <div style={{ display: "grid", justifyItems: "center", gap: 2 }}><span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>↓</span><strong>{edge.label || "causes"}</strong>{(edge.mechanism || edge.explanation) && <small>{edge.mechanism || edge.explanation}</small>}</div>}</li> })}</ol>}
     {validEdges.length === 0 && object.nodes.map(node => <p key={node.id} style={box}><strong>{node.label}</strong>{node.explanation ? ` — ${node.explanation}` : ""}</p>)}
   </div>
 }

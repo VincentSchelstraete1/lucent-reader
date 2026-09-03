@@ -55,3 +55,15 @@ def test_hybrid_model_path_uses_one_combined_generation_call():
     result = HybridSemanticGenerator(FakeModel()).generate_with_plan(current, decision("causal", "one-call"), None)
     assert result[1].type == "causal"
     assert calls == [("one-call", "causal")]
+
+def test_controlled_visual_structures_are_semantically_complete():
+    generator = DeterministicSemanticGenerator()
+    causal = generator.generate(block("Increasing the cache size reduces capacity misses. Fewer cache misses reduce accesses to main memory. This lowers average memory access time.", "causal-chain"), decision("causal", "causal-chain"))
+    assert [node["label"] for node in causal.nodes] == ["Cache Size ↑", "Capacity Misses ↓", "Main-Memory Accesses ↓", "Average Memory Access Time ↓"]
+    assert [edge["label"] for edge in causal.edges] == ["reduces", "causes fewer", "lowers"]
+    concept = generator.generate(block("Virtual memory involves virtual addresses, page tables, physical memory, the TLB, and page faults. The TLB caches recent page-table translations. Page tables map virtual pages to physical frames.", "concept-chain"), decision("concept_map", "concept-chain"))
+    assert len(concept.nodes) <= 7
+    assert {relationship["relation"] for relationship in concept.relationships} >= {"uses", "maps", "caches"}
+    hierarchy = generator.generate(block("Memory consists of registers, cache, main memory, and secondary storage. Cache contains L1, L2, and L3 levels.", "hierarchy-tree"), decision("hierarchy", "hierarchy-tree"))
+    assert [child["label"] for child in hierarchy.root["children"]] == ["Registers", "Cache", "Main Memory", "Secondary Storage"]
+    assert [child["label"] for child in hierarchy.root["children"][1]["children"]] == ["L1", "L2", "L3"]
