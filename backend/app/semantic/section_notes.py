@@ -27,6 +27,19 @@ class SectionInput:
     source: dict[str, Any]
 
 
+def is_low_value_section(section: SectionInput) -> bool:
+    """Conservatively exclude extraction furniture from expensive generation."""
+    title = (section.title or "").strip()
+    text = "\n".join(block.text for block in section.blocks).strip()
+    if not text or len(text) < 8:
+        return True
+    if title and (len(title) <= 1 or title.lower().rstrip(":") in {"references", "bibliography", "contents", "table of contents"}):
+        return True
+    if title and any(marker in title.lower() for marker in ("references", "bibliography")):
+        return True
+    return False
+
+
 COMPONENT_KINDS = Literal["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]
 
 class SectionComponent(BaseModel):
@@ -372,13 +385,14 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
         return _SECTION_CACHE[key].model_copy()
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     started = time.perf_counter()
-    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false", section.id, section.title)
+    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false source_chars=%d blocks=%d max_tokens=1000", section.id, section.title, len(source), len(section.blocks))
     try:
         raw = _run_structured_tool("Design a concise, source-grounded study note that teaches this coherent section rather than rewriting it. First identify the central mental model, essential facts, mechanisms, relationships, terminology, equations, and removable repetition. Choose a coherent teaching sequence and only the component types that materially improve learning; do not request or emit every type. Prefer a small set of strong components, use visual structure only when it is clearer than prose, preserve important technical detail, and explain meaningful transitions. Every component must cite sourceBlockIds from the supplied blocks.\n\n" + source, "section_learning_note", schema, 1000, timeout=15, max_retries=0)
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
     try:
+        logger.info("section_generation_response section_id=%s title=%r top_level_keys=%s", section.id, section.title, sorted(raw.keys()) if isinstance(raw, dict) else [])
         generated = GeneratedSectionNote.model_validate(raw)
         note = SectionNote.model_validate({**generated.model_dump(by_alias=True), "id": section.id, "sourceBlockIds": section.learning_block_ids})
     except Exception as exc:
@@ -402,10 +416,11 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
                     pass
             return safe_deterministic_section_note(section, objects)
 
-    return list(await asyncio.gather(*(one(section) for section in sections)))
+    return list(await asyncio.gather(*(one(section) for section in sections if not is_low_value_section(section))))
 
 async def generate_sections_progressively(sections: list[SectionInput], objects: dict[str, LearningObject], on_complete, *, concurrency: int = 3, use_model: bool = False) -> list[SectionNote]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
+    active = [(index, section) for index, section in enumerate(sections) if not is_low_value_section(section)]
     results: list[SectionNote | None] = [None] * len(sections)
 
     async def one(index: int, section: SectionInput) -> None:
@@ -420,5 +435,5 @@ async def generate_sections_progressively(sections: list[SectionInput], objects:
                 await on_complete(index, note, None)
             results[index] = note
 
-    await asyncio.gather(*(one(index, section) for index, section in enumerate(sections)))
+    await asyncio.gather(*(one(index, section) for index, section in active))
     return [note for note in results if note is not None]

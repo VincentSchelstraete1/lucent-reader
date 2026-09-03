@@ -24,7 +24,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively
+from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
 
 
 router = APIRouter(prefix="/ingestion")
@@ -79,7 +79,7 @@ async def _generate_note(extracted, blocks, decisions, semantic_generator):
     return assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, objects, plans)
 
 async def _generate_section_notes(blocks, objects):
-    sections = group_learning_blocks(blocks)
+    sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     return await generate_sections_concurrently(sections, objects, concurrency=3)
 
 async def _generate_outputs(extracted, blocks, decisions, semantic_generator):
@@ -191,7 +191,7 @@ async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semant
     async def on_complete(index, note, error):
         state = job["sections"][index]
         state["status"] = "complete" if error is None else "failed"
-        state["section_note"] = note.model_dump(by_alias=True)
+        state["section_note"] = SectionNote.model_validate(note)
         state["error"] = "Section used deterministic fallback" if error else None
     await generate_sections_progressively(group_learning_blocks(blocks), objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
     job["status"] = "complete"
@@ -234,7 +234,10 @@ async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_us
     job = _PROGRESSIVE_JOBS.get(job_id)
     if not job:
         raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
-    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=job["base"].model_copy(update={"section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]]}) if job["status"] == "complete" else None)
+    result = None
+    if job["status"] == "complete":
+        result = PdfIngestionResponse.model_validate({**job["base"].model_dump(by_alias=True), "section_notes": [SectionNote.model_validate(state["section_note"]).model_dump(by_alias=True) for state in job["sections"] if state["section_note"]]})
+    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=result)
 
 
 @router.post(

@@ -1,4 +1,5 @@
 import os
+import logging
 from anthropic import Anthropic
 from pydantic import ValidationError
 
@@ -7,6 +8,7 @@ from app.schemas.quiz import GeneratedQuizQuestions
 
 
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+logger = logging.getLogger(__name__)
 
 
 LENGTH_INSTRUCTIONS = {
@@ -189,6 +191,17 @@ def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: 
         tool_choice={"type": "tool", "name": tool_name},
         messages=[{"role": "user", "content": prompt}],
         **({"timeout": timeout} if timeout is not None else {})
+    )
+
+    usage = getattr(message, "usage", None)
+    logger.info(
+        "structured_generation_response tool=%s model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
+        tool_name,
+        getattr(message, "model", "unknown"),
+        getattr(message, "stop_reason", "unknown"),
+        getattr(usage, "input_tokens", "unknown"),
+        getattr(usage, "output_tokens", "unknown"),
+        max_tokens,
     )
 
     for block in message.content:
