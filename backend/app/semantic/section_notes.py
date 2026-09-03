@@ -144,7 +144,20 @@ def deterministic_section_note(section: SectionInput, objects: dict[str, Learnin
             data["root"] = obj.root
         elif kind == "worked_example":
             data["steps"] = [{"label": step} for step in (obj.derivation_steps or [block.text[:500]])]
-        components.append(SectionComponent.model_validate(data))
+        # Deterministic output is a safety net, so it must never emit a
+        # visually-typed component that cannot satisfy the same invariants as
+        # model output.  If the LearningObject lacks a connected graph/tree,
+        # retain the source-grounded text as an explanation instead.
+        try:
+            components.append(SectionComponent.model_validate(data))
+        except ValueError:
+            components.append(SectionComponent(
+                kind="explanation",
+                title=obj.title or "Explanation",
+                text=block.text[:500],
+                sourceBlockIds=[block.id],
+                learningObject=obj,
+            ))
     return SectionNote(id=section.id, title=section.title or (available[0].title if available else "Learning section"), bigIdea=first_text, learningGoals=["Understand the main idea and how the section's parts connect."], components=components, keyTakeaways=[block.text.strip() for block in section.blocks[:3]], sourceBlockIds=section.learning_block_ids)
 
 
@@ -157,10 +170,26 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     if key in _SECTION_CACHE:
         logger.info("section_generation_cache_hit section_id=%s title=%r model=claude-haiku-4-5-20251001", section.id, section.title)
         return _SECTION_CACHE[key].model_copy()
+    component_properties = {"kind": {"type": "string", "enum": ["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]}, "title": {"type": "string"}, "text": {"type": "string"}, "sourceBlockIds": {"type": "array", "items": {"type": "string"}}, "whyItMatters": {"type": "string"}, "term": {"type": "string"}, "definition": {"type": "string"}, "significance": {"type": "string"}, "nodes": {"type": "array", "items": {"type": "object"}}, "edges": {"type": "array", "items": {"type": "object"}}, "root": {"type": "object"}, "items": {"type": "array", "items": {"type": "object"}}, "dimensions": {"type": "array", "items": {"type": "string"}}, "conclusion": {"type": "string"}, "problem": {"type": "string"}, "knownValues": {"type": "array", "items": {"type": "object"}}, "steps": {"type": "array", "items": {"type": "object"}}, "result": {"type": "string"}, "interpretation": {"type": "string"}, "equation": {"type": "string"}, "variables": {"type": "array", "items": {"type": "object"}}, "calloutType": {"type": "string"}, "takeaway": {"type": "string"}}
+    component_schema = {
+        "type": "object",
+        "properties": component_properties,
+        "required": ["kind", "title", "sourceBlockIds"],
+        # Keep the model contract aligned with SectionComponent's semantic
+        # invariants.  Conditional requirements prevent a structure without a
+        # root (or a visual without graph data) from reaching validation.
+        "allOf": [
+            {"if": {"properties": {"kind": {"const": "structure"}}}, "then": {"required": ["root"]}},
+            {"if": {"properties": {"kind": {"enum": ["flow", "relationship_map"]}}}, "then": {"required": ["nodes", "edges"]}},
+            {"if": {"properties": {"kind": {"const": "key_definition"}}}, "then": {"required": ["term", "definition"]}},
+            {"if": {"properties": {"kind": {"const": "worked_example"}}}, "then": {"required": ["steps"]}},
+            {"if": {"properties": {"kind": {"const": "equation"}}}, "then": {"required": ["equation"]}},
+        ],
+    }
     schema = {"type": "object", "properties": {
         "title": {"type": "string"}, "bigIdea": {"type": "string"},
         "learningGoals": {"type": "array", "items": {"type": "string"}},
-        "components": {"type": "array", "items": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]}, "title": {"type": "string"}, "text": {"type": "string"}, "sourceBlockIds": {"type": "array", "items": {"type": "string"}}, "whyItMatters": {"type": "string"}, "term": {"type": "string"}, "definition": {"type": "string"}, "significance": {"type": "string"}, "nodes": {"type": "array", "items": {"type": "object"}}, "edges": {"type": "array", "items": {"type": "object"}}, "root": {"type": "object"}, "items": {"type": "array", "items": {"type": "object"}}, "dimensions": {"type": "array", "items": {"type": "string"}}, "conclusion": {"type": "string"}, "problem": {"type": "string"}, "knownValues": {"type": "array", "items": {"type": "object"}}, "steps": {"type": "array", "items": {"type": "object"}}, "result": {"type": "string"}, "interpretation": {"type": "string"}, "equation": {"type": "string"}, "variables": {"type": "array", "items": {"type": "object"}}, "calloutType": {"type": "string"}, "takeaway": {"type": "string"}}, "required": ["kind", "title", "sourceBlockIds"]}},
+        "components": {"type": "array", "items": component_schema},
         "keyTakeaways": {"type": "array", "items": {"type": "string"}}, "omittedNoise": {"type": "array", "items": {"type": "string"}}
     }, "required": ["title", "bigIdea", "learningGoals", "components", "keyTakeaways", "omittedNoise"]}
     started = time.perf_counter()

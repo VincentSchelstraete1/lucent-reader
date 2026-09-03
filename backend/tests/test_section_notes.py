@@ -9,6 +9,7 @@ from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
 from app.semantic.section_notes import model_section_note
+from app.semantic.schema import CausalObject
 
 
 def make_block(ident, text, ancestry=None):
@@ -56,3 +57,53 @@ def test_model_section_failure_isolated_to_deterministic_fallback(monkeypatch):
     monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", fail)
     with pytest.raises(RuntimeError):
         model_section_note(section, model_version="test-failure")
+
+
+def test_model_structure_without_root_is_rejected(monkeypatch):
+    block = make_block("structure", "Memory contains cache.")
+    section = SectionInput("section-structure", "Memory", ["Memory"], [block.id], [block], {})
+
+    def malformed(*args, **kwargs):
+        return {
+            "title": "Memory",
+            "bigIdea": "Memory is organized into levels.",
+            "learningGoals": [],
+            "components": [{"kind": "structure", "title": "Levels", "sourceBlockIds": [block.id]}],
+            "keyTakeaways": [],
+            "omittedNoise": [],
+        }
+
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", malformed)
+    with pytest.raises(ValueError, match="structure components require a root"):
+        model_section_note(section, model_version="test-missing-root")
+
+
+def test_deterministic_fallback_downgrades_invalid_visual_to_explanation():
+    block = make_block("causal", "A cache miss requires main memory access.")
+    obj = CausalObject(
+        id="causal", type="causal", title="Cache miss", learningGoal="Understand misses",
+        sourceText=block.text, nodes=[{"id": "a", "label": "Cache miss"}], edges=[]
+    )
+    note = deterministic_section_note(SectionInput("s", "Cache", ["Cache"], [block.id], [block], {}), {block.id: obj})
+    assert note.components[0].kind == "explanation"
+    assert note.components[0].source_block_ids == [block.id]
+
+
+def test_model_failure_then_fallback_produces_valid_section_note(monkeypatch):
+    block = make_block("fallback", "A short section that remains readable.")
+    section = SectionInput("section-fallback", "Fallback", ["Fallback"], [block.id], [block], {})
+    obj = CausalObject(
+        id=block.id, type="causal", title="Fallback", learningGoal="Understand",
+        sourceText=block.text, nodes=[{"id": "a", "label": "A"}], edges=[]
+    )
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
+    objects = {block.id: obj}
+    completed = []
+
+    async def on_complete(index, note, error):
+        completed.append((note, error))
+
+    notes = asyncio.run(generate_sections_progressively([section], objects, on_complete, concurrency=1, use_model=True))
+    assert len(notes) == 1
+    assert notes[0].components[0].kind == "explanation"
+    assert completed[0][1] == "provider unavailable"
