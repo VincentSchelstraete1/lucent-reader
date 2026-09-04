@@ -40,7 +40,7 @@ export function QuizPage() {
         {state.status === "loaded" && (
           <>
             <span> / </span>
-            <Link to={`/documents/${state.quiz.document_id}`}>Document</Link>
+            <Link to={`/app/material/${state.quiz.document_id}?mode=notes`}>Study material</Link>
           </>
         )}
         <span> / </span>

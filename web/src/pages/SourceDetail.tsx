@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { api, type Source, type Document } from "../api/client"
-import { DocumentCard } from "../components/DocumentCard"
 import { Skeleton } from "../components/Skeleton"
 
 type State =
@@ -11,6 +10,7 @@ type State =
 
 export function SourceDetail() {
   const { sourceId } = useParams()
+  const navigate = useNavigate()
   const [state, setState] = useState<State>({ status: "loading" })
 
   useEffect(() => {
@@ -21,10 +21,15 @@ export function SourceDetail() {
     Promise.all([api.getSource(id), api.getDocuments()])
       .then(([source, documents]) => {
         if (cancelled) return
+        const matchingDocuments = documents.filter((d) => d.source_id === id)
+        if (matchingDocuments.length === 1) {
+          navigate(`/app/material/${matchingDocuments[0].id}?mode=notes`, { replace: true })
+          return
+        }
         setState({
           status: "loaded",
           source,
-          documents: documents.filter((d) => d.source_id === id)
+          documents: matchingDocuments
         })
       })
       .catch((err) => {
@@ -38,14 +43,14 @@ export function SourceDetail() {
     return () => {
       cancelled = true
     }
-  }, [sourceId])
+  }, [navigate, sourceId])
 
   return (
     <div className="page">
       <nav className="breadcrumbs">
         <Link to="/app">Library</Link>
         <span> / </span>
-        <span>{state.status === "loaded" ? state.source.type : "Source"}</span>
+        <span>Choose study material</span>
       </nav>
 
       {state.status === "loading" && <Skeleton rows={2} />}
@@ -57,19 +62,19 @@ export function SourceDetail() {
       {state.status === "loaded" && (
         <>
           <div className="page-header">
-            <h1>{state.source.url || "Untitled source"}</h1>
-            <p className="page-subtitle">
-              {state.source.type} · added {new Date(state.source.created_at).toLocaleString()}
-            </p>
+            <h1>Choose a study material</h1>
+            <p className="page-subtitle">This link contains more than one saved material.</p>
           </div>
 
-          <h2>Documents ({state.documents.length})</h2>
           {state.documents.length === 0 ? (
-            <p className="empty">No documents saved from this source yet.</p>
+            <p className="empty">No study materials are available here. Return to your library.</p>
           ) : (
             <div className="card-grid">
               {state.documents.map((document) => (
-                <DocumentCard key={document.id} document={document} />
+                <Link key={document.id} to={`/app/material/${document.id}?mode=notes`} className="card card-link-wrap">
+                  <div className="card-title">{document.title.replace(/\.(pdf|docx|pptx)$/i, "") || "Untitled material"}</div>
+                  <div className="card-meta">Open study material →</div>
+                </Link>
               ))}
             </div>
           )}
