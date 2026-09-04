@@ -18,7 +18,8 @@ TutorActionType = Literal[
     "decrease_difficulty", "advance_to_related_concept",
     "give_worked_example", "show_process_visual", "show_diagram",
 ]
-VisualType = Literal["diagram", "process", "process_flow", "labeled_diagram", "relationship_map", "comparison", "sequence", "labeling", "ordering", "prediction", "staged_visual", "step_through"]
+VisualType = Literal["diagram", "process", "process_flow", "hierarchy", "causal_chain", "labeled_diagram", "relationship_map", "comparison", "sequence", "cycle", "spatial_structure", "state_transition", "timeline", "quantitative", "worked_derivation", "labeling", "ordering", "prediction", "staged_visual", "step_through"]
+AnimationOperation = Literal["highlight", "move", "appear", "disappear", "transform", "pulse", "connect", "flow", "change_value", "focus", "compare"]
 
 
 class VisualNode(BaseModel):
@@ -34,6 +35,13 @@ class VisualEdge(BaseModel):
     label: str | None = Field(default=None, max_length=80)
 
 
+class VisualAnimation(BaseModel):
+    operation: AnimationOperation
+    target_ids: list[str] = Field(alias="targetIds", min_length=1, max_length=8)
+    duration_ms: int = Field(default=700, alias="durationMs", ge=100, le=3000)
+    explanation: str | None = Field(default=None, max_length=240)
+
+
 class VisualSpec(BaseModel):
     type: VisualType
     title: str = Field(min_length=1, max_length=160)
@@ -41,6 +49,7 @@ class VisualSpec(BaseModel):
     nodes: list[VisualNode] = Field(default_factory=list, max_length=16)
     edges: list[VisualEdge] = Field(default_factory=list, max_length=24)
     stages: list[dict] = Field(default_factory=list, max_length=8)
+    animations: list[VisualAnimation] = Field(default_factory=list, max_length=16)
     answer_id: str | None = Field(default=None, alias="answerId")
     source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
@@ -52,8 +61,10 @@ class VisualSpec(BaseModel):
             raise ValueError("visual node ids must be unique")
         if any(edge.source not in node_ids or edge.target not in node_ids for edge in self.edges):
             raise ValueError("visual edges must reference known nodes")
-        if self.type in {"diagram", "process", "process_flow", "labeled_diagram", "relationship_map", "comparison", "sequence", "labeling", "ordering"} and not self.nodes:
+        if self.type in {"diagram", "process", "process_flow", "hierarchy", "causal_chain", "labeled_diagram", "relationship_map", "comparison", "sequence", "cycle", "spatial_structure", "state_transition", "timeline", "quantitative", "worked_derivation", "labeling", "ordering"} and not self.nodes:
             raise ValueError("structured visuals require nodes")
+        if any(target not in node_ids for animation in self.animations for target in animation.target_ids):
+            raise ValueError("visual animations must reference known nodes")
         return self
 
 

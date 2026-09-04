@@ -52,3 +52,17 @@ def test_visual_synthesis_maps_grounded_flow_to_process_flow():
     assert spec.type == "process_flow"
     assert spec.source_section_ids == ["section-1"]
     assert spec.edges[0].target == "b"
+
+
+def test_visual_synthesis_adds_meaningful_flow_animation_on_real_edge():
+    spec = synthesize_visual_spec({"kind": "flow", "title": "Signal path", "nodes": [{"id": "a", "label": "Detect", "detail": "A signal is detected."}, {"id": "b", "label": "Respond", "detail": "The response begins."}], "edges": [{"source": "a", "target": "b", "relation": "triggers"}]}, "Signals", ["s1"], ["b1"])
+    assert spec is not None
+    assert spec.animations[0].operation == "flow"
+    assert spec.animations[0].target_ids == ["a", "b"]
+
+
+def test_structure_visual_preserves_containment_relationships():
+    spec = synthesize_visual_spec({"kind": "structure", "title": "System", "root": {"id": "sys", "label": "System", "children": [{"id": "unit", "label": "Unit"}]}}, "System", ["s1"], [])
+    assert spec is not None
+    assert spec.type == "hierarchy"
+    assert [(edge.source, edge.target) for edge in spec.edges] == [("sys", "unit")]

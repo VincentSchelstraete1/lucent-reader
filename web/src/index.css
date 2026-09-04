@@ -236,11 +236,21 @@
 .structured-visual svg { width: 100%; height: auto; display: block; }
 .structured-visual-edge line { stroke: #879184; stroke-width: 1.5; color: #879184; }
 .structured-visual-edge text { fill: #74796f; font-size: 10px; text-anchor: middle; }
+.structured-visual-divider { stroke: #d9d2c6; stroke-dasharray: 3 4; }
+.structured-visual-column-label { fill: #687067; font-size: 11px; text-anchor: middle; }
 .structured-visual-node { cursor: pointer; outline: none; }
 .structured-visual-node rect { fill: #f2efe6; stroke: #9ea89d; stroke-width: 1.25; }
 .structured-visual-node:hover rect, .structured-visual-node:focus rect, .structured-visual-node.selected rect, .structured-visual-node.active rect { fill: #e5eee5; stroke: #44745a; }
 .structured-visual-node text { fill: #30342f; font-size: 12px; pointer-events: none; }
+.structured-visual-node .structured-visual-node-detail { fill: #657067; font-size: 9px; }
 .structured-visual-detail { margin: .4rem 0 0; font-size: .88rem; color: #4f554d; }
+.structured-visual-motion-path { fill: none; stroke: #9bb7a2; stroke-width: 1.5; stroke-dasharray: 4 5; opacity: .7; }
+.structured-visual-flow-dot { fill: #4d8764; opacity: .9; }
+.structured-visual-node.active rect { animation: lucent-node-focus 1.4s ease-in-out infinite alternate; }
+.structured-visual-node.comparison-focus rect { animation: lucent-node-compare 2.8s ease-in-out infinite alternate; }
+@keyframes lucent-node-focus { from { stroke-width: 1.25; } to { stroke-width: 3; } }
+@keyframes lucent-node-compare { 0%, 40% { fill: #e5eee5; stroke: #44745a; } 60%, 100% { fill: #f2efe6; stroke: #9ea89d; } }
+@media (prefers-reduced-motion: reduce) { .structured-visual-node.active rect, .structured-visual-node.comparison-focus rect { animation: none; } .structured-visual-flow-dot { display: none; } }
 .structured-visual-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .65rem; font-size: .82rem; color: #687067; }
 .structured-visual-controls button { border: 1px solid #c7cfc5; background: transparent; border-radius: 5px; padding: .3rem .55rem; color: #3e624a; }
 .axis { stroke: #b7b2a6; stroke-width: 1; }

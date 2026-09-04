@@ -31,25 +31,45 @@ def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], 
     """Translate grounded SectionNote structure into the constrained visual DSL."""
     kind = str(component.get("kind", ""))
     raw_nodes = component.get("nodes") or component.get("items") or []
+    generated_edges: list[dict] = []
     if kind == "structure" and not raw_nodes:
         root = component.get("root") or {}
-        raw_nodes = [root] + list(root.get("children", [])) if root else []
+        # Flatten nested containment into explicit relationships. This gives
+        # the renderer enough meaning to show composition, not just indentation.
+        def flatten(item: dict, parent: str | None = None) -> None:
+            if not isinstance(item, dict) or not item.get("id"):
+                return
+            raw_nodes.append(item)
+            if parent:
+                generated_edges.append({"source": parent, "target": str(item["id"]), "label": "contains"})
+            for child in item.get("children", []) or []:
+                flatten(child, str(item["id"]))
+        if root:
+            flatten(root)
     nodes = []
     for item in raw_nodes[:16]:
         if isinstance(item, dict) and item.get("id") and (item.get("label") or item.get("name")):
             values = item.get("values") if isinstance(item.get("values"), dict) else {}
             value_detail = "; ".join(f"{key}: {value}" for key, value in list(values.items())[:4])
-            nodes.append({"id": str(item["id"]), "label": _clean(item.get("label") or item.get("name")), "detail": _clean(item.get("detail") or item.get("description") or value_detail) or None, "group": _clean(item.get("group")) or None})
+            group = _clean(item.get("group")) or None
+            if kind == "comparison" and not group:
+                # Comparisons are two semantic sides, not one vertical list.
+                group = "left" if len(nodes) < max(1, len(raw_nodes) // 2) else "right"
+            nodes.append({"id": str(item["id"]), "label": _clean(item.get("label") or item.get("name")), "detail": _clean(item.get("detail") or item.get("description") or value_detail) or None, "group": group})
     if len(nodes) < 2:
         return None
     edges = []
-    for edge in (component.get("edges") or [])[:24]:
+    for edge in ((component.get("edges") or []) + generated_edges)[:24]:
         if isinstance(edge, dict) and edge.get("source") and edge.get("target"):
             edges.append({"source": str(edge["source"]), "target": str(edge["target"]), "label": _clean(edge.get("label") or edge.get("relation")) or None})
     valid_ids = {node["id"] for node in nodes}; edges = [edge for edge in edges if edge["source"] in valid_ids and edge["target"] in valid_ids]
-    visual_type = {"flow": "process_flow", "relationship_map": "relationship_map", "comparison": "comparison", "structure": "labeled_diagram"}.get(kind, "diagram")
-    stages = [{"title": f"Focus on {node['label']}", "explanation": node.get("detail") or "Notice how this element connects to the others.", "activeNodeIds": [node["id"]]} for node in nodes[:8]] if visual_type in {"process_flow", "sequence", "staged_visual"} else []
-    return VisualSpec(type=visual_type, title=_clean(component.get("title") or title), purpose="See the relationships that make this concept work.", nodes=nodes, edges=edges, stages=stages, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
+    structure_type = str(component.get("structureType", "hierarchy"))
+    visual_type = {"flow": "process_flow", "relationship_map": "relationship_map", "comparison": "comparison", "structure": "hierarchy" if structure_type == "hierarchy" else "spatial_structure"}.get(kind, "diagram")
+    stages = [{"title": f"Focus on {node['label']}", "explanation": node.get("detail") or "Notice how this element connects to the others.", "activeNodeIds": [node["id"]]} for node in nodes[:8]] if visual_type in {"process_flow", "comparison"} else []
+    animations = [{"operation": "flow", "targetIds": [edge["source"], edge["target"]], "durationMs": 850, "explanation": edge.get("label") or "Follow the relationship."} for edge in edges[:16]] if visual_type in {"process_flow", "causal_chain", "sequence", "hierarchy", "spatial_structure"} else []
+    if visual_type == "comparison" and len(nodes) >= 2:
+        animations = [{"operation": "compare", "targetIds": [node["id"] for node in nodes[:2]], "durationMs": 1400, "explanation": "Compare the two mechanisms side by side."}]
+    return VisualSpec(type=visual_type, title=_clean(component.get("title") or title), purpose="See the relationships that make this concept work.", nodes=nodes, edges=edges, stages=stages, animations=animations, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
 
 
 def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPlan:
