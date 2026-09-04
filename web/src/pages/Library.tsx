@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { api, type Document, type Note, type Source } from "../api/client"
+import { api, type Document, type Note, type Quiz, type Source } from "../api/client"
 import { Skeleton } from "../components/Skeleton"
 
-type Material = { document: Document; source?: Source; note?: Note }
+type Material = { document: Document; source?: Source; note?: Note; quizzes: Quiz[] }
 type State = { status: "loading" | "error" | "loaded"; materials: Material[]; message?: string }
 type LibraryView = "library" | "learn" | "flashcards" | "quiz"
 
@@ -13,6 +13,10 @@ function materialType(material: Material) {
   if (title.endsWith(".docx")) return "DOCX"
   if (title.endsWith(".pptx")) return "PPTX"
   return material.source?.type === "upload" ? "Document" : "Website"
+}
+
+function materialGlyph(type: string) {
+  return type === "Website" ? "◎" : type === "PPTX" ? "▤" : "▧"
 }
 
 export function formatMaterialTitle(title: string) {
@@ -26,11 +30,11 @@ function materialTitle(material: Material) {
   return formatMaterialTitle(material.document.title)
 }
 
-function noteSummary(note?: Note) {
+function noteSummary(note?: Note, quizzes: Quiz[] = []) {
   if (!note) return "Ready to create notes"
   try {
     const payload = JSON.parse(note.content) as { sectionNotes?: unknown[] }
-    return `${payload.sectionNotes?.length ?? 0} sections · Notes ready`
+    return `${payload.sectionNotes?.length ?? 0} sections · Notes ready${quizzes.length ? " · Quiz ready" : ""}`
   } catch { return "Notes ready" }
 }
 
@@ -69,11 +73,13 @@ export function Library() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.getDocuments(), api.getSources(), api.getNotes()]).then(([documents, sources, notes]) => {
+    Promise.all([api.getDocuments(), api.getSources(), api.getNotes()]).then(async ([documents, sources, notes]) => {
       if (cancelled) return
       const bySource = new Map(sources.map((source) => [source.id, source]))
       const byDocument = new Map(notes.filter((note) => note.content_type === "section_note").map((note) => [note.document_id, note]))
-      setState({ status: "loaded", materials: documents.map((document) => ({ document, source: bySource.get(document.source_id), note: byDocument.get(document.id) })) })
+      const quizEntries = await Promise.all(documents.map(async (document) => [document.id, await api.getQuizzesForDocument(document.id).catch(() => [])] as const))
+      const byQuiz = new Map(quizEntries)
+      if (!cancelled) setState({ status: "loaded", materials: documents.map((document) => ({ document, source: bySource.get(document.source_id), note: byDocument.get(document.id), quizzes: byQuiz.get(document.id) ?? [] })) })
     }).catch((error) => { if (!cancelled) setState({ status: "error", materials: [], message: error instanceof Error ? error.message : "Could not load your library" }) })
     return () => { cancelled = true }
   }, [])
@@ -81,7 +87,7 @@ export function Library() {
   const materials = useMemo(() => state.materials.filter((material) => {
     if (view === "learn" && noteExperienceCount(material.note) === 0) return false
     if (view === "flashcards" && !material.note) return false
-    if (view === "quiz" && !material.note) return false
+    if (view === "quiz" && material.quizzes.length === 0) return false
     const haystack = `${materialTitle(material)} ${material.source?.url ?? ""}`.toLowerCase()
     const matchesQuery = !query.trim() || haystack.includes(query.trim().toLowerCase())
     const type = materialType(material)
@@ -115,7 +121,7 @@ export function Library() {
     {state.status === "error" && <p className="error">Could not load your study materials: {state.message}</p>}
     {state.status === "loaded" && materials.length === 0 && (state.materials.length === 0 ? <section className="library-empty"><h2>Your library is empty</h2><p>Add a lecture, article, or document and Lucent will turn it into a learning experience.</p><Link className="btn btn-primary" to="/app/notes">+ Add your first material</Link></section> : <section className="library-empty"><h2>No materials match{query ? ` “${query}”` : " this filter"}</h2><p>Try a different search or filter.</p>{(query || filter !== "all") && <button className="btn btn-secondary" type="button" onClick={() => { setQuery(""); setFilter("all") }}>Clear search and filters</button>}</section>)}
     {actionError && <p className="error" role="alert">{actionError}</p>}
-    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>{view === "library" ? "All materials" : "Study materials"}</h2>{materials.map((material) => <div className="material-row" key={material.document.id}><Link className="material-row-main" to={`/app/material/${material.document.id}${view === "learn" ? "?mode=learn" : view === "flashcards" ? "?mode=flashcards" : "?mode=notes"}`}><div><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note)}{noteExperienceCount(material.note) > 0 && <span> · {noteExperienceCount(material.note)} walkthrough{noteExperienceCount(material.note) === 1 ? "" : "s"}</span>}</div></Link><div className="material-actions"><button type="button" className="material-menu-button" aria-label={`Actions for ${materialTitle(material)}`} aria-expanded={openMenu === material.document.id} onClick={() => setOpenMenu(openMenu === material.document.id ? null : material.document.id)} onKeyDown={(event) => { if (event.key === "Escape") setOpenMenu(null) }}>•••</button>{openMenu === material.document.id && <div className="material-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setEditingId(material.document.id); setEditingTitle(material.document.title.replace(/\.(pdf|docx|pptx)$/i, "")); setOpenMenu(null) }}>Rename</button>{material.source?.url && materialType(material) === "Website" && <a href={material.source.url} target="_blank" rel="noreferrer" role="menuitem">Open original source</a>}<button type="button" role="menuitem" onClick={() => { setDeleteTarget(material); setOpenMenu(null) }}>Delete</button></div>}</div>{editingId === material.document.id && <form className="material-rename" onSubmit={(event) => { event.preventDefault(); void renameMaterial(material) }}><label htmlFor={`rename-${material.document.id}`}>Rename material</label><input id={`rename-${material.document.id}`} value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} autoFocus /><button type="submit" className="btn btn-primary">Save</button><button type="button" className="btn btn-secondary" onClick={() => setEditingId(null)}>Cancel</button></form>}</div>)}</section>}
+    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>{view === "library" ? "All materials" : "Study materials"}</h2>{materials.map((material) => <div className="material-row" key={material.document.id}><Link className="material-row-main" to={`/app/material/${material.document.id}${view === "learn" ? "?mode=learn" : view === "flashcards" ? "?mode=flashcards" : "?mode=notes"}`}><span className="material-glyph" aria-hidden="true">{materialGlyph(materialType(material))}</span><div className="material-main-copy"><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note, material.quizzes)}{noteExperienceCount(material.note) > 0 && <span> · {noteExperienceCount(material.note)} walkthrough{noteExperienceCount(material.note) === 1 ? "" : "s"}</span>}</div></Link><div className="material-actions"><button type="button" className="material-menu-button" aria-label={`Actions for ${materialTitle(material)}`} aria-expanded={openMenu === material.document.id} onClick={() => setOpenMenu(openMenu === material.document.id ? null : material.document.id)} onKeyDown={(event) => { if (event.key === "Escape") setOpenMenu(null) }}>•••</button>{openMenu === material.document.id && <div className="material-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setEditingId(material.document.id); setEditingTitle(material.document.title.replace(/\.(pdf|docx|pptx)$/i, "")); setOpenMenu(null) }}>Rename</button>{material.source?.url && materialType(material) === "Website" && <a href={material.source.url} target="_blank" rel="noreferrer" role="menuitem">Open original source</a>}<button type="button" role="menuitem" onClick={() => { setDeleteTarget(material); setOpenMenu(null) }}>Delete</button></div>}</div>{editingId === material.document.id && <form className="material-rename" onSubmit={(event) => { event.preventDefault(); void renameMaterial(material) }}><label htmlFor={`rename-${material.document.id}`}>Rename material</label><input id={`rename-${material.document.id}`} value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} autoFocus /><button type="submit" className="btn btn-primary">Save</button><button type="button" className="btn btn-secondary" onClick={() => setEditingId(null)}>Cancel</button></form>}</div>)}</section>}
     {deleteTarget && <div className="dialog-backdrop" role="presentation"><section className="library-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-material-title"><h2 id="delete-material-title">Delete “{materialTitle(deleteTarget)}”?</h2><p>This removes the material and its Lucent study content.</p><div><button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button><button type="button" className="btn btn-danger" onClick={() => void deleteMaterial()}>Delete</button></div></section></div>}
   </div>
 }

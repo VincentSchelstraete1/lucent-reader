@@ -22,6 +22,8 @@
 .material-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; border-top: 1px solid #d8d2c5; padding: .8rem .25rem; color: inherit; }
 .material-row:hover { background: rgba(238,242,232,.55); }
 .material-row-main { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.material-glyph { display: grid; flex: 0 0 2rem; place-items: center; width: 2rem; height: 2rem; border: 1px solid #cdd4c8; border-radius: 6px; color: #58735d; font-size: 1.1rem; }
+.material-main-copy { flex: 1; min-width: 0; }
 .material-row-main:focus-visible { background: rgba(238,242,232,.7); outline: 2px solid #4f806c; outline-offset: 2px; }
 .material-row h3 { margin: 0; font-size: 1.05rem; font-weight: 600; }
 .material-row p, .material-status { margin: .25rem 0 0; color: #6c746e; font-size: .82rem; }
