@@ -229,6 +229,8 @@
 .step-mechanism { max-width: 760px; }
 .step-goal { color: #55544e; max-width: 65ch; }
 .step-visual { background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: .75rem 1rem .5rem; }
+.step-visual > .structured-visual-expand { display: block; margin: 0 0 .5rem auto; }
+.step-visual-expanded { position: fixed; inset: 3vh 3vw; z-index: 50; overflow: auto; box-shadow: 0 18px 60px rgba(38, 40, 34, .24); padding: 1.25rem; }
 .step-visual svg { width: 100%; height: auto; display: block; }
 .mechanism-scene svg { width: 100%; height: auto; display: block; }
 .mechanism-region { stroke: #9bb3bd; stroke-width: 1.5; }
@@ -241,6 +243,10 @@
 .structured-visual { margin: 1rem 0; padding: 1rem; border: 1px solid #d8d2c5; border-radius: 10px; background: #fbfaf6; color: #34352f; }
 .structured-visual-heading { display: flex; gap: .75rem; align-items: baseline; margin-bottom: .45rem; }
 .structured-visual-heading span { color: #6c7168; font-size: .82rem; }
+.structured-visual-expand, .structured-visual-close { margin-left: auto; border: 1px solid #c7cfc5; background: transparent; color: #3e624a; border-radius: 5px; padding: .3rem .55rem; font-size: .78rem; }
+.structured-visual-modal { position: fixed; inset: 0; z-index: 40; background: rgba(36, 39, 34, .48); display: grid; place-items: center; padding: 3vw; }
+.structured-visual-modal-panel { width: min(1100px, 96vw); max-height: 92vh; overflow: auto; background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: 1.25rem; box-shadow: 0 18px 60px rgba(38, 40, 34, .2); }
+.structured-visual-modal-panel .structured-visual { border: 0; margin: 0; padding: 0; background: transparent; }
 .structured-visual svg { width: 100%; height: auto; display: block; }
 .structured-visual-edge line { stroke: #879184; stroke-width: 1.5; color: #879184; }
 .structured-visual-edge text { fill: #74796f; font-size: 10px; text-anchor: middle; }

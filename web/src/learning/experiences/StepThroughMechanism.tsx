@@ -196,12 +196,14 @@ function VisualUnavailable({ reason }: { reason: string }) {
 export function StepThroughMechanism({ data }: { data: StepThroughMechanismData }) {
   const [stage, setStage] = useState(0)
   const [choice, setChoice] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const current = data.stages[stage]
   const vectors = current.vectors ?? []
   const unavailable = visualUnavailableReason(data, current)
   return <section className="step-mechanism" aria-label={data.learningGoal}>
     <p className="step-goal">Learning goal: {data.learningGoal}</p>
-    <div className="step-visual" aria-live="polite">
+    <div className={`step-visual${expanded ? " step-visual-expanded" : ""}`} aria-live="polite">
+      <button type="button" className="structured-visual-expand" onClick={() => setExpanded((value) => !value)} aria-label={`${expanded ? "Close" : "Expand"} visual`}>{expanded ? "Close" : "Expand visual"}</button>
       {unavailable ? <VisualUnavailable reason={unavailable} /> : data.sceneType === "mechanism_scene" && current.visual?.type === "mechanism_scene" ? <MechanismSceneVisual scene={current.visual} stage={stage} /> : data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} entities={data.entities} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
