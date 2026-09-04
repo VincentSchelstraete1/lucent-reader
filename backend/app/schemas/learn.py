@@ -18,7 +18,7 @@ TutorActionType = Literal[
     "decrease_difficulty", "advance_to_related_concept",
     "give_worked_example", "show_process_visual", "show_diagram",
 ]
-VisualType = Literal["diagram", "process", "labeling", "ordering", "prediction", "step_through"]
+VisualType = Literal["diagram", "process", "process_flow", "labeled_diagram", "relationship_map", "comparison", "sequence", "labeling", "ordering", "prediction", "staged_visual", "step_through"]
 
 
 class VisualNode(BaseModel):
@@ -42,6 +42,8 @@ class VisualSpec(BaseModel):
     edges: list[VisualEdge] = Field(default_factory=list, max_length=24)
     stages: list[dict] = Field(default_factory=list, max_length=8)
     answer_id: str | None = Field(default=None, alias="answerId")
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
 
     @model_validator(mode="after")
     def references_are_valid(self):
@@ -50,7 +52,7 @@ class VisualSpec(BaseModel):
             raise ValueError("visual node ids must be unique")
         if any(edge.source not in node_ids or edge.target not in node_ids for edge in self.edges):
             raise ValueError("visual edges must reference known nodes")
-        if self.type in {"diagram", "process", "labeling", "ordering"} and not self.nodes:
+        if self.type in {"diagram", "process", "process_flow", "labeled_diagram", "relationship_map", "comparison", "sequence", "labeling", "ordering"} and not self.nodes:
             raise ValueError("structured visuals require nodes")
         return self
 

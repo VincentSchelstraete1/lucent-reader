@@ -1,4 +1,4 @@
-from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step
+from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec
 from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec
 
 
@@ -44,3 +44,11 @@ def test_structured_visual_spec_rejects_unknown_edge_references():
     except ValueError:
         return
     raise AssertionError("visual edges must be validated against node ids")
+
+
+def test_visual_synthesis_maps_grounded_flow_to_process_flow():
+    spec = synthesize_visual_spec({"kind": "flow", "title": "Signal path", "nodes": [{"id": "a", "label": "Detect"}, {"id": "b", "label": "Respond"}], "edges": [{"source": "a", "target": "b", "relation": "triggers"}]}, "Signals", ["section-1"], ["block-1"])
+    assert spec is not None
+    assert spec.type == "process_flow"
+    assert spec.source_section_ids == ["section-1"]
+    assert spec.edges[0].target == "b"

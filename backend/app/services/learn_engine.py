@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from app.schemas.learn import (
-    LearnEvaluation, LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep,
+    LearnEvaluation, LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep, VisualSpec,
     OrderingStep, PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep,
 )
 
@@ -25,6 +25,31 @@ def _components(section: dict) -> list[dict]:
 
 def _source_ids(section: dict) -> tuple[list[str], list[str]]:
     return list(section.get("id") and [str(section["id"])] or []), [str(item) for item in section.get("sourceBlockIds", [])]
+
+
+def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], block_ids: list[str]) -> VisualSpec | None:
+    """Translate grounded SectionNote structure into the constrained visual DSL."""
+    kind = str(component.get("kind", ""))
+    raw_nodes = component.get("nodes") or component.get("items") or []
+    if kind == "structure" and not raw_nodes:
+        root = component.get("root") or {}
+        raw_nodes = [root] + list(root.get("children", [])) if root else []
+    nodes = []
+    for item in raw_nodes[:16]:
+        if isinstance(item, dict) and item.get("id") and (item.get("label") or item.get("name")):
+            values = item.get("values") if isinstance(item.get("values"), dict) else {}
+            value_detail = "; ".join(f"{key}: {value}" for key, value in list(values.items())[:4])
+            nodes.append({"id": str(item["id"]), "label": _clean(item.get("label") or item.get("name")), "detail": _clean(item.get("detail") or item.get("description") or value_detail) or None, "group": _clean(item.get("group")) or None})
+    if len(nodes) < 2:
+        return None
+    edges = []
+    for edge in (component.get("edges") or [])[:24]:
+        if isinstance(edge, dict) and edge.get("source") and edge.get("target"):
+            edges.append({"source": str(edge["source"]), "target": str(edge["target"]), "label": _clean(edge.get("label") or edge.get("relation")) or None})
+    valid_ids = {node["id"] for node in nodes}; edges = [edge for edge in edges if edge["source"] in valid_ids and edge["target"] in valid_ids]
+    visual_type = {"flow": "process_flow", "relationship_map": "relationship_map", "comparison": "comparison", "structure": "labeled_diagram"}.get(kind, "diagram")
+    stages = [{"title": f"Focus on {node['label']}", "explanation": node.get("detail") or "Notice how this element connects to the others.", "activeNodeIds": [node["id"]]} for node in nodes[:8]] if visual_type in {"process_flow", "sequence", "staged_visual"} else []
+    return VisualSpec(type=visual_type, title=_clean(component.get("title") or title), purpose="See the relationships that make this concept work.", nodes=nodes, edges=edges, stages=stages, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
 
 
 def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPlan:
@@ -58,7 +83,11 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         steps: list[LearnStep] = []
 
         if goal in {"understand", "exam"}:
-            steps.append(TeachStep(id=f"{section.get('id', 'section')}-teach", type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            refresher = TeachStep(id=f"{section.get('id', 'section')}-teach", type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
+            visual_candidate = next((c for c in comps if c.get("kind") in {"flow", "structure", "relationship_map", "comparison"}), None)
+            if visual_candidate:
+                refresher.visual_spec = synthesize_visual_spec(visual_candidate, title, section_ids, block_ids)
+            steps.append(refresher)
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))

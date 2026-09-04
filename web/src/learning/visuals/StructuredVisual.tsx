@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 
 export type StructuredVisualSpec = {
-  type: "diagram" | "process" | "labeling" | "ordering" | "prediction" | "step_through"
+  type: "diagram" | "process" | "process_flow" | "labeled_diagram" | "relationship_map" | "comparison" | "sequence" | "labeling" | "ordering" | "prediction" | "staged_visual" | "step_through"
   title: string
   purpose: string
   nodes: Array<{ id: string; label: string; detail?: string | null; group?: string | null }>
