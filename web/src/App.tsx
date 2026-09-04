@@ -17,6 +17,11 @@ function LegacyDocumentRedirect() {
   return <Navigate to={`/app/material/${documentId}?mode=notes`} replace />
 }
 
+function SidebarIcon({ name }: { name: "library" | "learn" | "cards" | "quiz" }) {
+  const paths = { library: <><path d="M3 5.5h6l1.5 2H21v11H3z" /><path d="M3 8h18" /></>, learn: <><path d="M3 5.5c3.4-.8 6 .2 9 2.2v11c-3-2-5.6-3-9-2.2z" /><path d="M21 5.5c-3.4-.8-6 .2-9 2.2v11c3-2 5.6-3 9-2.2z" /></>, cards: <><rect x="4" y="6" width="14" height="11" rx="1.5" /><path d="M7 4h13v11" /></>, quiz: <><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.5a2.3 2.3 0 1 1 3.8 1.7c-1 .7-1.6 1.1-1.6 2.3" /><path d="M12 16.2h.01" /></> }[name]
+  return <svg className="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
+}
+
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
 function AppLayout() {
@@ -25,10 +30,10 @@ function AppLayout() {
       <aside className="app-sidebar" aria-label="Study navigation">
         <Link to="/app" className="brand" data-tour="app-brand">Lucent</Link>
         <nav className="app-sidebar-nav">
-          <NavLink to="/app" end className={({ isActive }) => isActive ? "active" : ""}>Library</NavLink>
-          <NavLink to="/app?view=learn" className={({ isActive }) => isActive ? "active" : ""}>Learn</NavLink>
-          <NavLink to="/app?view=flashcards" className={({ isActive }) => isActive ? "active" : ""}>Flashcards</NavLink>
-          <NavLink to="/app?view=quiz" className={({ isActive }) => isActive ? "active" : ""}>Quiz</NavLink>
+          <NavLink to="/app" end className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="library" />Library</NavLink>
+          <NavLink to="/app?view=learn" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="learn" />Learn</NavLink>
+          <NavLink to="/app?view=flashcards" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="cards" />Flashcards</NavLink>
+          <NavLink to="/app?view=quiz" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="quiz" />Quiz</NavLink>
         </nav>
       </aside>
       <main><Outlet /></main>
