@@ -291,7 +291,9 @@ def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *,
         "of the document below. Prefer central concepts, mechanisms, relationships, and application over wording trivia. "
         "Each question needs exactly 4 answer choices, the "
         "0-based index of the correct choice, and a short explanation of why that "
-        f"answer is correct. {section_instruction}Base every question only on the document's content.\n\n"
+        f"answer is correct. {section_instruction}Base every question and explanation only on the document's content. "
+        "Do not invent facts, add background knowledge, or fabricate quotations. Do not write phrases such as 'the document explicitly states' unless the supplied text contains those exact words. "
+        "Keep explanations to 1–2 concise sentences that explain the reasoning, not a restatement of the entire source.\n\n"
         f"Document title: {title}\n\n"
         f"Document content:\n{content}"
     )
