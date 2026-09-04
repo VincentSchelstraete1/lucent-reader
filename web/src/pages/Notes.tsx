@@ -5,6 +5,13 @@ import { api, type DocumentIngestionResult, type ProgressiveSection, type Sectio
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
 
+function SupportingText({ text }: { text: string }) {
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
+  if (text.length < 220 || sentences.length < 2) return <p>{text}</p>
+  const lead = sentences[0]
+  return <details className="note-supporting"><summary>{lead}</summary><p>{sentences.slice(1).join(" ")}</p></details>
+}
+
 function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
   return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type }
 }
@@ -60,7 +67,7 @@ function ComponentView({ component }: { component: SectionNote["components"][num
     return <div className="note-example">{c.problem && <p className="note-example-problem">{c.problem}</p>}{c.equation && <code className="note-equation">{c.equation}</code>}{(c.knownValues ?? []).length > 0 && <dl className="note-values">{c.knownValues.map((value: any, i: number) => <Fragment key={i}><dt>{String(value.name ?? value.symbol ?? "Value")}</dt><dd>{String(value.value ?? value.meaning ?? value.description ?? "")}</dd></Fragment>)}</dl>}<ol>{steps.slice(0, visible).map((step: any, i: number) => <li key={String(step.order ?? i)}>{String(step.description ?? step.label ?? step)}</li>)}</ol>{steps.length > 0 && <button className="note-reveal" type="button" onClick={() => setSelected(visible >= steps.length ? null : visible)}>{visible >= steps.length ? "Start again" : visible === 0 ? "Reveal the reasoning" : "Reveal next step"}</button>}{visible >= steps.length && c.result && <p><strong>Result:</strong> {c.result}</p>}{visible >= steps.length && c.interpretation && <p><strong>Meaning:</strong> {c.interpretation}</p>}</div>
   }
   if (c.kind === "callout") return <aside className={`note-callout note-callout-${c.calloutType ?? "important"}`}><p>{c.text}</p>{c.whyItMatters && <small>{c.whyItMatters}</small>}</aside>
-  return <p>{c.text || c.takeaway || c.definition}</p>
+  return <SupportingText text={String(c.text || c.takeaway || c.definition || "")} />
 }
 
 export function NoteView({ notes }: { notes: SectionNote[] }) {

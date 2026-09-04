@@ -30,6 +30,10 @@
 .flow-child { display: grid; justify-items: center; min-width: 0; position: relative; z-index: 1; }
 .flow-split > .flow-child { flex: 1 1 0; }
 .note-detail { margin: .35rem 0 .5rem 1rem; color: #55544e; }
+.note-supporting { margin: 0; color: #55544e; }
+.note-supporting summary { cursor: pointer; }
+.note-supporting summary::marker { color: #58735d; }
+.note-supporting p { margin: .45rem 0 0; }
 .note-relationships { display: grid; gap: .55rem; }
 .note-relationship button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(6rem, .7fr) minmax(0, 1fr); align-items: center; gap: .65rem; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; cursor: pointer; }
 .note-relationship button > span:first-child, .note-relationship button > span:last-child { border: 1px solid #9eaa9f; border-radius: 8px; background: #fbfaf6; padding: .55rem .65rem; font-weight: 600; }

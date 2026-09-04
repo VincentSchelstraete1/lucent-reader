@@ -47,4 +47,14 @@ describe("SectionNote product rendering", () => {
     expect(html).toContain("Fetch block")
     expect(html).not.toContain("private-block-id")
   })
+
+  it("keeps long supporting prose behind progressive disclosure", () => {
+    const note: SectionNote = {
+      id: "section-explanation", title: "Energy", bigIdea: "Energy changes form.", learningGoals: [], keyTakeaways: [], sourceBlockIds: ["b"], omittedNoise: [],
+      components: [{ kind: "explanation", title: "Why it matters", text: "Energy changes form in an isolated system. Friction transfers some mechanical energy to heat. This makes the visible motion gradually decrease. The same conservation principle explains why the total remains constant even as the observable movement changes over time.", sourceBlockIds: ["b"], nodes: [], edges: [], items: [], dimensions: [], steps: [] }],
+    }
+    const html = renderToStaticMarkup(createElement(NoteView, { notes: [note] }))
+    expect(html).toContain("<details")
+    expect(html).toContain("<summary>Energy changes form in an isolated system.")
+  })
 })
