@@ -42,9 +42,10 @@ def _concept_for(session: LearnSession, objective: dict) -> dict:
     found = next((item for item in _concepts(session) if item.get("conceptId") == objective.get("id")), None)
     return found or {"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": "NOT_SEEN", "attempts": 0, "correct": 0, "partiallyCorrect": 0, "incorrect": 0, "insufficientEvidence": 0, "hintsUsed": 0, "interactionTypes": [], "misconceptions": [], "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", [])}
 
-def _action_for(step, objective: dict, concept: dict, revisit: bool = False) -> TutorAction:
+def _action_for(step, objective: dict, concept: dict, revisit: bool = False, remediation: str | None = None) -> TutorAction:
     mapping = {"teach": "teach_concept", "multiple_choice": "ask_multiple_choice", "short_answer": "ask_free_response", "numeric": "ask_free_response", "prediction": "ask_prediction", "ordering": "ask_ordering", "problem": "ask_free_response", "walkthrough": "show_process_visual"}
-    action_type = "revisit_concept" if revisit else mapping.get(step.type, "teach_concept")
+    remediation_map = {"simplify": "decrease_difficulty", "example": "give_example", "prerequisite": "revisit_prerequisite", "change_modality": "give_analogy", "revisit": "revisit_concept"}
+    action_type = remediation_map.get(remediation or "") or ("revisit_concept" if revisit else mapping.get(step.type, "teach_concept"))
     if concept.get("state") in {"STRUGGLING", "NEEDS_REVIEW"} and not revisit and step.type not in {"teach", "walkthrough"}: action_type = "clarify_definition"
     return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale="Revisit the concept with a different validated check." if revisit else "A bounded teaching or checking action matched to current evidence.")
 
@@ -78,7 +79,7 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
         if session.step_index < len(steps):
             parsed = _parse_step(steps[session.step_index])
             if parsed:
-                hints_used = int((state.get("hints") or {}).get(parsed.id, 0)); current = public_step(parsed, hints_used); action = _action_for(parsed, objective, _concept_for(session, objective), bool(state.get("revisitMode")))
+                hints_used = int((state.get("hints") or {}).get(parsed.id, 0)); current = public_step(parsed, hints_used); action = _action_for(parsed, objective, _concept_for(session, objective), bool(state.get("revisitMode")), state.get("lastRemediation"))
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
     report = LearnSessionReport.model_validate(session.report) if session.report else None
     return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=feedback, feedbackKind=feedback_kind, hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason)
@@ -164,6 +165,7 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
         evaluation = diagnose_response(prompt=getattr(step, "prompt", ""), expected=expected, response=request.response, source_context=" ".join(objective.get("sourceSectionIds", [])), fallback=evaluation)
     concepts = [dict(c) for c in state.get("concepts", [])]; concept = next((c for c in concepts if c.get("conceptId") == objective["id"]), _concept_for(session, objective)); concept["attempts"] = int(concept.get("attempts", 0)) + (0 if evaluation.result == "insufficient_evidence" else 1); concept["lastSeen"] = _now(); concept["lastResult"] = evaluation.result
+    state["lastRemediation"] = evaluation.remediation_category if evaluation.result in {"incorrect", "partially_correct"} else None
     concept.setdefault("firstSeen", concept["lastSeen"])
     if step.type not in {"teach", "walkthrough"} and step.type not in concept.get("interactionTypes", []): concept.setdefault("interactionTypes", []).append(step.type)
     if evaluation.result == "correct": concept["correct"] = int(concept.get("correct", 0)) + 1; concept["immediateSuccess"] = True; concept["state"] = "DEMONSTRATED" if concept.get("delayedSuccess") or concept.get("priorEvidence", 0) else "DEVELOPING"
