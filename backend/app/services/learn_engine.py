@@ -42,10 +42,23 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         big_idea = _clean(section.get("bigIdea")) or title
         takeaways = [_clean(item) for item in section.get("keyTakeaways", []) if _clean(item)]
         comps = _components(section)
+        kinds = {str(c.get("kind")) for c in comps}
+        if "worked_example" in kinds or "equation" in kinds:
+            bottleneck = "Translate the represented quantities into an ordered procedure."
+        elif "flow" in kinds:
+            bottleneck = "Follow the causal or process transition from one step to the next."
+        elif "comparison" in kinds:
+            bottleneck = "Keep the distinguishing dimensions separate instead of blending them together."
+        elif "structure" in kinds:
+            bottleneck = "See how containment or composition changes the system."
+        elif "relationship_map" in kinds:
+            bottleneck = "Connect each relationship to the role it plays in the whole idea."
+        else:
+            bottleneck = "Identify the central idea and connect it to a concrete response."
         steps: list[LearnStep] = []
 
         if goal in {"understand", "exam"}:
-            steps.append(TeachStep(id=f"{section.get('id', 'section')}-teach", type="teach", title="Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(TeachStep(id=f"{section.get('id', 'section')}-teach", type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -70,7 +83,8 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-method", type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=["Start with the central relationship.", "Use the wording from the teaching point."], feedbackIncorrect="Use the stated relationship as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
-        objectives.append(LearningObjective(id=f"objective-{section.get('id', len(objectives))}", title=title, outcome=f"Understand and use {title}.", bottleneck="Connect the central idea to a response.", sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
+        outcome = {"understand": f"Explain how {title} works.", "solve": f"Apply {title} to a new step.", "memorize": f"Recall the essential facts about {title}.", "exam": f"Recognize and use {title} under exam conditions."}[goal]
+        objectives.append(LearningObjective(id=f"objective-{section.get('id', len(objectives))}", title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
 
     if not objectives:
         objectives = [LearningObjective(id="objective-overview", title="Material overview", outcome="Recall the main idea.", bottleneck="Identify what matters most.", steps=[TeachStep(id="overview-teach", type="teach", title="Main idea", content=_clean(note_payload.get("title")) or "Review the material.")])]
