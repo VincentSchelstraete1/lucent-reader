@@ -153,7 +153,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   const step = session.step
   const visualRef = step.visualRef
   const visualComponent = visualRef && typeof visualRef.componentIndex === "number" ? note.components[visualRef.componentIndex] as any : null
-  const requiresResponse = ["multiple_choice", "short_answer", "numeric", "problem", "prediction"].includes(step.type)
+  const requiresResponse = ["multiple_choice", "short_answer", "numeric", "problem", "prediction", "ordering"].includes(step.type)
   return <section className="learn-workspace learn-session" aria-labelledby="learn-heading">
     <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span aria-live="polite">Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span></div>
     <p className="note-kicker">{session.goal === "solve" ? "Problem solving" : session.goal === "memorize" ? "Retrieval practice" : "Focused learning"}</p>
