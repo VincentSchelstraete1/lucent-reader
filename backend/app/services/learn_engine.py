@@ -114,7 +114,7 @@ def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     visual_ref = data.get("visualRef")
     if data["type"] == "walkthrough":
         visual_ref = {"sectionId": data.get("sectionId"), "componentIndex": data.get("componentIndex")}
-    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=data.get("items", []), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=data.get("items", []), visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
 
 
 def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | None, ordered_ids: list[str] | None = None) -> LearnEvaluation:

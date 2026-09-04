@@ -18,6 +18,41 @@ TutorActionType = Literal[
     "decrease_difficulty", "advance_to_related_concept",
     "give_worked_example", "show_process_visual", "show_diagram",
 ]
+VisualType = Literal["diagram", "process", "labeling", "ordering", "prediction", "step_through"]
+
+
+class VisualNode(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    label: str = Field(min_length=1, max_length=100)
+    detail: str | None = Field(default=None, max_length=260)
+    group: str | None = Field(default=None, max_length=60)
+
+
+class VisualEdge(BaseModel):
+    source: str = Field(min_length=1, max_length=40)
+    target: str = Field(min_length=1, max_length=40)
+    label: str | None = Field(default=None, max_length=80)
+
+
+class VisualSpec(BaseModel):
+    type: VisualType
+    title: str = Field(min_length=1, max_length=160)
+    purpose: str = Field(min_length=1, max_length=240)
+    nodes: list[VisualNode] = Field(default_factory=list, max_length=16)
+    edges: list[VisualEdge] = Field(default_factory=list, max_length=24)
+    stages: list[dict] = Field(default_factory=list, max_length=8)
+    answer_id: str | None = Field(default=None, alias="answerId")
+
+    @model_validator(mode="after")
+    def references_are_valid(self):
+        node_ids = {node.id for node in self.nodes}
+        if len(node_ids) != len(self.nodes):
+            raise ValueError("visual node ids must be unique")
+        if any(edge.source not in node_ids or edge.target not in node_ids for edge in self.edges):
+            raise ValueError("visual edges must reference known nodes")
+        if self.type in {"diagram", "process", "labeling", "ordering"} and not self.nodes:
+            raise ValueError("structured visuals require nodes")
+        return self
 
 
 class LearnOption(BaseModel):
@@ -34,6 +69,7 @@ class LearnStepBase(BaseModel):
     feedback_incorrect: str | None = Field(default=None, alias="feedbackIncorrect", max_length=500)
     hints: list[str] = Field(default_factory=list, max_length=3)
     remediation: str | None = Field(default=None, max_length=500)
+    visual_spec: VisualSpec | None = Field(default=None, alias="visualSpec")
 
 
 class TeachStep(LearnStepBase):
@@ -214,6 +250,7 @@ class LearnStepView(BaseModel):
     content: str | None = None
     options: list[LearnOption] = Field(default_factory=list)
     items: list[LearnOption] = Field(default_factory=list)
+    visual_spec: VisualSpec | None = Field(default=None, alias="visualSpec")
     visual_ref: dict | None = Field(default=None, alias="visualRef")
     section_id: str | None = Field(default=None, alias="sectionId")
     component_index: int | None = Field(default=None, alias="componentIndex")

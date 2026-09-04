@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
+import { StructuredVisual } from "../learning/visuals/StructuredVisual"
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
@@ -154,7 +155,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   const visualRef = step.visualRef
   const visualComponent = visualRef && typeof visualRef.componentIndex === "number" ? note.components[visualRef.componentIndex] as any : null
   const requiresResponse = ["multiple_choice", "short_answer", "numeric", "problem", "prediction", "ordering"].includes(step.type)
-  return <section className="learn-workspace learn-session" aria-labelledby="learn-heading">
+  return <section className="learn-workspace learn-session" aria-labelledby="learn-heading">{step.visualSpec && <StructuredVisual spec={step.visualSpec} />}
     <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span aria-live="polite">Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span></div>
     <p className="note-kicker">{session.goal === "solve" ? "Problem solving" : session.goal === "memorize" ? "Retrieval practice" : "Focused learning"}</p>
     <h2 id="learn-heading">{session.objectiveTitle ?? note.title}</h2>

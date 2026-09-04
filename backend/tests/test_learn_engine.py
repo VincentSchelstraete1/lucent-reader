@@ -1,5 +1,5 @@
 from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step
-from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep
+from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec
 
 
 def _note():
@@ -36,3 +36,11 @@ def test_ordering_evaluation_reports_partial_understanding():
     evaluation = evaluate_step(step, response=None, option_id=None, ordered_ids=["a", "c", "b"])
     assert evaluation.result == "partially_correct"
     assert evaluation.remediation_category == "simplify"
+
+
+def test_structured_visual_spec_rejects_unknown_edge_references():
+    try:
+        VisualSpec(type="diagram", title="Map", purpose="Connect ideas", nodes=[{"id": "a", "label": "A"}], edges=[{"source": "a", "target": "missing"}])
+    except ValueError:
+        return
+    raise AssertionError("visual edges must be validated against node ids")

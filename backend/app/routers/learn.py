@@ -18,6 +18,7 @@ from app.models.note import Note
 from app.models.source import Source
 from app.schemas.learn import ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step
+from app.services.learn_tutor import diagnose_response
 
 router = APIRouter()
 STEP_ADAPTER = TypeAdapter(LearnStep)
@@ -158,7 +159,11 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     objective = session.plan["objectives"][session.objective_index]; step = _parse_step(objective["steps"][session.step_index])
     if not step: session.step_index += 1; db.commit(); return _session_payload(session, feedback="That step was skipped because it was unavailable.", feedback_kind="info")
     state = dict(session.state or {}); attempts = dict(state.get("attempts") or {}); attempt_number = int(attempts.get(step.id, 0)) + 1; attempts[step.id] = attempt_number; state["attempts"] = attempts
-    evaluation = evaluate_step(step, response=request.response, option_id=request.option_id, ordered_ids=request.ordered_ids); concepts = [dict(c) for c in state.get("concepts", [])]; concept = next((c for c in concepts if c.get("conceptId") == objective["id"]), _concept_for(session, objective)); concept["attempts"] = int(concept.get("attempts", 0)) + (0 if evaluation.result == "insufficient_evidence" else 1); concept["lastSeen"] = _now(); concept["lastResult"] = evaluation.result
+    evaluation = evaluate_step(step, response=request.response, option_id=request.option_id, ordered_ids=request.ordered_ids)
+    if request.response and step.type in {"short_answer", "problem", "numeric"}:
+        expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
+        evaluation = diagnose_response(prompt=getattr(step, "prompt", ""), expected=expected, response=request.response, source_context=" ".join(objective.get("sourceSectionIds", [])), fallback=evaluation)
+    concepts = [dict(c) for c in state.get("concepts", [])]; concept = next((c for c in concepts if c.get("conceptId") == objective["id"]), _concept_for(session, objective)); concept["attempts"] = int(concept.get("attempts", 0)) + (0 if evaluation.result == "insufficient_evidence" else 1); concept["lastSeen"] = _now(); concept["lastResult"] = evaluation.result
     concept.setdefault("firstSeen", concept["lastSeen"])
     if step.type not in {"teach", "walkthrough"} and step.type not in concept.get("interactionTypes", []): concept.setdefault("interactionTypes", []).append(step.type)
     if evaluation.result == "correct": concept["correct"] = int(concept.get("correct", 0)) + 1; concept["immediateSuccess"] = True; concept["state"] = "DEMONSTRATED" if concept.get("delayedSuccess") or concept.get("priorEvidence", 0) else "DEVELOPING"
