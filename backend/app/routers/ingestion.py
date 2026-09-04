@@ -141,6 +141,7 @@ def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> Pd
     payload = json.dumps({
         "filename": response.filename,
         "sourceType": response.source_type,
+        "teachingDepth": response.teaching_depth,
         "sectionNotes": [note.model_dump(by_alias=True) for note in response.section_notes],
     })
     note = db.execute(select(Note).where(
@@ -223,6 +224,7 @@ async def ingest_pdf(
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
+    depth: TeachingDepth = Query("balanced"),
 ) -> PdfIngestionResponse:
     if file.content_type not in PDF_MEDIA_TYPES:
         await file.close()
@@ -249,8 +251,8 @@ async def ingest_pdf(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    response = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
+    response = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     return _persist_learning_note(db, user_id=user.id, response=response)
 
 async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
@@ -298,7 +300,7 @@ async def start_progressive_pdf(
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
     base_note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
-    base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [])
+    base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [], teaching_depth=depth)
     sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     job_id = uuid4().hex
     _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "user_id": user.id, "depth": depth, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
@@ -328,6 +330,7 @@ async def ingest_docx(
     ingestor: DocxDocumentIngestor = Depends(get_docx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
+    depth: TeachingDepth = Query("balanced"),
 ) -> DocumentIngestionResponse:
     if file.content_type not in DOCX_MEDIA_TYPES:
         await file.close()
@@ -346,8 +349,8 @@ async def ingest_docx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
+    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     return _persist_learning_note(db, user_id=user.id, response=response)
 
 
@@ -363,6 +366,7 @@ async def ingest_pptx(
     ingestor: PptxDocumentIngestor = Depends(get_pptx_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
+    depth: TeachingDepth = Query("balanced"),
 ) -> DocumentIngestionResponse:
     if file.content_type not in PPTX_MEDIA_TYPES:
         await file.close()
@@ -381,6 +385,6 @@ async def ingest_pptx(
 
     normalized = await run_in_threadpool(normalize_document, extracted)
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
-    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator)
-    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes)
+    note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
+    response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     return _persist_learning_note(db, user_id=user.id, response=response)

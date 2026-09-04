@@ -303,6 +303,7 @@ export type DocumentIngestionResult = {
   source_id?: number | null
   document_id?: number | null
   note_id?: number | null
+  teaching_depth?: "concise" | "balanced" | "detailed"
 }
 
 export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
@@ -358,12 +359,12 @@ export const api = {
     form.append("file", file)
     return postForm<DocumentIngestionResult>("/ingestion/pdf", form)
   },
-  ingestDocument: (file: File) => {
+  ingestDocument: (file: File, depth: "concise" | "balanced" | "detailed" = "balanced") => {
     const endpoint = ingestionEndpointFor(file.name)
     if (!endpoint) return Promise.reject(new Error(`Unsupported file type: ${file.name}`))
     const form = new FormData()
     form.append("file", file)
-    return postForm<DocumentIngestionResult>(endpoint, form)
+    return postForm<DocumentIngestionResult>(`${endpoint}?depth=${depth}`, form)
   },
   startProgressiveDocument: (file: File, depth: "concise" | "balanced" | "detailed" = "balanced") => {
     const form = new FormData(); form.append("file", file)

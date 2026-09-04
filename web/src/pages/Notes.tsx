@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 
-type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string }
+type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
 type DepthMode = "concise" | "balanced" | "detailed"
 
@@ -16,14 +16,14 @@ function SupportingText({ text, depth = "balanced" }: { text: string; depth?: De
 }
 
 function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
-  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type }
+  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type, teaching_depth: result.teaching_depth }
 }
 
 function recordFromSavedNote(note: { id: number; title: string; document_id: number | null; content: string }): LearningNoteRecord | null {
   try {
-    const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; sectionNotes?: SectionNote[] }
+    const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; teachingDepth?: DepthMode; sectionNotes?: SectionNote[] }
     if (!Array.isArray(payload.sectionNotes)) return null
-    return { filename: payload.filename || note.title, source_type: payload.sourceType, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id }
+    return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id }
   } catch { return null }
 }
 
@@ -116,7 +116,7 @@ export function Notes() {
       const persisted = notes.filter((note) => note.content_type === "section_note").map(recordFromSavedNote).filter((item): item is LearningNoteRecord => item !== null).reverse()
       const requestedDocument = Number(searchParams.get("document_id"))
       const selected = persisted.find((item) => item.document_id === requestedDocument) ?? persisted[0]
-      if (persisted.length) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setState({ status: "complete", result: selected }) }
+      if (persisted.length) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setDepth(selected.teaching_depth ?? "balanced"); setState({ status: "complete", result: selected }) }
       else { setHistory([]); setState({ status: "idle" }) }
       window.setTimeout(() => { if (window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }) }, 0)
     }).catch(() => {
@@ -125,7 +125,7 @@ export function Notes() {
     })
     return () => { cancelled = true }
   }, [searchParams])
-  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }) }
+  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setDepth(record.teaching_depth ?? depth); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }) }
 
   async function startQuiz() {
     const documentId = state.result?.document_id
@@ -148,7 +148,7 @@ export function Notes() {
         if (!poll.result) throw new Error("Lucent could not finish this document")
         saveResult(poll.result, run)
       } else {
-        const result = await api.ingestDocument(file); saveResult(result, run)
+        const result = await api.ingestDocument(file, depth); saveResult(result, run)
       }
     } catch (error) { if (run === runRef.current) setState({ status: "error", message: error instanceof Error ? error.message : "Upload failed" }) }
   }
@@ -156,5 +156,22 @@ export function Notes() {
   const notes = state.result?.section_notes ?? []
   const estimatedMinutes = estimateMinutes(notes, depth)
   const availableHistory = history.length ? history : state.result ? [state.result] : []
-    return <div className="page notes-page"><header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header><section className="notes-import"><label htmlFor="notes-file">Import learning material</label><p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p><input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} /><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>{state.status === "error" && <p className="error" role="alert">{state.message}</p>}</section>{state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}{availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}{state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}{state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min</p></div><div className="notes-actions"><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}</div>
+  return <div className="page notes-page">
+    <header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header>
+    <section className="notes-import">
+      <label htmlFor="notes-file">Import learning material</label>
+      <p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p>
+      <input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} />
+      <label htmlFor="notes-generation-depth">Teaching depth</label>
+      <select id="notes-generation-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}>
+        <option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option>
+      </select>
+      <button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>
+      {state.status === "error" && <p className="error" role="alert">{state.message}</p>}
+    </section>
+    {state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}
+    {availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}
+    {state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}
+    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min</p></div><div className="notes-actions"><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}
+  </div>
 }

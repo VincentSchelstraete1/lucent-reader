@@ -261,6 +261,7 @@ class PdfIngestionResponse(BaseModel):
     source_id: int | None = None
     document_id: int | None = None
     note_id: int | None = None
+    teaching_depth: Literal["concise", "balanced", "detailed"] = Field(default="balanced", alias="teachingDepth")
 
     @classmethod
     def from_documents(cls, document: RawDocument, normalized: NormalizedDocument) -> "PdfIngestionResponse":
@@ -301,6 +302,7 @@ class PdfIngestionResponse(BaseModel):
         decisions: dict[str, RepresentationDecision],
         generated_note: GeneratedNote | None = None,
         section_notes: list[SectionNote] | None = None,
+        teaching_depth: Literal["concise", "balanced", "detailed"] = "balanced",
     ) -> "PdfIngestionResponse":
         response = cls.from_documents(document, normalized)
         return response.model_copy(
@@ -310,6 +312,7 @@ class PdfIngestionResponse(BaseModel):
                 ],
                 "generated_note": generated_note,
                 "section_notes": section_notes or [],
+                "teaching_depth": teaching_depth,
             }
         )
 
