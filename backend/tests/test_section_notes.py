@@ -29,6 +29,9 @@ def test_low_value_section_filter_is_conservative():
     assert not is_low_value_section(SectionInput("e", "Definition", [], ["e"], [make_block("e", "An inner product defines geometry on a vector space.")], {}))
     assert is_low_value_section(SectionInput("a", "Course Administration", [], ["a"], [make_block("a", "Homework deadline and regrade details.")], {}))
     assert is_low_value_section(SectionInput("t", "QR Factorization", [], ["t"], [make_block("t", "QR Factorization")], {}))
+    assert is_low_value_section(SectionInput("credit", "Figure 2", [], ["credit"], [make_block("credit", "Figure by MIT OCW")], {}))
+    assert not is_low_value_section(SectionInput("caption", "Figure 2", [], ["caption"], [make_block("caption", "Figure 2: Cache hit rate rises as associativity increases.")], {}))
+    assert is_low_value_section(SectionInput("unknown", "<UNKNOWN>", [], ["unknown"], [make_block("unknown", "<UNKNOWN>")], {}))
 
 
 def test_progressive_section_normalizes_note_to_typed_instance():

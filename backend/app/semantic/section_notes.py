@@ -68,6 +68,13 @@ def is_low_value_section(section: SectionInput) -> bool:
     if title and any(marker in normalized_title for marker in ("references", "bibliography", "course administration", "course logistics", "grading and deadlines")):
         return True
     normalized_text = " ".join(text.lower().split())
+    # Credits and attribution lines are extraction metadata, not learning
+    # content. Suppress only short standalone attributions so captions that
+    # explain a figure remain eligible for generation.
+    if len(normalized_text) < 240 and re.match(r"^(?:figure|fig\.?|image)\s+(?:by|courtesy of|source:)", normalized_text):
+        return True
+    if normalized_title in {"<unknown>", "unknown"} and len(normalized_text) < 80:
+        return True
     if normalized_text in {normalized_title, "<unknown>", "unknown"}:
         return True
     # Suppress short title/agenda furniture without suppressing concise real
