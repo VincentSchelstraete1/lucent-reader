@@ -169,9 +169,7 @@ export function Notes() {
   async function startQuiz() {
     const documentId = state.result?.document_id
     if (!documentId) { setQuizStatus("error"); return }
-    setQuizStatus("working")
-    try { const quiz = await api.generateQuiz(documentId); navigate(`/quizzes/${quiz.id}`) }
-    catch { setQuizStatus("error") }
+    navigate(`/quizzes/generating?document_id=${documentId}`)
   }
   async function upload() {
     if (!file) return

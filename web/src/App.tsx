@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, Link, Outlet, useParams } from "react-router-dom"
 import { Library } from "./pages/Library"
 import { SourceDetail } from "./pages/SourceDetail"
-import { QuizPage } from "./pages/QuizPage"
+import { QuizGenerationPage, QuizPage } from "./pages/QuizPage"
 import { LandingPage } from "./pages/LandingPage"
 import { AuthPage } from "./pages/AuthPage"
 import { OnboardingPage } from "./pages/OnboardingPage"
@@ -53,6 +53,7 @@ export function App() {
             <Route path="/sources/:sourceId" element={<SourceDetail />} />
             <Route path="/documents/:documentId" element={<LegacyDocumentRedirect />} />
             <Route path="/quizzes/:quizId" element={<QuizPage />} />
+            <Route path="/quizzes/generating" element={<QuizGenerationPage />} />
             <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
             {import.meta.env.DEV && <Route path="/app/dev/ingestion" element={<DocumentIngestionDemo />} />}
             {import.meta.env.DEV && <Route path="/app/dev/step-through" element={<StepThroughDev />} />}

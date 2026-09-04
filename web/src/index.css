@@ -538,6 +538,14 @@ h2 {
   transform: none;
 }
 
+/* Quiz generation */
+.quiz-generation { max-width: 680px; }
+.quiz-generation h1 { max-width: 24ch; }
+.quiz-generation-track { height: 8px; margin: 2rem 0 .7rem; overflow: hidden; border-radius: 999px; background: #e5e5dc; }
+.quiz-generation-track span { display: block; width: 62%; height: 100%; border-radius: inherit; background: var(--lucent-accent, #4f806c); animation: quiz-generation-pulse 1.8s ease-in-out infinite; }
+.quiz-generation-status { color: var(--lucent-caption); font-size: .9rem; }
+@keyframes quiz-generation-pulse { 0%, 100% { opacity: .65; } 50% { opacity: 1; } }
+
 /* Quiz */
 .quiz-progress {
   font-size: 12px;

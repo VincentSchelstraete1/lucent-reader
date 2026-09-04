@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, type Quiz } from "../api/client"
 import { QuizPlayer } from "../components/QuizPlayer"
 import { Skeleton } from "../components/Skeleton"
@@ -59,4 +59,44 @@ export function QuizPage() {
       )}
     </div>
   )
+}
+
+export function QuizGenerationPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const documentId = Number(searchParams.get("document_id"))
+  const [status, setStatus] = useState<"working" | "error">("working")
+  const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    if (!Number.isFinite(documentId) || documentId <= 0) {
+      setStatus("error")
+      setMessage("This material could not be identified.")
+      return () => { cancelled = true }
+    }
+    api.generateQuiz(documentId).then((quiz) => {
+      if (!cancelled) navigate(`/quizzes/${quiz.id}`, { replace: true })
+    }).catch((error) => {
+      if (!cancelled) {
+        setStatus("error")
+        setMessage(error instanceof Error ? error.message : "Lucent could not create this quiz.")
+      }
+    })
+    return () => { cancelled = true }
+  }, [documentId, navigate])
+
+  return <div className="page quiz-generation" aria-live="polite">
+    <nav className="breadcrumbs"><Link to="/app">Library</Link><span> / </span><span>Quiz</span></nav>
+    {status === "working" ? <>
+      <p className="note-kicker">Preparing your quiz</p>
+      <h1>Building a quiz from this material</h1>
+      <p className="page-subtitle">Lucent is selecting questions that test the important ideas.</p>
+      <div className="quiz-generation-track" role="progressbar" aria-label="Generating quiz" aria-valuemin={0} aria-valuemax={100} aria-valuenow={62}><span /></div>
+      <p className="quiz-generation-status">Generating questions…</p>
+    </> : <>
+      <p className="error" role="alert">{message}</p>
+      {documentId > 0 && <Link className="btn btn-secondary" to={`/app/material/${documentId}?mode=notes`}>Back to study material</Link>}
+    </>}
+  </div>
 }
