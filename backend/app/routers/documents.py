@@ -5,6 +5,7 @@ from app.schemas.note import NoteResponse
 from app.database import get_db
 from app.models.document import Document
 from app.models.note import Note
+from app.models.quiz import Quiz, QuizAttempt
 from app.models.source import Source
 from app.services.anthropic_service import generate_structured_note
 from sqlalchemy import select
@@ -56,6 +57,12 @@ def delete_document(document_id: int, db = Depends(get_db), user: User = Depends
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    quizzes = db.execute(select(Quiz).where(Quiz.document_id == document.id)).scalars().all()
+    quiz_ids = [quiz.id for quiz in quizzes]
+    if quiz_ids:
+        db.query(QuizAttempt).filter(QuizAttempt.quiz_id.in_(quiz_ids)).delete(synchronize_session=False)
+        db.query(Quiz).filter(Quiz.id.in_(quiz_ids)).delete(synchronize_session=False)
+    db.query(Note).filter(Note.document_id == document.id).delete(synchronize_session=False)
     db.delete(document)
     db.commit()
     return document
