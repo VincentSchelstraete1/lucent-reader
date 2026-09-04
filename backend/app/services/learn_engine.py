@@ -68,7 +68,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-method", type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-apply", type="short_answer", title="Explain the move", prompt=f"What is the key move in {title}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the stated relationship as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=["Start with the central relationship.", "Use the wording from the teaching point."], feedbackIncorrect="Use the stated relationship as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
         objectives.append(LearningObjective(id=f"objective-{section.get('id', len(objectives))}", title=title, outcome=f"Understand and use {title}.", bottleneck="Connect the central idea to a response.", sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
 
@@ -85,7 +85,10 @@ def plan_fingerprint(note_payload: dict, goal: str, familiarity: str) -> str:
 def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     data = step.model_dump(by_alias=True, exclude_none=True)
     options = data.get("options", [])
-    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, visualRef=data.get("visualRef"), sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+    visual_ref = data.get("visualRef")
+    if data["type"] == "walkthrough":
+        visual_ref = {"sectionId": data.get("sectionId"), "componentIndex": data.get("componentIndex")}
+    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
 
 
 def grade_step(step: LearnStep, *, response: str | None, option_id: str | None) -> tuple[bool | None, str]:
