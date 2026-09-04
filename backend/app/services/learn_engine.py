@@ -108,6 +108,14 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             if visual_candidate:
                 refresher.visual_spec = synthesize_visual_spec(visual_candidate, title, section_ids, block_ids)
             steps.append(refresher)
+            comparison = next((c for c in comps if c.get("kind") == "comparison" and len(c.get("items", [])) >= 2), None)
+            if comparison:
+                pairs = [{"id": str(item.get("id")), "label": _clean(item.get("name"))} for item in comparison.get("items", [])[:8] if item.get("id") and item.get("name")]
+                dimension = (comparison.get("dimensions") or ["key distinction"])[0]
+                matches = {pair["id"]: _clean(next((item.get("values", {}).get(dimension) for item in comparison.get("items", []) if str(item.get("id")) == pair["id"]), "")) for pair in pairs}
+                values = [value for value in dict.fromkeys(matches.values()) if value]
+                if len(pairs) >= 2 and len(values) >= 2:
+                    steps.append(MatchingStep(id=f"{section.get('id', 'section')}-match", type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", "Look for the mechanism that differs between the two concepts."], feedbackIncorrect="Use the defining difference, not a nearby detail."))
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -116,10 +124,23 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 node_ids = [str(node.get("id")) for node in flow.get("nodes", []) if node.get("id")]
                 options = [{"id": node_id, "label": _clean(next((node.get("label") for node in flow.get("nodes", []) if str(node.get("id")) == node_id), node_id))} for node_id in node_ids]
                 steps.append(OrderingStep(id=f"{section.get('id', 'section')}-order", type="ordering", title="Put the process in order", prompt=f"What is the sequence for {title}?", items=options[:8], correctOrder=node_ids[:8], feedbackIncorrect="Follow the transition from one step to the next in the process.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                if goal == "understand" and len(options) >= 3:
+                    steps.append(PredictionStep(id=f"{section.get('id', 'section')}-predict", type="prediction", title="Predict the next transition", prompt=f"What happens immediately after {_clean(options[0]['label'])}?", options=options[1:4], answerId=options[1]["id"], reveal=f"The process continues with {_clean(options[1]['label'])}, which sets up the next transition.", feedbackIncorrect="Trace the direction of the process from the first step.", hints=["Look at the first outgoing transition.", "Ask what state must be established next."], sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             elif goal == "understand" and any(c.get("kind") == "key_definition" for c in comps):
                 definition = next(c for c in comps if c.get("kind") == "key_definition")
                 answer = _clean(definition.get("definition")) or big_idea
                 steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-free", type="short_answer", title="Say it in your own words", prompt=f"What does {_clean(definition.get('term')) or title} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Focus on the defining relationship, not a supporting detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(TeachBackStep(id=f"{section.get('id', 'section')}-teachback", type="teach_back", title="Teach it back", prompt=f"Explain {_clean(definition.get('term')) or title} to a classmate in one or two sentences.", requiredConcepts=list(_words(answer))[:5], hints=["Name the defining relationship first.", "Add why the relationship matters."], feedbackIncorrect="Include the defining relationship and why it matters.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            elif any(c.get("kind") == "structure" and c.get("root") for c in comps):
+                structure = next(c for c in comps if c.get("kind") == "structure" and c.get("root"))
+                targets = []
+                def collect(node: dict):
+                    if node.get("id") and node.get("label"): targets.append({"id": str(node["id"]), "label": _clean(node["label"])})
+                    for child in node.get("children", []) or []: collect(child)
+                collect(structure["root"])
+                targets = targets[:6]; labels = [{"id": item["id"], "label": item["label"]} for item in targets]
+                if len(targets) >= 2:
+                    steps.append(LabelingStep(id=f"{section.get('id', 'section')}-label", type="labeling", title="Label the structure", prompt=f"Name the important parts of {title}.", targets=targets, labels=labels, answerMap={item["id"]: item["id"] for item in targets}, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=["Start with the outermost part.", "Use the labels from the diagram."], feedbackIncorrect="Match each label to the part it names."))
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement best captures {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A detail not established by this material."}, {"id": "c", "label": "A reversed version of the relationship."}], answerId="a", feedbackIncorrect=f"Return to the central idea: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -132,6 +153,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             steps.append(TeachStep(id=f"{section.get('id', 'section')}-definition", type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A related but different idea."}, {"id": "c", "label": "A claim not supported by this material."}], answerId="a", feedbackIncorrect="Look for the defining relationship, not a nearby detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the definition above, then try the idea again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(FillBlankStep(id=f"{section.get('id', 'section')}-fill", type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} is the idea that ____.", acceptedAnswers=[answer], hints=["Recall the definition you just retrieved."], feedbackIncorrect="Recall the defining relationship from the note.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         else:  # solve
             example = next((c for c in comps if c.get("kind") in {"worked_example", "equation"}), None)
             if example and _clean(example.get("result")):
@@ -139,6 +161,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 result = _clean(example.get("result"))
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-worked", type="teach", title="See one worked path", content=f"{problem} → {result}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Try the key step", prompt=f"What result should this method produce for: {problem}?", responseType="short_answer", acceptedAnswers=[result], solution=result, hints=["Start from the worked relationship.", "Keep the same operation order."], feedbackIncorrect="Compare your result with the worked path, then try once more.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(WorkedStepStep(id=f"{section.get('id', 'section')}-worked-step", type="worked_step", title="Complete the next step", prompt=f"Complete the next step for: {problem}.", acceptedAnswers=[result], solution=result, hints=["Reuse the operation shown in the worked path.", "Check each quantity before combining them."], feedbackIncorrect="Use the worked example as a scaffold, then try the step again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-method", type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -160,14 +183,16 @@ def plan_fingerprint(note_payload: dict, goal: str, familiarity: str) -> str:
 def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     data = step.model_dump(by_alias=True, exclude_none=True)
     options = data.get("options", [])
-    if data["type"] == "matching": options = data.get("pairs", [])
+    if data["type"] == "matching":
+        options = [{"id": str(value), "label": str(value)} for value in dict.fromkeys((data.get("matches") or {}).values())]
     if data["type"] == "labeling": options = data.get("labels", []); data["items"] = data.get("targets", [])
     visual_ref = data.get("visualRef")
     if data["type"] == "walkthrough":
         visual_ref = {"sectionId": data.get("sectionId"), "componentIndex": data.get("componentIndex")}
     items = data.get("items", [])
-    if data["type"] == "matching": items = data.get("pairs", [])
-    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=items, visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+    if data["type"] == "matching":
+        items = data.get("pairs", [])
+    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=items, visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used), sourceSectionIds=list(getattr(step, "source_section_ids", [])), sourceBlockIds=list(getattr(step, "source_block_ids", [])))
 
 
 def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | None, ordered_ids: list[str] | None = None) -> LearnEvaluation:

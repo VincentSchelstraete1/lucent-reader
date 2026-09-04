@@ -44,11 +44,18 @@ def _concept_for(session: LearnSession, objective: dict) -> dict:
     return found or {"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": "NOT_SEEN", "attempts": 0, "correct": 0, "partiallyCorrect": 0, "incorrect": 0, "insufficientEvidence": 0, "hintsUsed": 0, "interactionTypes": [], "misconceptions": [], "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", [])}
 
 def _action_for(step, objective: dict, concept: dict, revisit: bool = False, remediation: str | None = None) -> TutorAction:
-    mapping = {"teach": "teach_concept", "multiple_choice": "ask_multiple_choice", "short_answer": "ask_free_response", "numeric": "ask_free_response", "prediction": "ask_prediction", "ordering": "ask_ordering", "problem": "ask_free_response", "walkthrough": "show_process_visual"}
+    mapping = {"teach": "teach_concept", "multiple_choice": "ask_multiple_choice", "short_answer": "ask_free_response", "numeric": "ask_free_response", "prediction": "ask_prediction", "ordering": "ask_ordering", "matching": "ask_matching", "labeling": "ask_labeling", "fill_blank": "ask_fill_blank", "worked_step": "ask_worked_step", "teach_back": "ask_teach_back", "problem": "ask_free_response", "walkthrough": "show_process_visual"}
     remediation_map = {"simplify": "decrease_difficulty", "example": "give_example", "prerequisite": "revisit_prerequisite", "change_modality": "give_analogy", "revisit": "revisit_concept"}
     action_type = remediation_map.get(remediation or "") or ("revisit_concept" if revisit else mapping.get(step.type, "teach_concept"))
-    if concept.get("state") in {"STRUGGLING", "NEEDS_REVIEW"} and not revisit and step.type not in {"teach", "walkthrough"}: action_type = "clarify_definition"
-    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale="Revisit the concept with a different validated check." if revisit else "A bounded teaching or checking action matched to current evidence.")
+    if concept.get("state") in {"STRUGGLING", "NEEDS_REVIEW"} and not revisit and step.type not in {"teach", "walkthrough"}:
+        # Keep remediation explicit while preserving the current interaction's
+        # stable contract; the runtime chooses the alternate validated step.
+        action_type = remediation_map.get(remediation or "") or "clarify_definition"
+    used = set(concept.get("interactionTypes") or [])
+    if step.type == "multiple_choice" and "multiple_choice" in used and not revisit:
+        action_type = "ask_free_response"
+    rationale = "Revisit with a different validated modality after earlier evidence." if revisit else "A bounded action selected for the learner's current evidence and goal."
+    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale)
 
 def _report(session: LearnSession) -> LearnSessionReport:
     objectives = session.plan.get("objectives", []); by_id = {item.get("conceptId"): item for item in _concepts(session)}

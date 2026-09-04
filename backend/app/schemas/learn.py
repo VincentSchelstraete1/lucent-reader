@@ -16,7 +16,7 @@ TutorActionType = Literal[
     "ask_multiple_choice", "ask_free_response", "ask_prediction", "ask_ordering",
     "give_hint", "revisit_prerequisite", "revisit_concept", "increase_difficulty",
     "decrease_difficulty", "advance_to_related_concept",
-    "give_worked_example", "show_process_visual", "show_diagram",
+    "give_worked_example", "show_process_visual", "show_diagram", "show_visual", "show_animation", "show_comparison", "show_process", "simplify_explanation", "give_counterexample", "ask_matching", "ask_labeling", "ask_fill_blank", "ask_worked_step", "ask_teach_back", "schedule_revisit",
 ]
 VisualType = Literal["diagram", "process", "process_flow", "hierarchy", "causal_chain", "labeled_diagram", "relationship_map", "comparison", "sequence", "cycle", "spatial_structure", "state_transition", "timeline", "quantitative", "worked_derivation", "labeling", "ordering", "prediction", "staged_visual", "step_through"]
 AnimationOperation = Literal["highlight", "move", "appear", "disappear", "transform", "pulse", "connect", "flow", "change_value", "focus", "compare"]
@@ -152,12 +152,27 @@ class MatchingStep(LearnStepBase):
     pairs: list[LearnOption] = Field(min_length=2, max_length=8)
     matches: dict[str, str] = Field(min_length=2, max_length=8)
 
+    @model_validator(mode="after")
+    def matching_contract(self):
+        ids = {item.id for item in self.pairs}
+        if set(self.matches) != ids or any(not str(value).strip() for value in self.matches.values()):
+            raise ValueError("matches must reference every pair")
+        return self
+
 class LabelingStep(LearnStepBase):
     type: Literal["labeling"]
     prompt: str = Field(min_length=1, max_length=500)
     targets: list[LearnOption] = Field(min_length=2, max_length=8)
     labels: list[LearnOption] = Field(min_length=2, max_length=8)
     answer_map: dict[str, str] = Field(alias="answerMap", min_length=2, max_length=8)
+
+    @model_validator(mode="after")
+    def labeling_contract(self):
+        target_ids = {item.id for item in self.targets}
+        label_ids = {item.id for item in self.labels}
+        if set(self.answer_map) != target_ids or not set(self.answer_map.values()) <= label_ids:
+            raise ValueError("answerMap must reference every target and known label")
+        return self
 
 class FillBlankStep(LearnStepBase):
     type: Literal["fill_blank"]
@@ -298,6 +313,8 @@ class LearnStepView(BaseModel):
     section_id: str | None = Field(default=None, alias="sectionId")
     component_index: int | None = Field(default=None, alias="componentIndex")
     hints_available: int = Field(default=0, alias="hintsAvailable")
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
 
 
 class LearnSessionResponse(BaseModel):

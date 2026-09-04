@@ -1,5 +1,5 @@
 from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec
-from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep
+from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep
 from app.services.retrieval import retrieve_note_context
 
 
@@ -78,3 +78,24 @@ def test_retrieval_returns_grounded_section_and_block_references():
     result = retrieve_note_context({"sectionNotes":[{"id":"s1","bigIdea":"Protons build a gradient.","sourceBlockIds":["b1"]},{"id":"s2","bigIdea":"Unrelated history.","sourceBlockIds":["b2"]}]}, "proton gradient")
     assert result["sourceSectionIds"] == ["s1"]
     assert result["sourceBlockIds"] == ["b1"]
+
+def test_goal_plan_includes_structured_interactions():
+    note = {"title": "Learning set", "sectionNotes": [
+        {"id": "cmp", "title": "Comparison", "bigIdea": "Two paths differ", "components": [{"kind": "comparison", "dimensions": ["outcome"], "items": [{"id": "a", "name": "A", "values": {"outcome": "increase"}}, {"id": "b", "name": "B", "values": {"outcome": "decrease"}}]}]},
+        {"id": "def", "title": "Definition", "bigIdea": "A gradient matters", "components": [{"kind": "key_definition", "term": "Gradient", "definition": "difference across a boundary"}]},
+        {"id": "math", "title": "Method", "bigIdea": "Apply the method", "components": [{"kind": "worked_example", "problem": "2 + 2", "result": "4"}]},
+    ]}
+    understand = [step.type for objective in build_learn_plan(note, "understand", "new").objectives for step in objective.steps]
+    memorize = [step.type for objective in build_learn_plan(note, "memorize", "new").objectives for step in objective.steps]
+    solve = [step.type for objective in build_learn_plan(note, "solve", "new").objectives for step in objective.steps]
+    assert "matching" in understand and "teach_back" in understand
+    assert "fill_blank" in memorize
+    assert "worked_step" in solve
+
+def test_new_interactions_grade_and_preserve_partial_evidence():
+    fill = FillBlankStep(id="f", type="fill_blank", title="Fill", prompt="Complete", acceptedAnswers=["gradient"])
+    teach = TeachBackStep(id="t", type="teach_back", title="Teach", prompt="Explain", requiredConcepts=["gradient", "difference"])
+    worked = WorkedStepStep(id="w", type="worked_step", title="Work", prompt="Complete", acceptedAnswers=["4"], solution="4")
+    assert evaluate_step(fill, response="gradient", option_id=None).result == "correct"
+    assert evaluate_step(teach, response="a gradient is a difference", option_id=None).result == "correct"
+    assert evaluate_step(worked, response="partly", option_id=None).result == "incorrect"
