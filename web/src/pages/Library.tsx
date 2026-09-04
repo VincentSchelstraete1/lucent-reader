@@ -45,6 +45,11 @@ export function Library() {
   const [filter, setFilter] = useState<"all" | "documents" | "websites">("all")
   const [sort, setSort] = useState<"recent" | "name">("recent")
   const [newOpen, setNewOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingTitle, setEditingTitle] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -65,12 +70,33 @@ export function Library() {
     return matchesQuery && matchesFilter
   }).sort((a, b) => sort === "name" ? materialTitle(a).localeCompare(materialTitle(b)) : new Date(b.document.updated_at).getTime() - new Date(a.document.updated_at).getTime()), [filter, query, sort, state.materials])
 
+  async function renameMaterial(material: Material) {
+    const title = editingTitle.trim()
+    if (!title) return
+    try {
+      const document = await api.updateDocument(material.document.id, { title })
+      setState((current) => ({ ...current, materials: current.materials.map((item) => item.document.id === document.id ? { ...item, document } : item) }))
+      setEditingId(null); setOpenMenu(null); setActionError(null)
+    } catch { setActionError("We couldn't rename this material. Please try again.") }
+  }
+
+  async function deleteMaterial() {
+    if (!deleteTarget) return
+    try {
+      await api.deleteDocument(deleteTarget.document.id)
+      setState((current) => ({ ...current, materials: current.materials.filter((item) => item.document.id !== deleteTarget.document.id) }))
+      setDeleteTarget(null); setOpenMenu(null); setActionError(null)
+    } catch { setActionError("We couldn't delete this material. Please try again."); setDeleteTarget(null) }
+  }
+
   return <div className="page library-page">
     <header className="library-header"><div><p className="note-kicker">Lucent library</p><h1>Study materials</h1><p className="page-subtitle">Your lectures, chapters, and articles in one place.</p></div><div className="library-new-wrap"><button className="btn btn-primary" type="button" aria-haspopup="menu" aria-expanded={newOpen} onKeyDown={(event) => { if (event.key === "Escape") setNewOpen(false) }} onClick={() => setNewOpen((open) => !open)}>+ New</button>{newOpen && <div className="library-new-menu" role="menu"><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Upload document <small>PDF, DOCX, PPTX</small></Link><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Add webpage <small>Save a webpage to Lucent</small></Link></div>}</div></header>
     <div className="library-toolbar"><label className="library-search"><span className="sr-only">Search materials</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search materials" /></label><div className="library-controls"><div className="library-filters" role="group" aria-label="Filter materials">{([['all', 'All'], ['documents', 'Documents'], ['websites', 'Websites']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div><label className="library-sort">Sort <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")}><option value="recent">Recent</option><option value="name">Name</option></select></label></div></div>
     {state.status === "loading" && <Skeleton rows={3} />}
     {state.status === "error" && <p className="error">Could not load your study materials: {state.message}</p>}
     {state.status === "loaded" && materials.length === 0 && (state.materials.length === 0 ? <section className="library-empty"><h2>Your library is empty</h2><p>Add a lecture, article, or document and Lucent will turn it into a learning experience.</p><Link className="btn btn-primary" to="/app/notes">+ Add your first material</Link></section> : <section className="library-empty"><h2>No materials match{query ? ` “${query}”` : " this filter"}</h2><p>Try a different search or filter.</p>{(query || filter !== "all") && <button className="btn btn-secondary" type="button" onClick={() => { setQuery(""); setFilter("all") }}>Clear search and filters</button>}</section>)}
-    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>All materials</h2>{materials.map((material) => <Link className="material-row" key={material.document.id} to={`/app/material/${material.document.id}`}><div><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note)}</div></Link>)}</section>}
+    {actionError && <p className="error" role="alert">{actionError}</p>}
+    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>All materials</h2>{materials.map((material) => <div className="material-row" key={material.document.id}><Link className="material-row-main" to={`/app/material/${material.document.id}`}><div><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note)}</div></Link><div className="material-actions"><button type="button" className="material-menu-button" aria-label={`Actions for ${materialTitle(material)}`} aria-expanded={openMenu === material.document.id} onClick={() => setOpenMenu(openMenu === material.document.id ? null : material.document.id)} onKeyDown={(event) => { if (event.key === "Escape") setOpenMenu(null) }}>•••</button>{openMenu === material.document.id && <div className="material-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setEditingId(material.document.id); setEditingTitle(material.document.title.replace(/\.(pdf|docx|pptx)$/i, "")); setOpenMenu(null) }}>Rename</button>{material.source?.url && materialType(material) === "Website" && <a href={material.source.url} target="_blank" rel="noreferrer" role="menuitem">Open original source</a>}<button type="button" role="menuitem" onClick={() => { setDeleteTarget(material); setOpenMenu(null) }}>Delete</button></div>}</div>{editingId === material.document.id && <form className="material-rename" onSubmit={(event) => { event.preventDefault(); void renameMaterial(material) }}><label htmlFor={`rename-${material.document.id}`}>Rename material</label><input id={`rename-${material.document.id}`} value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} autoFocus /><button type="submit" className="btn btn-primary">Save</button><button type="button" className="btn btn-secondary" onClick={() => setEditingId(null)}>Cancel</button></form>}</div>)}</section>}
+    {deleteTarget && <div className="dialog-backdrop" role="presentation"><section className="library-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-material-title"><h2 id="delete-material-title">Delete “{materialTitle(deleteTarget)}”?</h2><p>This removes the material and its Lucent study content.</p><div><button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button><button type="button" className="btn btn-danger" onClick={() => void deleteMaterial()}>Delete</button></div></section></div>}
   </div>
 }

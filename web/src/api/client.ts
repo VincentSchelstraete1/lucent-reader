@@ -119,6 +119,22 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return response.json()
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "PATCH", credentials: "include",
+    headers: { "Content-Type": "application/json", ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}) },
+    body: JSON.stringify(body)
+  })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
+async function del<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, { method: "DELETE", credentials: "include", headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {} })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
 async function postForm<T>(path: string, body: FormData): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
@@ -346,6 +362,8 @@ export const api = {
   getSource: (id: number) => get<Source>(`/sources/${id}`),
   getDocuments: () => get<Document[]>("/documents"),
   getDocument: (id: number) => get<Document>(`/documents/${id}`),
+  updateDocument: (id: number, updates: { title?: string }) => patch<Document>(`/documents/${id}`, updates),
+  deleteDocument: (id: number) => del<Document>(`/documents/${id}`),
   getNotes: () => get<Note[]>("/notes"),
   getNote: (id: number) => get<Note>(`/notes/${id}`),
   generateNote: (documentId: number) => post<Note>(`/documents/${documentId}/generate-note`),

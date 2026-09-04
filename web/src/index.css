@@ -19,11 +19,26 @@
 .library-sort { display: inline-flex; align-items: center; gap: .35rem; color: #6c746e; font-size: .82rem; }
 .library-sort select { border: 1px solid #c8c5bb; border-radius: 6px; background: #fffdf8; padding: .35rem .45rem; font: inherit; color: #3f433e; }
 .library-list h2 { font: 400 1.8rem "Instrument Serif", Georgia, serif; margin-bottom: .7rem; }
-.material-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid #d8d2c5; padding: 1rem .25rem; color: inherit; text-decoration: none; }
+.material-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; border-top: 1px solid #d8d2c5; padding: .8rem .25rem; color: inherit; }
 .material-row:hover { background: rgba(238,242,232,.55); }
-.material-row:focus-visible { background: rgba(238,242,232,.7); outline: 2px solid #4f806c; outline-offset: 2px; }
+.material-row-main { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.material-row-main:focus-visible { background: rgba(238,242,232,.7); outline: 2px solid #4f806c; outline-offset: 2px; }
 .material-row h3 { margin: 0; font-size: 1.05rem; font-weight: 600; }
 .material-row p, .material-status { margin: .25rem 0 0; color: #6c746e; font-size: .82rem; }
+.material-actions { position: relative; }
+.material-menu-button { border: 0; background: transparent; color: #8a8d85; border-radius: 6px; padding: .35rem .45rem; letter-spacing: .12em; cursor: pointer; font-size: .9rem; }
+.material-menu-button:hover, .material-menu-button:focus-visible { color: #315d4d; background: #eef2e8; outline: 2px solid transparent; }
+.material-menu { position: absolute; right: 0; top: calc(100% + .2rem); z-index: 3; display: grid; min-width: 10rem; padding: .3rem; border: 1px solid #d8d2c5; border-radius: 8px; background: #fffdf8; box-shadow: var(--lucent-shadow); }
+.material-menu button, .material-menu a { border: 0; background: transparent; color: #3f433e; text-align: left; text-decoration: none; padding: .5rem .6rem; border-radius: 5px; font: inherit; cursor: pointer; }
+.material-menu button:hover, .material-menu button:focus-visible, .material-menu a:hover, .material-menu a:focus-visible { background: #eef2e8; outline: 2px solid transparent; }
+.material-rename { display: flex; align-items: end; gap: .45rem; flex-basis: 100%; padding: .55rem 0 .1rem; }
+.material-rename label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.material-rename input { flex: 1; min-width: 0; border: 1px solid #c8c5bb; border-radius: 6px; padding: .5rem .6rem; font: inherit; }
+.btn-danger { border: 1px solid #b86d5c; background: #fff8f5; color: #8d3e2f; }
+.dialog-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: rgba(45,48,45,.28); }
+.library-dialog { width: min(28rem, 100%); padding: 1.3rem; border: 1px solid #d8d2c5; border-radius: 12px; background: #fffdf8; box-shadow: var(--lucent-shadow); }
+.library-dialog h2 { margin-top: 0; font: 400 1.65rem "Instrument Serif", Georgia, serif; }
+.library-dialog > div { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.2rem; }
 .material-status { display: grid; gap: .25rem; text-align: right; }
 .material-status span { color: #315d4d; font-weight: 600; }
 .library-empty { border: 1px dashed #c8c5bb; border-radius: 12px; padding: 3rem 1.5rem; text-align: center; background: #fbfaf6; }
