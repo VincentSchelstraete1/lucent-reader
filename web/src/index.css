@@ -2,7 +2,7 @@
 @import "./styles/public-tokens.css";
 
 .notes-page { max-width: 820px; margin: 0 auto; }
-.library-page { max-width: 980px; margin: 0 auto; }
+.library-page { max-width: 1160px; margin: 0 auto; }
 .library-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; margin-bottom: 1.5rem; }
 .library-header h1 { margin-bottom: .35rem; }
 .library-new-wrap { position: relative; }
@@ -19,13 +19,16 @@
 .library-sort { display: inline-flex; align-items: center; gap: .35rem; color: #6c746e; font-size: .82rem; }
 .library-sort select { border: 1px solid #c8c5bb; border-radius: 6px; background: #fffdf8; padding: .35rem .45rem; font: inherit; color: #3f433e; }
 .library-list h2 { font: 400 1.8rem "Instrument Serif", Georgia, serif; margin-bottom: .7rem; }
-.material-table-head, .material-row { display: grid; grid-template-columns: minmax(260px, 1fr) 110px 135px 110px 36px 36px; align-items: center; gap: .75rem; border-top: 1px solid #d8d2c5; padding: .8rem .25rem; color: inherit; }
-.material-table-head { border-top: 0; padding-top: 0; color: #8a8d85; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; }
+.material-row { display: grid; grid-template-columns: minmax(0, 1.8fr) 110px 140px 120px 36px; align-items: center; gap: .75rem; border-top: 1px solid #d8d2c5; padding: .85rem .25rem; color: inherit; }
 .material-row:hover { background: rgba(238,242,232,.55); }
 .material-row-main { display: contents; color: inherit; text-decoration: none; }
-.material-glyph { display: grid; flex: 0 0 2rem; place-items: center; width: 2rem; height: 2rem; border: 1px solid #cdd4c8; border-radius: 6px; color: #58735d; font-size: 1.1rem; }
-.material-main-copy { flex: 1; min-width: 0; }
-.material-cell { color: #6c746e; font-size: .78rem; }
+.material-glyph { display: grid; place-items: center; width: 2.15rem; height: 2.15rem; border: 1px solid #cdd4c8; border-radius: 6px; color: #58735d; }
+.material-glyph svg { width: 1.05rem; height: 1.05rem; }
+.material-glyph { grid-column: 1; grid-row: 1; }
+.material-glyph-pdf { color: #a65e50; background: #f9ece8; border-color: #e7c8c0; }
+.material-glyph-website { background: #eef2e8; }
+.material-main-copy { grid-column: 1; grid-row: 1; min-width: 0; padding-left: 3rem; }
+.material-cell { color: #6c746e; font-size: .78rem; white-space: nowrap; }
 .material-cell-status.ready { color: #315d4d; }
 .material-row-main:focus-visible { background: rgba(238,242,232,.7); outline: 2px solid #4f806c; outline-offset: 2px; }
 .material-row h3 { margin: 0; font-size: 1.05rem; font-weight: 600; }
@@ -268,8 +271,10 @@ main {
 .app-shell { min-height: 100vh; }
 .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 4; display: flex; width: 224px; flex-direction: column; gap: 2.2rem; padding: 1.4rem 1rem; border-right: 1px solid var(--lucent-border); background: var(--lucent-surface); }
 .app-sidebar-nav { display: grid; gap: .2rem; }
-.app-sidebar-nav a { padding: .55rem .7rem; border-radius: 7px; color: var(--lucent-caption); text-decoration: none; }
-.app-sidebar-nav a:hover, .app-sidebar-nav a:focus-visible, .app-sidebar-nav a.active { background: #eef2e8; color: var(--lucent-accent-dark); outline: 2px solid transparent; }
+.app-sidebar-nav a { display: flex; align-items: center; gap: .75rem; min-height: 42px; padding: .5rem .7rem; border-radius: 7px; color: var(--lucent-caption); text-decoration: none; }
+.sidebar-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.app-sidebar-nav a:hover, .app-sidebar-nav a:focus-visible { background: rgba(238,242,232,.55); color: var(--lucent-accent-dark); outline: 2px solid transparent; }
+.app-sidebar-nav a.active { background: #eef2e8; color: var(--lucent-accent-dark); outline: 2px solid transparent; }
 .app-shell > main { max-width: none; margin-left: 224px; padding: 0 3rem 64px; }
 
 .app-header {
