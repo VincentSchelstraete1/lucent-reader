@@ -52,7 +52,7 @@ def _action_for(step, objective: dict, concept: dict, revisit: bool = False, rem
 
 def _report(session: LearnSession) -> LearnSessionReport:
     objectives = session.plan.get("objectives", []); by_id = {item.get("conceptId"): item for item in _concepts(session)}
-    covered, demonstrated, developing, struggles, needs_review, not_covered = [], [], [], [], [], []
+    covered, demonstrated, developing, struggles, needs_review, not_covered, misconceptions = [], [], [], [], [], [], []
     for objective in objectives:
         item = by_id.get(objective.get("id"), {}); state = item.get("state", "NOT_SEEN"); title = objective.get("title", "Concept")
         if state == "NOT_SEEN": not_covered.append(title)
@@ -60,10 +60,11 @@ def _report(session: LearnSession) -> LearnSessionReport:
         if state == "DEMONSTRATED": demonstrated.append(title)
         elif state in {"DEVELOPING", "INTRODUCED"}: developing.append(title)
         if state == "STRUGGLING": struggles.append(f"{title}: " + (item.get("misconceptions") or ["understanding is not yet consistent"])[-1])
+        misconceptions.extend(item.get("misconceptions") or [])
         if state in {"NEEDS_REVIEW", "STRUGGLING"}: needs_review.append(title)
     queue = list((session.state or {}).get("revisitQueue") or []); next_focus = [by_id.get(cid, {}).get("title", cid) for cid in queue]
     next_focus.extend(needs_review)
-    return LearnSessionReport(covered=covered, demonstrated=demonstrated, developing=developing, struggles=struggles, needsReview=list(dict.fromkeys(needs_review)), notCovered=not_covered, nextFocus=list(dict.fromkeys(next_focus)), stopped=session.status == "stopped")
+    return LearnSessionReport(covered=covered, demonstrated=demonstrated, developing=developing, struggles=struggles, misconceptions=list(dict.fromkeys(misconceptions)), needsReview=list(dict.fromkeys(needs_review)), notCovered=not_covered, nextFocus=list(dict.fromkeys(next_focus)), stopped=session.status == "stopped")
 
 def _completion_met(session: LearnSession) -> bool:
     concepts = _concepts(session); objectives = session.plan.get("objectives", [])

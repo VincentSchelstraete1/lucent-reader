@@ -264,6 +264,7 @@ class LearnSessionReport(BaseModel):
     needs_review: list[str] = Field(default_factory=list, alias="needsReview")
     not_covered: list[str] = Field(default_factory=list, alias="notCovered")
     next_focus: list[str] = Field(default_factory=list, alias="nextFocus")
+    misconceptions: list[str] = Field(default_factory=list)
     stopped: bool = False
 
 
