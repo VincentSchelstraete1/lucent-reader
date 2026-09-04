@@ -102,18 +102,26 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   const [answer, setAnswer] = useState("")
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [hint, setHint] = useState<string | null>(null)
+  const sessionRef = useRef<LearnSession | null>(null)
+
+  useEffect(() => {
+    if (!documentId) return
+    let cancelled = false
+    api.getActiveLearnSession(documentId).then((active) => { if (!cancelled && active && !sessionRef.current) { sessionRef.current = active; setSession(active) } }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [documentId])
 
   async function start() {
     if (!documentId) return
     setLoading(true); setError(null)
-    try { setSession(await api.createLearnSession(documentId, { goal, familiarity })); setAnswer(""); setSelectedOption(null); setHint(null) }
+    try { const created = await api.createLearnSession(documentId, { goal, familiarity }); sessionRef.current = created; setSession(created); setAnswer(""); setSelectedOption(null); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start this learning session.") }
     finally { setLoading(false) }
   }
   async function respond(response?: string, optionId?: string) {
     if (!session) return
     setLoading(true); setError(null)
-    try { setSession(await api.submitLearnResponse(session.id, { response, optionId })); setAnswer(""); setSelectedOption(null); setHint(null) }
+    try { const updated = await api.submitLearnResponse(session.id, { response, optionId }); sessionRef.current = updated; setSession(updated); setAnswer(""); setSelectedOption(null); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Your response could not be saved.") }
     finally { setLoading(false) }
   }

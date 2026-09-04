@@ -39,3 +39,6 @@ def test_learn_session_is_owned_and_resumable(client):
     resumed = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "reviewing"}).json()
     assert resumed["id"] == first["id"]
     assert resumed["goal"] == "understand"
+    active = client.get(f"/documents/{document['id']}/learn-sessions/active")
+    assert active.status_code == 200
+    assert active.json()["id"] == first["id"]

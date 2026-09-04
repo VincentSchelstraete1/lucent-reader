@@ -14,8 +14,10 @@ def test_goal_changes_the_learning_strategy():
     understand = build_learn_plan(_note(), "understand", "new")
     solve = build_learn_plan(_note(), "solve", "new")
     memorize = build_learn_plan(_note(), "memorize", "new")
+    exam = build_learn_plan(_note(), "exam", "new")
     assert [step.type for step in understand.objectives[0].steps] != [step.type for step in memorize.objectives[0].steps]
     assert [step.type for step in solve.objectives[0].steps] != [step.type for step in memorize.objectives[0].steps]
+    assert [step.type for step in exam.objectives[0].steps] == ["teach", "multiple_choice", "short_answer"]
     assert memorize.objectives[0].steps[-1].type == "short_answer"
 
 

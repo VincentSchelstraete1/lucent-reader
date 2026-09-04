@@ -400,6 +400,7 @@ export const api = {
   generateStepThrough: (request: { fixture_name: string; source_text: string; mode: "replay" | "live"; save_fixture?: boolean }) => post<StepThroughResponse>("/dev/step-through/generate", request)
   ,createLearnSession: (documentId: number, request: { goal: LearnGoal; familiarity: LearnFamiliarity; restart?: boolean }) => post<LearnSession>(`/documents/${documentId}/learn-sessions`, request)
   ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
+  ,getActiveLearnSession: (documentId: number) => get<LearnSession | null>(`/documents/${documentId}/learn-sessions/active`)
   ,submitLearnResponse: (sessionId: string, request: { response?: string; optionId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
   ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
 }

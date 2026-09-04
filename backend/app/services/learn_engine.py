@@ -65,6 +65,8 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement best captures {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A detail not established by this material."}, {"id": "c", "label": "A reversed version of the relationship."}], answerId="a", feedbackIncorrect=f"Return to the central idea: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                if goal == "exam":
+                    steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-exam-recall", type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the central idea, not a peripheral detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         elif goal == "memorize":
             definition = next((c for c in comps if c.get("kind") == "key_definition" and _clean(c.get("term")) and _clean(c.get("definition"))), None)
             term = _clean(definition.get("term")) if definition else title

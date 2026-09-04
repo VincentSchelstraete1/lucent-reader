@@ -90,6 +90,13 @@ def get_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends
     return _session_payload(_get_owned_session(db, session_id, user))
 
 
+@router.get("/documents/{document_id}/learn-sessions/active", response_model=LearnSessionResponse | None)
+def get_active_learn_session(document_id: int, db=Depends(get_db), user: User = Depends(get_current_user)):
+    _owned_document(db, document_id, user)
+    session = db.execute(select(LearnSession).where(LearnSession.document_id == document_id, LearnSession.user_id == user.id, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
+    return _session_payload(session) if session else None
+
+
 @router.post("/learn-sessions/{session_id}/hints", response_model=LearnHintResponse, dependencies=[Depends(require_csrf)])
 def get_learn_hint(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
