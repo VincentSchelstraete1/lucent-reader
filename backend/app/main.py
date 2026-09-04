@@ -11,6 +11,7 @@ from app.routers.auth import router as auth_router
 from app.routers.ingestion import router as ingestion_router
 from app.routers.routing import router as routing_router
 from app.routers.step_through import router as step_through_router
+from app.routers.learn import router as learn_router
 from app.config import settings
 import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
@@ -58,6 +59,7 @@ app.include_router(auth_router, tags=["Authentication"])
 app.include_router(ingestion_router, tags=["Ingestion"])
 app.include_router(routing_router, tags=["Routing"])
 app.include_router(step_through_router, tags=["Development"])
+app.include_router(learn_router, tags=["Learn"])
 
 
 

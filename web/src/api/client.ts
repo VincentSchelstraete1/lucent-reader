@@ -343,6 +343,12 @@ export type StepThroughFixture = { name: string; source_text: string; source_has
 export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "sample_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; stop_reason?: string | null; parsed: boolean; truncated: boolean; validation: "passed" | "failed"; error?: string | null }
 export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: StepThroughMetadata }
 
+export type LearnGoal = "understand" | "solve" | "memorize" | "exam"
+export type LearnFamiliarity = "new" | "somewhat_familiar" | "reviewing"
+export type LearnOption = { id: string; label: string }
+export type LearnStepView = { id: string; type: string; title: string; prompt?: string | null; content?: string | null; options: LearnOption[]; visualRef?: { sectionId?: string; componentIndex?: number } | null; sectionId?: string | null; componentIndex?: number | null; hintsAvailable: number }
+export type LearnSession = { id: string; documentId: number; goal: LearnGoal; familiarity: LearnFamiliarity; status: "active" | "completed" | "abandoned"; objectiveIndex: number; stepIndex: number; objectiveCount: number; objectiveTitle?: string | null; step?: LearnStepView | null; feedback?: string | null; feedbackKind?: "correct" | "incorrect" | "info" | null; hintsUsed: number; completedObjectives: number; weakObjectives: string[] }
+
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
 
@@ -392,4 +398,8 @@ export const api = {
   routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text }),
   getStepThroughFixtures: () => get<StepThroughFixture[]>("/dev/step-through/fixtures"),
   generateStepThrough: (request: { fixture_name: string; source_text: string; mode: "replay" | "live"; save_fixture?: boolean }) => post<StepThroughResponse>("/dev/step-through/generate", request)
+  ,createLearnSession: (documentId: number, request: { goal: LearnGoal; familiarity: LearnFamiliarity; restart?: boolean }) => post<LearnSession>(`/documents/${documentId}/learn-sessions`, request)
+  ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
+  ,submitLearnResponse: (sessionId: string, request: { response?: string; optionId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
+  ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
 }

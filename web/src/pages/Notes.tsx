@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
+import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
@@ -93,20 +93,60 @@ export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; 
   return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} depth={depth} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.slice(0, depth === "concise" ? 2 : note.keyTakeaways.length).map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
 }
 
-function LearnView({ note, onBack }: { note: SectionNote; onBack: () => void }) {
-  const walkthrough = note.components.find((component: any) => component.kind === "walkthrough" && component.mechanism) as any
-  return <section className="learn-workspace" aria-labelledby="learn-heading">
+function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId: number | null | undefined; onBack: () => void }) {
+  const [goal, setGoal] = useState<LearnGoal>("understand")
+  const [familiarity, setFamiliarity] = useState<LearnFamiliarity>("new")
+  const [session, setSession] = useState<LearnSession | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [answer, setAnswer] = useState("")
+  const [selectedOption, setSelectedOption] = useState<string | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
+
+  async function start() {
+    if (!documentId) return
+    setLoading(true); setError(null)
+    try { setSession(await api.createLearnSession(documentId, { goal, familiarity })); setAnswer(""); setSelectedOption(null); setHint(null) }
+    catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start this learning session.") }
+    finally { setLoading(false) }
+  }
+  async function respond(response?: string, optionId?: string) {
+    if (!session) return
+    setLoading(true); setError(null)
+    try { setSession(await api.submitLearnResponse(session.id, { response, optionId })); setAnswer(""); setSelectedOption(null); setHint(null) }
+    catch (e) { setError(e instanceof Error ? e.message : "Your response could not be saved.") }
+    finally { setLoading(false) }
+  }
+  async function requestHint() {
+    if (!session) return
+    try { const result = await api.getLearnHint(session.id); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
+    catch (e) { setError(e instanceof Error ? e.message : "No hint is available right now.") }
+  }
+
+  if (!session) return <section className="learn-workspace learn-onboarding" aria-labelledby="learn-heading">
     <button className="learn-back" type="button" onClick={onBack}>← Back to notes</button>
     <p className="note-kicker">Focused learning</p>
-    <h2 id="learn-heading">{walkthrough?.title ?? note.title}</h2>
+    <h2 id="learn-heading">What do you want to get out of this?</h2>
     <p className="learn-context">{note.title}</p>
-    {walkthrough ? <>
-      <p className="learn-goal">{String(walkthrough.learningGoal ?? walkthrough.mechanism.learningGoal)}</p>
-      <StepThroughMechanism data={generatedMechanismToRendererData(walkthrough.mechanism)} />
-    </> : <>
-      <p className="learn-empty">This section is best learned as a concise reference. No focused walkthrough is available.</p>
-      <button className="btn btn-primary" type="button" onClick={onBack}>Return to notes</button>
-    </>}
+    <div className="learn-choice-group"><p className="learn-choice-label">Choose a goal</p><div className="learn-choice-grid">{([['understand', 'Understand the concepts', 'Build intuition and see how ideas connect.'], ['solve', 'Learn to solve problems', 'Practice methods and apply them step by step.'], ['memorize', 'Memorize the content', 'Practice important facts, terms, and formulas.'], ['exam', 'Prepare for an exam', 'Mix understanding, recall, and application.']] as const).map(([value, label, description]) => <button type="button" key={value} className={goal === value ? "learn-choice selected" : "learn-choice"} onClick={() => setGoal(value)}><strong>{label}</strong><span>{description}</span></button>)}</div></div>
+    <div className="learn-choice-group"><p className="learn-choice-label">How familiar are you with this already?</p><div className="learn-familiarity-row">{([['new', 'New to this'], ['somewhat_familiar', 'Somewhat familiar'], ['reviewing', 'Mostly reviewing']] as const).map(([value, label]) => <button type="button" key={value} className={familiarity === value ? "learn-familiarity selected" : "learn-familiarity"} onClick={() => setFamiliarity(value)}>{label}</button>)}</div></div>
+    {error && <p className="error" role="alert">{error}</p>}
+    <button className="btn btn-primary" type="button" disabled={loading || !documentId} onClick={start}>{loading ? "Preparing your session…" : "Start learning"}</button>
+  </section>
+
+  if (session.status === "completed" || !session.step) return <section className="learn-workspace learn-complete" aria-labelledby="learn-heading"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><p className="note-kicker">Session complete</p><h2 id="learn-heading">You worked through {session.completedObjectives} objective{session.completedObjectives === 1 ? "" : "s"}.</h2>{session.weakObjectives.length > 0 && <p className="learn-context">A few ideas are marked for review when you return.</p>}<div className="learn-result-actions"><button className="btn" type="button" onClick={onBack}>Review notes</button>{documentId && <button className="btn btn-primary" type="button" onClick={() => window.location.assign(`/quizzes/generating?document_id=${documentId}`)}>Take the quiz</button>}</div></section>
+
+  const step = session.step
+  const visualRef = step.visualRef
+  const visualComponent = visualRef && typeof visualRef.componentIndex === "number" ? note.components[visualRef.componentIndex] as any : null
+  const requiresResponse = ["multiple_choice", "short_answer", "numeric", "problem", "prediction"].includes(step.type)
+  return <section className="learn-workspace learn-session" aria-labelledby="learn-heading">
+    <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span aria-live="polite">Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span></div>
+    <p className="note-kicker">{session.goal === "solve" ? "Problem solving" : session.goal === "memorize" ? "Retrieval practice" : "Focused learning"}</p>
+    <h2 id="learn-heading">{session.objectiveTitle ?? note.title}</h2>
+    <div className="learn-progress" role="progressbar" aria-valuemin={0} aria-valuemax={session.objectiveCount} aria-valuenow={session.objectiveIndex + 1}><span style={{ width: `${((session.objectiveIndex + 1) / Math.max(1, session.objectiveCount)) * 100}%` }} /></div>
+    <article className="learn-step"><p className="learn-step-count">Step {session.stepIndex + 1}</p><h3>{step.title}</h3>{step.content && <p className="learn-step-content">{step.content}</p>}{visualComponent?.mechanism && <StepThroughMechanism data={generatedMechanismToRendererData(visualComponent.mechanism)} />}{step.prompt && <p className="learn-question">{step.prompt}</p>}{step.options.length > 0 && <div className="learn-options">{step.options.map((option) => <button type="button" key={option.id} className={selectedOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setSelectedOption(option.id)}>{option.label}</button>)}</div>}{requiresResponse && step.options.length === 0 && <input className="learn-answer" aria-label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && answer.trim()) respond(answer) }} placeholder="Type your response" />}{hint && <p className="learn-hint" role="status"><strong>Hint {session.hintsUsed}:</strong> {hint}</p>}{session.feedback && <p className={`learn-feedback ${session.feedbackKind ?? "info"}`} role="status">{session.feedback}</p>}<div className="learn-step-actions">{step.hintsAvailable > 0 && <button className="btn" type="button" onClick={requestHint}>Hint</button>}{requiresResponse ? <button className="btn btn-primary" type="button" disabled={loading || (step.options.length > 0 ? !selectedOption : !answer.trim())} onClick={() => respond(answer, selectedOption ?? undefined)}>{loading ? "Checking…" : "Submit"}</button> : <button className="btn btn-primary" type="button" disabled={loading} onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button>}</div></article>
+    {error && <p className="error" role="alert">{error}</p>}
   </section>
 }
 
@@ -216,6 +256,6 @@ export function Notes() {
     {state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}
     {availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}
     {state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}
-    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min · {mode === "learn" ? "focused learning" : mode === "flashcards" ? "recall practice" : "ready to review"}</p></div><div className="notes-actions"><div className="study-mode-tabs" role="tablist" aria-label="Study mode"><button type="button" role="tab" aria-selected={mode === "notes"} className={mode === "notes" ? "active" : ""} onClick={() => setMode("notes")}>Notes</button><button type="button" role="tab" aria-selected={mode === "learn"} className={mode === "learn" ? "active" : ""} onClick={() => setMode("learn", activeNote?.id)}>Learn</button><button type="button" role="tab" aria-selected={mode === "flashcards"} className={mode === "flashcards" ? "active" : ""} onClick={() => setMode("flashcards")}>Flashcards</button><button type="button" role="tab" aria-selected={false} onClick={startQuiz}>Quiz</button></div><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{mode === "learn" && activeNote ? <LearnView note={activeNote} onBack={() => setMode("notes", activeNote.id)} /> : mode === "flashcards" ? <FlashcardsView notes={notes} onBack={() => setMode("notes")} /> : <><nav className="section-index" aria-label="Note sections"><span>Sections</span>{notes.map((note, index) => { const hasWalkthrough = note.components.some((component: any) => component.kind === "walkthrough" && component.mechanism); return <span className="section-index-item" key={note.id}><a className={note.id === activeNote?.id ? "active" : ""} href={`#${note.id}`}>{index + 1}. {note.title}</a>{hasWalkthrough && <button type="button" onClick={() => setMode("learn", note.id)} aria-label={`Learn ${note.title}`}>Learn</button>}</span>})}</nav>{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}</>}
+    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min · {mode === "learn" ? "focused learning" : mode === "flashcards" ? "recall practice" : "ready to review"}</p></div><div className="notes-actions"><div className="study-mode-tabs" role="tablist" aria-label="Study mode"><button type="button" role="tab" aria-selected={mode === "notes"} className={mode === "notes" ? "active" : ""} onClick={() => setMode("notes")}>Notes</button><button type="button" role="tab" aria-selected={mode === "learn"} className={mode === "learn" ? "active" : ""} onClick={() => setMode("learn", activeNote?.id)}>Learn</button><button type="button" role="tab" aria-selected={mode === "flashcards"} className={mode === "flashcards" ? "active" : ""} onClick={() => setMode("flashcards")}>Flashcards</button><button type="button" role="tab" aria-selected={false} onClick={startQuiz}>Quiz</button></div><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{mode === "learn" && activeNote ? <LearnView note={activeNote} documentId={state.result.document_id} onBack={() => setMode("notes", activeNote.id)} /> : mode === "flashcards" ? <FlashcardsView notes={notes} onBack={() => setMode("notes")} /> : <><nav className="section-index" aria-label="Note sections"><span>Sections</span>{notes.map((note, index) => { const hasWalkthrough = note.components.some((component: any) => component.kind === "walkthrough" && component.mechanism); return <span className="section-index-item" key={note.id}><a className={note.id === activeNote?.id ? "active" : ""} href={`#${note.id}`}>{index + 1}. {note.title}</a>{hasWalkthrough && <button type="button" onClick={() => setMode("learn", note.id)} aria-label={`Learn ${note.title}`}>Learn</button>}</span>})}</nav>{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}</>}
   </div>
 }
