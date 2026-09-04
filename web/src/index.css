@@ -78,6 +78,9 @@
 .status-failed .section-status { color: #7a5a12; }
 .notes-progress-summary { color: #6c746e; margin-top: -.4rem; }
 .notes-document-heading { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; border-bottom: 1px solid #d8d2c5; padding: 1.5rem 0 .9rem; }
+.notes-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: flex-end; }
+.notes-actions label { color: #6c746e; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+.notes-actions select { border: 1px solid #c8c5bb; border-radius: 999px; background: #fffdf8; color: #2d302d; padding: .55rem .8rem; font: inherit; }
 .notes-document-heading h2 { font: 400 clamp(1.75rem, 4vw, 2.45rem) "Instrument Serif", Georgia, serif; margin: .15rem 0; }
 .notes-document-heading p:not(.note-kicker) { color: #6c746e; font-size: .82rem; margin: 0; }
 .golden-experience { margin-top: 3rem; border-top: 1px solid #d8d2c5; padding-top: 1.5rem; }

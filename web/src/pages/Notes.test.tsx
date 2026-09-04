@@ -57,4 +57,16 @@ describe("SectionNote product rendering", () => {
     expect(html).toContain("<details")
     expect(html).toContain("<summary>Energy changes form in an isolated system.")
   })
+
+  it("changes the reading depth without changing the semantic note", () => {
+    const note: SectionNote = {
+      id: "section-depth", title: "Depth", bigIdea: "A concise idea.", learningGoals: [], keyTakeaways: [], sourceBlockIds: ["b"], omittedNoise: [],
+      components: [{ kind: "explanation", title: "Context", text: "A first sentence stays visible. A second sentence adds context for learners who want more detail. A third sentence adds the final nuance. A fourth sentence adds another useful distinction so the detailed mode has meaningful supporting material to reveal.", sourceBlockIds: ["b"], nodes: [], edges: [], items: [], dimensions: [], steps: [] }],
+    }
+    const concise = renderToStaticMarkup(createElement(NoteView, { notes: [note], depth: "concise" }))
+    const detailed = renderToStaticMarkup(createElement(NoteView, { notes: [note], depth: "detailed" }))
+    expect(concise).not.toContain("final nuance")
+    expect(detailed).toContain("open=\"\"")
+    expect(detailed).toContain("final nuance")
+  })
 })

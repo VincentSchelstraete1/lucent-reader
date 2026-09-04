@@ -4,12 +4,14 @@ import { api, type DocumentIngestionResult, type ProgressiveSection, type Sectio
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
+type DepthMode = "concise" | "balanced" | "detailed"
 
-function SupportingText({ text }: { text: string }) {
+function SupportingText({ text, depth = "balanced" }: { text: string; depth?: DepthMode }) {
   const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean)
   if (text.length < 220 || sentences.length < 2) return <p>{text}</p>
   const lead = sentences[0]
-  return <details className="note-supporting"><summary>{lead}</summary><p>{sentences.slice(1).join(" ")}</p></details>
+  if (depth === "concise") return <p>{lead}</p>
+  return <details className="note-supporting" open={depth === "detailed"}><summary>{lead}</summary><p>{sentences.slice(1).join(" ")}</p></details>
 }
 
 function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
@@ -24,12 +26,12 @@ function recordFromSavedNote(note: { id: number; title: string; document_id: num
   } catch { return null }
 }
 
-function ComponentView({ component }: { component: SectionNote["components"][number] }) {
+function ComponentView({ component, depth = "balanced" }: { component: SectionNote["components"][number]; depth?: DepthMode }) {
   const c = component as any
   const [selected, setSelected] = useState<number | string | null>(null)
   if (c.kind === "relationship_map") {
     const nodes = new Map((c.nodes ?? []).map((node: any) => [String(node.id), node]))
-    return <div className="note-relationships" aria-label={c.title}>{(c.edges ?? []).map((edge: any, index: number) => {
+      return <div className="note-relationships" aria-label={c.title}>{(c.edges ?? []).map((edge: any, index: number) => {
       const source = nodes.get(String(edge.source)) as any
       const target = nodes.get(String(edge.target)) as any
       const detail = edge.explanation ?? source?.explanation ?? target?.explanation
@@ -67,11 +69,18 @@ function ComponentView({ component }: { component: SectionNote["components"][num
     return <div className="note-example">{c.problem && <p className="note-example-problem">{c.problem}</p>}{c.equation && <code className="note-equation">{c.equation}</code>}{(c.knownValues ?? []).length > 0 && <dl className="note-values">{c.knownValues.map((value: any, i: number) => <Fragment key={i}><dt>{String(value.name ?? value.symbol ?? "Value")}</dt><dd>{String(value.value ?? value.meaning ?? value.description ?? "")}</dd></Fragment>)}</dl>}<ol>{steps.slice(0, visible).map((step: any, i: number) => <li key={String(step.order ?? i)}>{String(step.description ?? step.label ?? step)}</li>)}</ol>{steps.length > 0 && <button className="note-reveal" type="button" onClick={() => setSelected(visible >= steps.length ? null : visible)}>{visible >= steps.length ? "Start again" : visible === 0 ? "Reveal the reasoning" : "Reveal next step"}</button>}{visible >= steps.length && c.result && <p><strong>Result:</strong> {c.result}</p>}{visible >= steps.length && c.interpretation && <p><strong>Meaning:</strong> {c.interpretation}</p>}</div>
   }
   if (c.kind === "callout") return <aside className={`note-callout note-callout-${c.calloutType ?? "important"}`}><p>{c.text}</p>{c.whyItMatters && <small>{c.whyItMatters}</small>}</aside>
-  return <SupportingText text={String(c.text || c.takeaway || c.definition || "")} />
+  return <SupportingText text={String(c.text || c.takeaway || c.definition || "")} depth={depth} />
 }
 
-export function NoteView({ notes }: { notes: SectionNote[] }) {
-  return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
+export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; depth?: DepthMode }) {
+  return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} depth={depth} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.slice(0, depth === "concise" ? 2 : note.keyTakeaways.length).map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
+}
+
+function estimateMinutes(notes: SectionNote[], depth: DepthMode): number {
+  const chars = notes.reduce((sum, note) => sum + note.bigIdea.length + note.components.reduce((n, component: any) => n + String(component.text ?? component.definition ?? component.interpretation ?? "").length, 0), 0)
+  const visualWeight = notes.reduce((sum, note) => sum + note.components.filter((component: any) => ["flow", "structure", "relationship_map", "worked_example", "equation"].includes(component.kind)).length, 0)
+  const multiplier = depth === "detailed" ? 1.35 : depth === "concise" ? 0.7 : 1
+  return Math.max(1, Math.round(((chars / 900) + visualWeight * 0.45) * multiplier))
 }
 
 export function Notes() {
@@ -82,6 +91,7 @@ export function Notes() {
   const [history, setHistory] = useState<LearningNoteRecord[]>([])
   const [selectedHistory, setSelectedHistory] = useState(0)
   const [quizStatus, setQuizStatus] = useState<"idle" | "working" | "error">("idle")
+  const [depth, setDepth] = useState<DepthMode>("balanced")
   const runRef = useRef(0)
   useEffect(() => {
     let cancelled = false
@@ -128,6 +138,7 @@ export function Notes() {
   }
   const sections = state.sections ?? []
   const notes = state.result?.section_notes ?? []
+  const estimatedMinutes = estimateMinutes(notes, depth)
   const availableHistory = history.length ? history : state.result ? [state.result] : []
-    return <div className="page notes-page"><header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header><section className="notes-import"><label htmlFor="notes-file">Import learning material</label><p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p><input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} /><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>{state.status === "error" && <p className="error" role="alert">{state.message}</p>}</section>{state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}{availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}{state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}{state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"}</p></div><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} /> : <p className="empty">No sections were produced for this document.</p>}</>}</div>
+    return <div className="page notes-page"><header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header><section className="notes-import"><label htmlFor="notes-file">Import learning material</label><p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p><input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} /><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>{state.status === "error" && <p className="error" role="alert">{state.message}</p>}</section>{state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}{availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}{state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}{state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min</p></div><div className="notes-actions"><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}</div>
 }
