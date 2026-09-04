@@ -3,7 +3,7 @@ from pathlib import PurePosixPath
 import json
 import re
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from uuid import uuid4
 from starlette.concurrency import run_in_threadpool
 
@@ -29,7 +29,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
-from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
+from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, TeachingDepth, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
 from sqlalchemy import select
 
 
@@ -88,13 +88,13 @@ async def _generate_section_notes(blocks, objects):
     sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     return await generate_sections_concurrently(sections, objects, concurrency=3)
 
-async def _generate_outputs(extracted, blocks, decisions, semantic_generator):
+async def _generate_outputs(extracted, blocks, decisions, semantic_generator, depth: TeachingDepth = "balanced"):
     # Keep the legacy per-block note payload available for the inspector, but
     # make the user-facing coherent path section-level and model-backed.
     deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
     note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
     objects = {section.learning_block_id: section.learning_object for section in note.sections}
-    section_notes = await generate_sections_concurrently(group_learning_blocks(blocks), objects, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    section_notes = await generate_sections_concurrently(group_learning_blocks(blocks), objects, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=depth)
     return note, section_notes
 
 
@@ -262,7 +262,7 @@ async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semant
         state["section_note"] = SectionNote.model_validate(note)
         state["error"] = "Section used deterministic fallback" if error else None
     sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
-    await generate_sections_progressively(sections, objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None)
+    await generate_sections_progressively(sections, objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=job.get("depth", "balanced"))
     result = PdfIngestionResponse.model_validate({
         **job["base"].model_dump(by_alias=True),
         "section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]],
@@ -280,6 +280,7 @@ async def start_progressive_pdf(
     ingestor: DocumentIngestor = Depends(get_document_ingestor),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
+    depth: TeachingDepth = Query("balanced"),
 ) -> ProgressiveStartResponse:
     if file.content_type not in PDF_MEDIA_TYPES:
         await file.close()
@@ -300,7 +301,7 @@ async def start_progressive_pdf(
     base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [])
     sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     job_id = uuid4().hex
-    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "user_id": user.id, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
+    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "user_id": user.id, "depth": depth, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
     for state in _PROGRESSIVE_JOBS[job_id]["sections"]: state["status"] = "generating"
     background_tasks.add_task(_run_progressive_job, job_id, extracted, blocks, decisions, semantic_generator)
     return ProgressiveStartResponse(job_id=job_id, filename=filename, sections=[ProgressiveSectionResponse(**state) for state in _PROGRESSIVE_JOBS[job_id]["sections"]])

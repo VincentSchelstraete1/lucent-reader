@@ -49,7 +49,9 @@ function ComponentView({ component, depth = "balanced" }: { component: SectionNo
       if (!node || path.has(nodeId)) return null
       const children = edges.filter((edge: any) => String(edge.source) === nodeId)
       const nextPath = new Set(path).add(nodeId)
-      return <div className="flow-branch" key={`${[...path].join("-")}-${nodeId}`}><button className={`note-node${selected === nodeId ? " selected" : ""}`} type="button" onClick={() => setSelected(selected === nodeId ? null : nodeId)} aria-expanded={selected === nodeId}>{String(node.label)}</button>{selected === nodeId && <p className="note-detail" aria-live="polite">{String(node.explanation ?? c.transitionExplanation ?? "This step changes the path shown below.")}</p>}{children.length > 0 && <div className={`flow-children${children.length > 1 ? " flow-split" : ""}`}>{children.map((edge: any, index: number) => <div className="flow-child" key={`${nodeId}-${edge.target}-${index}`}><div className="note-edge"><span aria-hidden="true">↓</span><strong>{String(edge.relation)}</strong></div>{renderNode(String(edge.target), nextPath)}</div>)}</div>}</div>
+      const nodeDetail = typeof node.explanation === "string" && node.explanation.trim() ? node.explanation : null
+      const nodeView = nodeDetail ? <button className={`note-node${selected === nodeId ? " selected" : ""}`} type="button" onClick={() => setSelected(selected === nodeId ? null : nodeId)} aria-expanded={selected === nodeId}>{String(node.label)}</button> : <span className="note-node note-node-static">{String(node.label)}</span>
+      return <div className="flow-branch" key={`${[...path].join("-")}-${nodeId}`}>{nodeView}{selected === nodeId && nodeDetail && <p className="note-detail" aria-live="polite">{String(nodeDetail)}</p>}{children.length > 0 && <div className={`flow-children${children.length > 1 ? " flow-split" : ""}`}>{children.map((edge: any, index: number) => <div className="flow-child" key={`${nodeId}-${edge.target}-${index}`}><div className="note-edge"><span aria-hidden="true">↓</span><strong>{String(edge.relation)}</strong></div>{renderNode(String(edge.target), nextPath)}</div>)}</div>}</div>
     }
     return <div className="note-flow" aria-label={c.title}><p className="note-hint">Select a step for its role in the mechanism.</p>{(roots.length ? roots : [...nodeMap.keys()].slice(0, 1)).map((root) => renderNode(root, new Set()))}{c.transitionExplanation && <p className="note-why"><strong>What the path means</strong>{String(c.transitionExplanation)}</p>}</div>
   }
@@ -74,11 +76,12 @@ function ComponentView({ component, depth = "balanced" }: { component: SectionNo
   }
   if (c.kind === "walkthrough" && c.mechanism) {
     const mechanism = c.mechanism
+    const [started, setStarted] = useState(false)
     return <div className="note-walkthrough">
       <p className="note-walkthrough-goal">{String(c.learningGoal ?? mechanism.learningGoal)}</p>
       <p className="note-walkthrough-bottleneck"><strong>Focus:</strong> {String(c.bottleneck)}</p>
       {c.estimatedMinutes && <p className="note-walkthrough-time">About {String(c.estimatedMinutes)} min</p>}
-      <StepThroughMechanism data={generatedMechanismToRendererData(mechanism)} />
+      {!started ? <button className="note-walkthrough-start" type="button" onClick={() => setStarted(true)}>Start walkthrough →</button> : <StepThroughMechanism data={generatedMechanismToRendererData(mechanism)} />}
     </div>
   }
   if (c.kind === "callout") return <aside className={`note-callout note-callout-${c.calloutType ?? "important"}`}><p>{c.text}</p>{c.whyItMatters && <small>{c.whyItMatters}</small>}</aside>
@@ -137,7 +140,7 @@ export function Notes() {
     setState({ status: "uploading", filename: file.name })
     try {
       if (file.name.toLowerCase().endsWith(".pdf")) {
-        const start = await api.startProgressiveDocument(file)
+        const start = await api.startProgressiveDocument(file, depth)
         if (run !== runRef.current) return
         setState({ status: "processing", filename: start.filename, sections: start.sections })
         let poll = await api.pollProgressiveDocument(start.job_id)

@@ -584,12 +584,15 @@ h2 {
 .note-walkthrough-goal { font-weight: 600; margin: 0 0 .35rem; }
 .note-walkthrough-bottleneck { color: var(--lucent-caption); margin: 0 0 .35rem; }
 .note-walkthrough-time { color: var(--lucent-accent-dark); font-size: .85rem; margin: 0 0 .8rem; }
+.note-walkthrough-start { border: 1px solid var(--lucent-accent-dark); border-radius: 999px; background: transparent; color: var(--lucent-accent-dark); font-weight: 600; padding: .55rem 1rem; cursor: pointer; }
+.note-walkthrough-start:hover { background: rgba(88,115,93,.08); }
 .note-node-multiplicity { color: var(--lucent-accent-dark); font-size: .75em; margin-left: .5rem; }
 .note-structure-connections { border-top: 1px solid var(--lucent-border); margin-top: 1rem; padding-top: .8rem; display: grid; gap: .45rem; }
 .note-structure-connections > strong { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--lucent-caption); }
 .note-structure-connections button { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; border: 0; background: transparent; color: inherit; text-align: left; padding: .35rem 0; cursor: pointer; }
 .note-structure-connections button b { color: var(--lucent-accent-dark); font-size: .85rem; }
 .note-structure-connections button small { flex-basis: 100%; color: var(--lucent-caption); }
+.note-node-static { cursor: default; }
 @media (max-width: 620px) {
   .notes-document-heading { align-items: flex-start; flex-direction: column; }
   .notes-document-heading .btn { width: 100%; }

@@ -365,9 +365,9 @@ export const api = {
     form.append("file", file)
     return postForm<DocumentIngestionResult>(endpoint, form)
   },
-  startProgressiveDocument: (file: File) => {
+  startProgressiveDocument: (file: File, depth: "concise" | "balanced" | "detailed" = "balanced") => {
     const form = new FormData(); form.append("file", file)
-    return postForm<ProgressiveStart>("/ingestion/progressive", form)
+    return postForm<ProgressiveStart>(`/ingestion/progressive?depth=${depth}`, form)
   },
   pollProgressiveDocument: (jobId: string) => get<ProgressivePoll>(`/ingestion/progressive/${jobId}`),
   routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text }),
