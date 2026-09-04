@@ -92,7 +92,7 @@ export function QuizGenerationPage() {
       <p className="note-kicker">Preparing your quiz</p>
       <h1>Building a quiz from this material</h1>
       <p className="page-subtitle">Lucent is selecting questions that test the important ideas.</p>
-      <div className="quiz-generation-track" role="progressbar" aria-label="Generating quiz" aria-valuemin={0} aria-valuemax={100} aria-valuenow={62}><span /></div>
+      <div className="quiz-generation-track" role="progressbar" aria-label="Generating quiz"><span /></div>
       <p className="quiz-generation-status">Generating questions…</p>
     </> : <>
       <p className="error" role="alert">{message}</p>
