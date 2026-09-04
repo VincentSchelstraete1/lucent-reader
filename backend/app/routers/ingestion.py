@@ -94,7 +94,8 @@ async def _generate_outputs(extracted, blocks, decisions, semantic_generator, de
     deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
     note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
     objects = {section.learning_block_id: section.learning_object for section in note.sections}
-    section_notes = await generate_sections_concurrently(group_learning_blocks(blocks), objects, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=depth)
+    eligible_sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
+    section_notes = await generate_sections_concurrently(eligible_sections, objects, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=depth)
     return note, section_notes
 
 
