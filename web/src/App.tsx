@@ -1,7 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate, Link, Outlet } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, Link, Outlet, useParams } from "react-router-dom"
 import { Library } from "./pages/Library"
 import { SourceDetail } from "./pages/SourceDetail"
-import { DocumentDetail } from "./pages/DocumentDetail"
 import { QuizPage } from "./pages/QuizPage"
 import { LandingPage } from "./pages/LandingPage"
 import { AuthPage } from "./pages/AuthPage"
@@ -13,6 +12,11 @@ import { DocumentIngestionDemo } from "./pages/DocumentIngestionDemo"
 import { Notes } from "./pages/Notes"
 import { StepThroughDev } from "./pages/StepThroughDev"
 
+function LegacyDocumentRedirect() {
+  const { documentId } = useParams()
+  return <Navigate to={`/app/material/${documentId}?mode=notes`} replace />
+}
+
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
 function AppLayout() {
@@ -22,8 +26,7 @@ function AppLayout() {
         <Link to="/app" className="brand" data-tour="app-brand">
           Lucent Library
         </Link>
-        <Link to="/app/learning-canvas" className="app-header-link">Learning Canvas</Link>
-        <Link to="/app/notes" className="app-header-link">Notes</Link>
+        <Link to="/app" className="app-header-link">Library</Link>
       </header>
       <main>
         <Outlet />
@@ -46,8 +49,9 @@ export function App() {
           <Route element={<AppLayout />}>
             <Route path="/app" element={<Library />} />
             <Route path="/app/notes" element={<Notes />} />
+            <Route path="/app/material/:documentId" element={<Notes />} />
             <Route path="/sources/:sourceId" element={<SourceDetail />} />
-            <Route path="/documents/:documentId" element={<DocumentDetail />} />
+            <Route path="/documents/:documentId" element={<LegacyDocumentRedirect />} />
             <Route path="/quizzes/:quizId" element={<QuizPage />} />
             <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
             {import.meta.env.DEV && <Route path="/app/dev/ingestion" element={<DocumentIngestionDemo />} />}

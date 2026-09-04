@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 
@@ -132,24 +132,30 @@ function estimateMinutes(notes: SectionNote[], depth: DepthMode): number {
 
 export function Notes() {
   const navigate = useNavigate()
+  const { documentId: routeDocumentId } = useParams()
   const [searchParams] = useSearchParams()
   const mode: StudyMode = searchParams.get("mode") === "learn" ? "learn" : searchParams.get("mode") === "flashcards" ? "flashcards" : "notes"
   const requestedSection = searchParams.get("section")
   const [file, setFile] = useState<File | null>(null)
   const [state, setState] = useState<State>({ status: "idle" })
   const [history, setHistory] = useState<LearningNoteRecord[]>([])
+  const [materialTitle, setMaterialTitle] = useState<string | null>(null)
   const [selectedHistory, setSelectedHistory] = useState(0)
   const [quizStatus, setQuizStatus] = useState<"idle" | "working" | "error">("idle")
   const [depth, setDepth] = useState<DepthMode>("balanced")
   const runRef = useRef(0)
   useEffect(() => {
     let cancelled = false
+    const requestedDocument = Number(searchParams.get("document_id") ?? routeDocumentId)
+    if (Number.isFinite(requestedDocument) && requestedDocument > 0) {
+      api.getDocument(requestedDocument).then((document) => { if (!cancelled) setMaterialTitle(document.title.replace(/\.(pdf|docx|pptx)$/i, "") || "Untitled material") }).catch(() => { if (!cancelled) setMaterialTitle(null) })
+    }
     api.getNotes().then((notes) => {
       if (cancelled) return
       const persisted = notes.filter((note) => note.content_type === "section_note").map(recordFromSavedNote).filter((item): item is LearningNoteRecord => item !== null).reverse()
-      const requestedDocument = Number(searchParams.get("document_id"))
-      const selected = persisted.find((item) => item.document_id === requestedDocument) ?? persisted[0]
-      if (persisted.length) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setDepth(selected.teaching_depth ?? "balanced"); setState({ status: "complete", result: selected }) }
+      const selected = Number.isFinite(requestedDocument) && requestedDocument > 0 ? persisted.find((item) => item.document_id === requestedDocument) : persisted[0]
+      if (selected) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setDepth(selected.teaching_depth ?? "balanced"); setState({ status: "complete", result: selected }) }
+      else if (Number.isFinite(requestedDocument) && requestedDocument > 0) { setHistory([]); setState({ status: "idle", filename: materialTitle ?? undefined }) }
       else { setHistory([]); setState({ status: "idle" }) }
       window.setTimeout(() => { if (window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }) }, 0)
     }).catch(() => {
@@ -157,8 +163,8 @@ export function Notes() {
       if (saved) { try { const parsed = JSON.parse(saved) as LearningNoteRecord[]; if (Array.isArray(parsed) && parsed.length) { setHistory(parsed); setState({ status: "complete", result: parsed[0] }) } } catch { sessionStorage.removeItem("lucent-note-history") } }
     })
     return () => { cancelled = true }
-  }, [searchParams])
-  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setDepth(record.teaching_depth ?? depth); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }) }
+  }, [routeDocumentId, searchParams])
+  function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setDepth(record.teaching_depth ?? depth); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }); if (record.document_id) navigate(`/app/material/${record.document_id}?mode=notes`) }
 
   async function startQuiz() {
     const documentId = state.result?.document_id
@@ -194,10 +200,10 @@ export function Notes() {
     const params = new URLSearchParams(searchParams)
     params.set("mode", nextMode)
     if (sectionId) params.set("section", sectionId)
-    navigate(`/app/notes?${params.toString()}`)
+    navigate(`${routeDocumentId ? `/app/material/${routeDocumentId}` : "/app/notes"}?${params.toString()}`)
   }
   return <div className="page notes-page">
-    <header className="page-header"><p className="note-kicker">Study library</p><h1>Notes</h1><p className="page-subtitle">Turn a lecture, chapter, or slide deck into a focused study guide.</p></header>
+    <header className="page-header"><p className="note-kicker">{routeDocumentId ? <Link to="/app">← Back to library</Link> : "Study library"}</p><h1>{routeDocumentId && materialTitle ? materialTitle : "Notes"}</h1><p className="page-subtitle">{routeDocumentId ? "Turn this material into a focused study guide." : "Turn a lecture, chapter, or slide deck into a focused study guide."}</p></header>
     <section className="notes-import">
       <label htmlFor="notes-file">Import learning material</label>
       <p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p>
