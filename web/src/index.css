@@ -10,19 +10,24 @@
 .library-new-menu a { display: grid; gap: .15rem; padding: .65rem .7rem; color: #315d4d; text-decoration: none; border-radius: 7px; }
 .library-new-menu a:hover, .library-new-menu a:focus-visible { background: #eef2e8; outline: 2px solid transparent; }
 .library-new-menu small { color: #6c746e; font-size: .72rem; }
-.library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+.library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; padding: .55rem .7rem; border: 1px solid #ded9ce; border-radius: 10px; background: rgba(255,253,248,.58); }
 .library-search input { width: min(28rem, 70vw); border: 1px solid #c8c5bb; border-radius: 999px; background: #fffdf8; padding: .65rem .9rem; font: inherit; }
+.library-controls { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .library-filters { display: flex; gap: .25rem; }
 .library-filters button { border: 0; border-radius: 999px; background: transparent; color: #55544e; padding: .48rem .7rem; cursor: pointer; font: inherit; }
 .library-filters button.active, .library-filters button:focus-visible { background: #dcefe5; color: #315d4d; outline: 2px solid transparent; }
+.library-sort { display: inline-flex; align-items: center; gap: .35rem; color: #6c746e; font-size: .82rem; }
+.library-sort select { border: 1px solid #c8c5bb; border-radius: 6px; background: #fffdf8; padding: .35rem .45rem; font: inherit; color: #3f433e; }
 .library-list h2 { font: 400 1.8rem "Instrument Serif", Georgia, serif; margin-bottom: .7rem; }
 .material-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid #d8d2c5; padding: 1rem .25rem; color: inherit; text-decoration: none; }
-.material-row:hover, .material-row:focus-visible { background: rgba(238,242,232,.55); outline: 2px solid transparent; }
+.material-row:hover { background: rgba(238,242,232,.55); }
+.material-row:focus-visible { background: rgba(238,242,232,.7); outline: 2px solid #4f806c; outline-offset: 2px; }
 .material-row h3 { margin: 0; font-size: 1.05rem; font-weight: 600; }
 .material-row p, .material-status { margin: .25rem 0 0; color: #6c746e; font-size: .82rem; }
 .material-status { display: grid; gap: .25rem; text-align: right; }
 .material-status span { color: #315d4d; font-weight: 600; }
 .library-empty { border: 1px dashed #c8c5bb; border-radius: 12px; padding: 3rem 1.5rem; text-align: center; background: #fbfaf6; }
+.btn-secondary { border: 1px solid #bfc8bd; background: transparent; color: #315d4d; }
 .library-empty h2 { font: 400 2rem "Instrument Serif", Georgia, serif; margin-top: 0; }
 .notes-import { border: 1px solid #d8d2c5; border-radius: 14px; padding: 1.15rem 1.25rem; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: #fbfaf6; }
 .notes-import label { font-weight: 600; width: 100%; }

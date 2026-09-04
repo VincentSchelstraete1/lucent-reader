@@ -14,8 +14,15 @@ function materialType(material: Material) {
   return material.source?.type === "upload" ? "Document" : "Website"
 }
 
+export function formatMaterialTitle(title: string) {
+  const cleaned = title.replace(/^(pdf|docx|pptx):/i, "").replace(/\.(pdf|docx|pptx)$/i, "").replace(/\s+/g, " ").trim()
+  if (!cleaned) return "Untitled material"
+  if (!/[_-]/.test(cleaned)) return cleaned
+  return cleaned.split(/[_-]+/).filter(Boolean).map((word) => word.length <= 3 ? word.toUpperCase() : `${word[0].toUpperCase()}${word.slice(1)}`).join(" ")
+}
+
 function materialTitle(material: Material) {
-  return material.document.title.replace(/\.(pdf|docx|pptx)$/i, "").trim() || "Untitled material"
+  return formatMaterialTitle(material.document.title)
 }
 
 function noteSummary(note?: Note) {
@@ -36,6 +43,7 @@ export function Library() {
   const [state, setState] = useState<State>({ status: "loading", materials: [] })
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<"all" | "documents" | "websites">("all")
+  const [sort, setSort] = useState<"recent" | "name">("recent")
   const [newOpen, setNewOpen] = useState(false)
 
   useEffect(() => {
@@ -55,14 +63,14 @@ export function Library() {
     const type = materialType(material)
     const matchesFilter = filter === "all" || (filter === "documents" ? type !== "Website" : type === "Website")
     return matchesQuery && matchesFilter
-  }), [filter, query, state.materials])
+  }).sort((a, b) => sort === "name" ? materialTitle(a).localeCompare(materialTitle(b)) : new Date(b.document.updated_at).getTime() - new Date(a.document.updated_at).getTime()), [filter, query, sort, state.materials])
 
   return <div className="page library-page">
-    <header className="library-header"><div><p className="note-kicker">Lucent library</p><h1>Study materials</h1><p className="page-subtitle">Your lectures, chapters, and articles in one place.</p></div><div className="library-new-wrap"><button className="btn btn-primary" type="button" aria-expanded={newOpen} onClick={() => setNewOpen((open) => !open)}>+ New</button>{newOpen && <div className="library-new-menu" role="menu"><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Upload document <small>PDF, DOCX, PPTX</small></Link><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Add webpage <small>Use an existing saved source</small></Link></div>}</div></header>
-    <div className="library-toolbar"><label className="library-search"><span className="sr-only">Search materials</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search materials" /></label><div className="library-filters" role="group" aria-label="Filter materials">{([['all', 'All'], ['documents', 'Documents'], ['websites', 'Websites']] as const).map(([value, label]) => <button key={value} type="button" className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div></div>
+    <header className="library-header"><div><p className="note-kicker">Lucent library</p><h1>Study materials</h1><p className="page-subtitle">Your lectures, chapters, and articles in one place.</p></div><div className="library-new-wrap"><button className="btn btn-primary" type="button" aria-haspopup="menu" aria-expanded={newOpen} onKeyDown={(event) => { if (event.key === "Escape") setNewOpen(false) }} onClick={() => setNewOpen((open) => !open)}>+ New</button>{newOpen && <div className="library-new-menu" role="menu"><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Upload document <small>PDF, DOCX, PPTX</small></Link><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Add webpage <small>Save a webpage to Lucent</small></Link></div>}</div></header>
+    <div className="library-toolbar"><label className="library-search"><span className="sr-only">Search materials</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search materials" /></label><div className="library-controls"><div className="library-filters" role="group" aria-label="Filter materials">{([['all', 'All'], ['documents', 'Documents'], ['websites', 'Websites']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div><label className="library-sort">Sort <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")}><option value="recent">Recent</option><option value="name">Name</option></select></label></div></div>
     {state.status === "loading" && <Skeleton rows={3} />}
     {state.status === "error" && <p className="error">Could not load your study materials: {state.message}</p>}
-    {state.status === "loaded" && materials.length === 0 && <section className="library-empty"><h2>Your library is empty</h2><p>Add a lecture, article, or document and Lucent will turn it into a learning experience.</p><Link className="btn btn-primary" to="/app/notes">+ Add your first material</Link></section>}
-    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>Recent materials</h2>{materials.map((material) => <Link className="material-row" key={material.document.id} to={`/app/material/${material.document.id}`}><div><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note)}<span>Open →</span></div></Link>)}</section>}
+    {state.status === "loaded" && materials.length === 0 && (state.materials.length === 0 ? <section className="library-empty"><h2>Your library is empty</h2><p>Add a lecture, article, or document and Lucent will turn it into a learning experience.</p><Link className="btn btn-primary" to="/app/notes">+ Add your first material</Link></section> : <section className="library-empty"><h2>No materials match{query ? ` “${query}”` : " this filter"}</h2><p>Try a different search or filter.</p>{(query || filter !== "all") && <button className="btn btn-secondary" type="button" onClick={() => { setQuery(""); setFilter("all") }}>Clear search and filters</button>}</section>)}
+    {state.status === "loaded" && materials.length > 0 && <section className="library-list" aria-label="Study materials"><h2>All materials</h2>{materials.map((material) => <Link className="material-row" key={material.document.id} to={`/app/material/${material.document.id}`}><div><h3>{materialTitle(material)}</h3><p>{materialType(material)}{materialType(material) === "Website" && sourceDomain(material.source?.url) ? ` · ${sourceDomain(material.source?.url)}` : ""}</p></div><div className="material-status">{noteSummary(material.note)}</div></Link>)}</section>}
   </div>
 }
