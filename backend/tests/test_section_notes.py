@@ -222,6 +222,18 @@ def test_structure_and_relationship_map_preserve_teaching_explanations():
     assert generated.components[1].edges[0].relation == "map"
 
 
+def test_architecture_structure_supports_multiplicity_and_connections():
+    architecture = {"kind": "structure", "title": "System", "sourceBlockIds": ["b"], "structureType": "architecture",
+                    "root": {"id": "system", "label": "System", "children": [{"id": "core", "label": "Core", "multiplicity": "×4"}, {"id": "bus", "label": "Interconnect"}]},
+                    "connections": [{"source": "core", "target": "bus", "relation": "connects", "explanation": "Each core shares the interconnect."}],
+                    "whyItMatters": "Repeated cores share a communication path."}
+    note = GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [architecture], "keyTakeaways": [], "omittedNoise": []})
+    component = note.components[0]
+    assert component.kind == "structure"
+    assert component.structure_type == "architecture"
+    assert component.root.children[0].multiplicity == "×4"
+
+
 def test_relationship_map_rejects_explanatory_prose_as_visual_relation_label():
     with pytest.raises(ValueError):
         GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [{

@@ -196,6 +196,7 @@ class TreeNode(BaseModel):
     id: str = Field(min_length=1)
     label: str = Field(min_length=1, max_length=120)
     explanation: str | None = None
+    multiplicity: str | None = Field(default=None, max_length=40)
     children: list["TreeNode"] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -209,7 +210,23 @@ class TreeNode(BaseModel):
 class StructureComponent(_TypedComponent):
     kind: Literal["structure"]
     root: TreeNode
+    structure_type: Literal["hierarchy", "architecture"] = Field(default="hierarchy", alias="structureType")
+    connections: list[GraphEdge] = Field(default_factory=list, max_length=12)
     why_it_matters: str | None = Field(default=None, alias="whyItMatters")
+
+    @model_validator(mode="after")
+    def validate_architecture_links(self):
+        seen: set[str] = set()
+        def visit(node: TreeNode):
+            if node.id in seen:
+                raise ValueError("structure tree contains duplicate node IDs")
+            seen.add(node.id)
+            for child in node.children:
+                visit(child)
+        visit(self.root)
+        if any(edge.source not in seen or edge.target not in seen for edge in self.connections):
+            raise ValueError("structure connections must reference tree nodes")
+        return self
 
 
 class RelationshipMapComponent(_TypedComponent):
@@ -491,7 +508,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
                   "Do not add plausible background knowledge, design advice, examples, properties, or causes from memory. If the source does not explain why, omit that explanation. "
                   "Check numerical comparisons and arithmetic exactly; do not turn a derived result into a broader optimization claim. "
                   "Use an explanation only for ideas that are genuinely clearer as prose, adds information beyond bigIdea, and fits in 1–2 concise sentences. For a process, mechanism, or causal chain prefer a FLOW with 2+ concise nodes, "
-                  "meaningful 1–3 word verb relations, putting any longer meaning in the edge explanation, and a separate brief explanation of why transitions matter. For a multi-stage mechanism whose state changes are clearer interactively, you may choose one WALKTHROUGH component using the supplied semantic mechanism contract; use it selectively, keep it to 2–5 meaningful stages, and never include coordinates or presentation code. For containment or levels prefer a connected STRUCTURE "
+                  "meaningful 1–3 word verb relations, putting any longer meaning in the edge explanation, and a separate brief explanation of why transitions matter. For a multi-stage mechanism whose state changes are clearer interactively, you may choose one WALKTHROUGH component using the supplied semantic mechanism contract; use it selectively, keep it to 2–5 meaningful stages, and never include coordinates or presentation code. For containment or levels prefer a connected STRUCTURE; set structureType to architecture only when repeated components, multiplicity, or cross-component connections are important, and use concise connections rather than inventing links. "
                   "with an explicit root and children. For equations or numerical reasoning prefer EQUATION or WORKED_EXAMPLE with variables, supplied values, ordered "
                   "substitution/derivation steps, result, and interpretation. For systems of concepts use a selective connected RELATIONSHIP_MAP (3–7 concepts) with "
                   "specific relations such as uses, maps, caches, contains, enables, or depends on; never use generic related to. Preserve technical terminology, mechanisms, "
