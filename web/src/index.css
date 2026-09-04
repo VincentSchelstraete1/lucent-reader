@@ -90,6 +90,9 @@
 .section-index span { color: #6c746e; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; margin-right: .2rem; }
 .section-index a { color: #315d4d; text-decoration: none; font-size: .82rem; padding: .35rem .55rem; border-radius: 999px; }
 .section-index a:hover, .section-index a:focus-visible, .section-index a.active { background: #eef2e8; outline: 2px solid transparent; }
+.section-index-item { display: inline-flex; align-items: center; gap: .2rem; }
+.section-index-item button { border: 0; background: transparent; color: #6c746e; font-size: .72rem; padding: .25rem; cursor: pointer; }
+.section-index-item button:hover, .section-index-item button:focus-visible { color: #167a5a; text-decoration: underline; outline: 2px solid transparent; }
 .learn-workspace { margin-top: 1.3rem; max-width: 820px; }
 .learn-back { border: 0; background: transparent; color: #315d4d; padding: 0; cursor: pointer; font: inherit; }
 .learn-context { color: #6c746e; font-size: .8rem; margin-top: -.35rem; }
