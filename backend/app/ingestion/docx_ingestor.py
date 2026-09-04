@@ -145,6 +145,24 @@ class DocxDocumentIngestor:
                         location=SourceLocation(kind="document", sequence_id=sequence_id),
                     )
                 )
+                # Keep the image in the ordered source stream as a structural
+                # block.  The previous implementation exposed image bytes in
+                # RawDocument but omitted the corresponding block, so
+                # segmentation could never attach the figure to a
+                # LearningBlock.  The renderer can now associate it by ID
+                # without turning the image into model-readable prose.
+                blocks.append(
+                    RawContentBlock(
+                        id=f"docx-{sequence_id}-block",
+                        page_number=None,
+                        type="image",
+                        bbox=None,
+                        reading_order=order,
+                        image_id=image_id,
+                        location=SourceLocation(kind="document", sequence_id=sequence_id),
+                    )
+                )
+                order += 1
         except DocumentExtractionError:
             raise
         except Exception as exc:

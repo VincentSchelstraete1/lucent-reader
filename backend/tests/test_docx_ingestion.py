@@ -135,6 +135,9 @@ def test_docx_image_is_extracted_with_document_provenance():
     assert len(normalized.images) == 1
     assert normalized.images[0].location is not None
     assert normalized.images[0].location.kind == "document"
+    image_blocks = [block for block in normalized.pages[0].blocks if block.type == "image"]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].source_image_id in normalized.images[0].source_image_ids
 
 
 def test_docx_normalization_event_with_no_page_number_serializes_safely():
