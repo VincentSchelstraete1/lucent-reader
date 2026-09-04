@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, Link, Outlet, useParams } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, Link, NavLink, Outlet, useParams } from "react-router-dom"
 import { Library } from "./pages/Library"
 import { SourceDetail } from "./pages/SourceDetail"
 import { QuizGenerationPage, QuizPage } from "./pages/QuizPage"
@@ -21,18 +21,19 @@ function LegacyDocumentRedirect() {
 // the new public pages (landing/login/signup/onboarding) render without it.
 function AppLayout() {
   return (
-    <>
-      <header className="app-header">
-        <Link to="/app" className="brand" data-tour="app-brand">
-          Lucent Library
-        </Link>
-        <Link to="/app" className="app-header-link">Library</Link>
-      </header>
-      <main>
-        <Outlet />
-      </main>
+    <div className="app-shell">
+      <aside className="app-sidebar" aria-label="Study navigation">
+        <Link to="/app" className="brand" data-tour="app-brand">Lucent</Link>
+        <nav className="app-sidebar-nav">
+          <NavLink to="/app" end className={({ isActive }) => isActive ? "active" : ""}>Library</NavLink>
+          <NavLink to="/app?view=learn" className={({ isActive }) => isActive ? "active" : ""}>Learn</NavLink>
+          <NavLink to="/app?view=flashcards" className={({ isActive }) => isActive ? "active" : ""}>Flashcards</NavLink>
+          <NavLink to="/app?view=quiz" className={({ isActive }) => isActive ? "active" : ""}>Quiz</NavLink>
+        </nav>
+      </aside>
+      <main><Outlet /></main>
       <AppWalkthrough />
-    </>
+    </div>
   )
 }
 
