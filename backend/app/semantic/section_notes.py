@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import time
@@ -18,6 +19,30 @@ _SECTION_CACHE: dict[str, SectionNote] = {}
 logger = logging.getLogger(__name__)
 SECTION_NOTE_MAX_TOKENS = 1600
 SECTION_NOTE_TIMEOUT_SECONDS = 20
+
+
+def _normalize_generated_section_payload(raw: Any) -> Any:
+    """Normalize transport-level JSON strings before strict validation.
+
+    Some provider/tool responses have encoded an otherwise valid array as a
+    JSON string. Decode only the known structured collection fields; the
+    resulting value still passes the complete GeneratedSectionNote and
+    canonical SectionNote validators below. No fields are invented or
+    discarded.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    normalized = dict(raw)
+    for field_name in ("components", "learningGoals", "keyTakeaways", "omittedNoise"):
+        value = normalized.get(field_name)
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, list):
+                normalized[field_name] = decoded
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -444,7 +469,7 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
         raise
     try:
         logger.info("section_generation_response section_id=%s title=%r top_level_keys=%s", section.id, section.title, sorted(raw.keys()) if isinstance(raw, dict) else [])
-        generated = GeneratedSectionNote.model_validate(raw)
+        generated = GeneratedSectionNote.model_validate(_normalize_generated_section_payload(raw))
         note = SectionNote.model_validate({**generated.model_dump(by_alias=True), "id": section.id, "sourceBlockIds": section.learning_block_ids})
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)

@@ -8,7 +8,7 @@ from app.semantic.section_notes import SectionComponent
 from app.semantic import DeterministicSemanticGenerator
 from app.routing import RepresentationDecision
 from app.segmentation import LearningBlock
-from app.semantic.section_notes import model_section_note, GeneratedSectionNote
+from app.semantic.section_notes import model_section_note, GeneratedSectionNote, _normalize_generated_section_payload
 from app.semantic.schema import CausalObject, PlainTextObject
 from app.schemas.ingestion import ProgressiveSectionResponse
 
@@ -149,6 +149,22 @@ def test_generated_section_note_rejects_unknown_top_level_fields():
             "components": [], "keyTakeaways": [], "omittedNoise": [],
             "plausibleButUnsupported": "must not slip through",
         })
+
+
+def test_provider_json_encoded_component_array_is_normalized_then_strictly_validated():
+    payload = {
+        "title": "Mechanism", "bigIdea": "A process changes state.", "learningGoals": [],
+        "components": '[{"kind":"explanation","title":"Core","text":"The state changes.","sourceBlockIds":["b"]}]',
+        "keyTakeaways": ["State changes."], "omittedNoise": [],
+    }
+    note = GeneratedSectionNote.model_validate(_normalize_generated_section_payload(payload))
+    assert isinstance(note.components, list)
+    assert note.components[0].kind == "explanation"
+
+
+def test_malformed_json_string_is_not_silently_accepted():
+    payload = {"components": "not json"}
+    assert _normalize_generated_section_payload(payload)["components"] == "not json"
 
 
 def test_section_prompt_enforces_source_boundary_and_branch_topology(monkeypatch):
