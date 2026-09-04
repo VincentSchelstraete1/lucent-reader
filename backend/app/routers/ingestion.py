@@ -142,6 +142,16 @@ def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> Pd
         "filename": response.filename,
         "sourceType": response.source_type,
         "teachingDepth": response.teaching_depth,
+        # Keep extracted instructional figures with the note.  LearningBlock
+        # attachments provide the deterministic association back to sections;
+        # the image bytes remain the extractor's data URI (no external upload
+        # or new persistence service is required for this local product path).
+        "images": [image.model_dump() for image in response.images],
+        "learningBlocks": [
+            {"id": block.id, "attachedImageIds": block.attached_image_ids}
+            for block in response.learning_blocks
+            if block.attached_image_ids
+        ],
         "sectionNotes": [note.model_dump(by_alias=True) for note in response.section_notes],
     })
     note = db.execute(select(Note).where(

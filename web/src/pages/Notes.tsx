@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
+import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote, type RawImage } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 
-type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
+type PersistedImage = Pick<RawImage, "id" | "asset_reference" | "caption" | "mime_type" | "page_number"> & { source_image_ids?: string[] }
+type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode; images?: PersistedImage[]; learning_blocks?: Array<{ id: string; attachedImageIds: string[] }> }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
 type DepthMode = "concise" | "balanced" | "detailed"
 
@@ -16,14 +17,14 @@ function SupportingText({ text, depth = "balanced" }: { text: string; depth?: De
 }
 
 function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
-  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type, teaching_depth: result.teaching_depth }
+  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type, teaching_depth: result.teaching_depth, images: result.images, learning_blocks: result.learning_blocks.map((block) => ({ id: block.id, attachedImageIds: block.attached_image_ids })) }
 }
 
 function recordFromSavedNote(note: { id: number; title: string; document_id: number | null; content: string }): LearningNoteRecord | null {
   try {
-    const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; teachingDepth?: DepthMode; sectionNotes?: SectionNote[] }
+    const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; teachingDepth?: DepthMode; sectionNotes?: SectionNote[]; images?: PersistedImage[]; learningBlocks?: Array<{ id: string; attachedImageIds?: string[] }> }
     if (!Array.isArray(payload.sectionNotes)) return null
-    return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id }
+    return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id, images: payload.images ?? [], learning_blocks: (payload.learningBlocks ?? []).map((block) => ({ id: block.id, attachedImageIds: block.attachedImageIds ?? [] })) }
   } catch { return null }
 }
 
@@ -88,8 +89,14 @@ function ComponentView({ component, depth = "balanced" }: { component: SectionNo
   return <SupportingText text={String(c.text || c.takeaway || c.definition || "")} depth={depth} />
 }
 
-export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; depth?: DepthMode }) {
-  return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} depth={depth} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.slice(0, depth === "concise" ? 2 : note.keyTakeaways.length).map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
+export function NoteView({ notes, depth = "balanced", images = [], learningBlocks = [] }: { notes: SectionNote[]; depth?: DepthMode; images?: PersistedImage[]; learningBlocks?: Array<{ id: string; attachedImageIds: string[] }> }) {
+  const blockImages = new Map(learningBlocks.map((block) => [block.id, block.attachedImageIds]))
+  const imageMap = new Map(images.map((image) => [image.id, image]))
+  return <div className="notes-output">{notes.map((note) => {
+    const imageIds = [...new Set(note.sourceBlockIds.flatMap((blockId) => blockImages.get(blockId) ?? []))]
+    const sectionImages = imageIds.map((id) => imageMap.get(id)).filter((image): image is PersistedImage => Boolean(image && image.asset_reference))
+    return <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{sectionImages.length > 0 && <div className="note-source-figures" aria-label="Source figures">{sectionImages.map((image) => <figure key={image.id}><img src={image.asset_reference} alt={image.caption || "Instructional figure from source"} />{image.caption && <figcaption>{image.caption}</figcaption>}</figure>)}</div>}{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} depth={depth} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.slice(0, depth === "concise" ? 2 : note.keyTakeaways.length).map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>
+  })}</div>
 }
 
 function estimateMinutes(notes: SectionNote[], depth: DepthMode): number {
@@ -172,6 +179,6 @@ export function Notes() {
     {state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}
     {availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}
     {state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}
-    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min</p></div><div className="notes-actions"><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}
+    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min</p></div><div className="notes-actions"><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={startQuiz}>{quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{notes.length ? <NoteView notes={notes} depth={depth} images={state.result.images} learningBlocks={state.result.learning_blocks} /> : <p className="empty">No sections were produced for this document.</p>}</>}
   </div>
 }
