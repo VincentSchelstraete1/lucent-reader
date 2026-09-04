@@ -230,6 +230,14 @@
 .step-goal { color: #55544e; max-width: 65ch; }
 .step-visual { background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: .75rem 1rem .5rem; }
 .step-visual svg { width: 100%; height: auto; display: block; }
+.mechanism-scene svg { width: 100%; height: auto; display: block; }
+.mechanism-region { stroke: #9bb3bd; stroke-width: 1.5; }
+.mechanism-region text, .mechanism-annotation { fill: #3d5148; font-size: 13px; font-weight: 600; }
+.mechanism-boundary { stroke: #6d8074; stroke-width: 6; stroke-linecap: round; }
+.mechanism-flow { stroke: #477456; stroke-width: 2.5; stroke-dasharray: 6 5; animation: mechanism-flow-dash 1.1s linear infinite; }
+.mechanism-active circle { animation: lucent-node-focus 1.2s ease-in-out infinite alternate; }
+@keyframes mechanism-flow-dash { to { stroke-dashoffset: -22; } }
+@media (prefers-reduced-motion: reduce) { .mechanism-flow { animation: none; } .mechanism-active circle { animation: none; } }
 .structured-visual { margin: 1rem 0; padding: 1rem; border: 1px solid #d8d2c5; border-radius: 10px; background: #fbfaf6; color: #34352f; }
 .structured-visual-heading { display: flex; gap: .75rem; align-items: baseline; margin-bottom: .45rem; }
 .structured-visual-heading span { color: #6c7168; font-size: .82rem; }

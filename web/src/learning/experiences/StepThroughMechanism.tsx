@@ -18,7 +18,9 @@ export type SemanticRegion = { id: string; label: string; entityIds: string[]; s
 export type OrderedCollectionState = { items: Array<{ entityId: string; status: EntityStatus }>; regions: SemanticRegion[] }
 export type OrderedOperation = { type: "compare" | "swap" | "move" | "highlight" | "mark_complete"; entityIds: string[]; reason?: string | null; result?: string | null }
 export type OrderedItemsScene = { type: "ordered_items_scene"; before: OrderedCollectionState; operation: OrderedOperation; after?: OrderedCollectionState | null; notice?: string | null }
-export type StageVisual = SequenceExchangeScene | VectorScene | OrderedItemsScene
+export type MechanismPrimitive = { id: string; kind: "region" | "boundary" | "object" | "particle" | "flow" | "quantity_bar" | "annotation"; label?: string; x: number; y: number; width?: number; height?: number; x2?: number; y2?: number; value?: number; color?: string; visibleFromStage?: number; detail?: string }
+export type MechanismScene = { type: "mechanism_scene"; primitives: MechanismPrimitive[]; operations?: Array<{ type: "photon_arrives" | "electron_moves" | "particle_accumulates" | "gradient_increases" | "object_transforms" | "value_changes" | "flow"; primitiveIds: string[]; explanation?: string }> }
+export type StageVisual = SequenceExchangeScene | VectorScene | OrderedItemsScene | MechanismScene
 export type MechanismPrediction = { prompt: string; options: string[]; answer: number; reveal: string }
 export type StepThroughMechanismData = {
   sceneType: string
@@ -128,6 +130,15 @@ function SequenceExchangeVisual({ scene }: { scene: SequenceExchangeScene }) {
   </svg>{emphasized && (emphasized.reason || emphasized.result) && <div className="sequence-teaching-detail"><strong>{emphasized.label}</strong>{emphasized.reason && <span>{emphasized.reason}</span>}{emphasized.result && <span className="sequence-result">Result: {emphasized.result}</span>}</div>}</div>
 }
 
+function MechanismSceneVisual({ scene, stage }: { scene: MechanismScene; stage: number }) {
+  const visible = scene.primitives.filter((primitive) => (primitive.visibleFromStage ?? 0) <= stage)
+  const activeIds = new Set(scene.operations?.flatMap((operation) => operation.primitiveIds) ?? [])
+  return <div className="mechanism-scene" role="img" aria-label="Mechanism visual"><svg viewBox="0 0 720 360">
+    {visible.map((p) => p.kind === "region" ? <g key={p.id}><rect className="mechanism-region" x={p.x} y={p.y} width={p.width ?? 100} height={p.height ?? 80} rx="12" fill={p.color ?? "#e7efe7"} /><text x={p.x + 12} y={p.y + 22}>{p.label}</text></g> : p.kind === "boundary" ? <line key={p.id} className="mechanism-boundary" x1={p.x} y1={p.y} x2={p.x2 ?? p.x} y2={p.y2 ?? p.y} /> : p.kind === "particle" ? <g key={p.id} className={activeIds.has(p.id) ? "mechanism-active" : ""}><circle cx={p.x} cy={p.y} r="7" fill={p.color ?? "#4d8764"} /><text x={p.x + 11} y={p.y + 4}>{p.label}</text></g> : p.kind === "flow" ? <g key={p.id}><line className="mechanism-flow" x1={p.x} y1={p.y} x2={p.x2 ?? p.x + 40} y2={p.y2 ?? p.y} markerEnd="url(#mechanism-arrow)" /><text x={(p.x + (p.x2 ?? p.x + 40)) / 2} y={(p.y + (p.y2 ?? p.y)) / 2 - 6}>{p.label}</text></g> : p.kind === "quantity_bar" ? <g key={p.id}><text x={p.x} y={p.y - 6}>{p.label}: {p.value}</text><rect x={p.x} y={p.y} width={p.width ?? 100} height="12" rx="6" fill="#d9e5da" /><rect x={p.x} y={p.y} width={(p.width ?? 100) * Math.min(1, Math.max(0, p.value ?? 0))} height="12" rx="6" fill={p.color ?? "#4d8764"} /></g> : <text key={p.id} className="mechanism-annotation" x={p.x} y={p.y}>{p.label}</text>)}
+    <defs><marker id="mechanism-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#477456" /></marker></defs>
+  </svg></div>
+}
+
 const toScreen = ({ x, y }: { x: number; y: number }) => ({ x: 70 + x, y: 215 - y })
 
 function VectorArrow({ vector }: { vector: NonNullable<MechanismStage["vectors"]>[number] }) {
@@ -154,7 +165,7 @@ function VectorArrow({ vector }: { vector: NonNullable<MechanismStage["vectors"]
   </g>
 }
 
-const SUPPORTED_SCENES = new Set(["vector_scene", "sequence_exchange_scene", "ordered_items_scene"])
+const SUPPORTED_SCENES = new Set(["vector_scene", "sequence_exchange_scene", "ordered_items_scene", "mechanism_scene"])
 
 export function visualUnavailableReason(data: StepThroughMechanismData, stage: MechanismStage): string | null {
   if (!SUPPORTED_SCENES.has(data.sceneType)) return `Unsupported scene type: ${data.sceneType || "missing"}`
@@ -191,7 +202,7 @@ export function StepThroughMechanism({ data }: { data: StepThroughMechanismData 
   return <section className="step-mechanism" aria-label={data.learningGoal}>
     <p className="step-goal">Learning goal: {data.learningGoal}</p>
     <div className="step-visual" aria-live="polite">
-      {unavailable ? <VisualUnavailable reason={unavailable} /> : data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} entities={data.entities} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
+      {unavailable ? <VisualUnavailable reason={unavailable} /> : data.sceneType === "mechanism_scene" && current.visual?.type === "mechanism_scene" ? <MechanismSceneVisual scene={current.visual} stage={stage} /> : data.sceneType === "sequence_exchange_scene" && current.visual?.type === "sequence_exchange_scene" ? <SequenceExchangeVisual scene={current.visual} /> : data.sceneType === "ordered_items_scene" && current.visual?.type === "ordered_items_scene" ? <OrderedItemsVisual scene={current.visual} entities={data.entities} /> : data.sceneType === "vector_scene" ? <svg viewBox="0 0 420 250" role="img" aria-label={`${current.title}: ${current.explanation}`}>
         <line x1="35" y1="215" x2="390" y2="215" className="axis" /><line x1="70" y1="235" x2="70" y2="25" className="axis" />
         {vectors.map((vector) => <VectorArrow key={vector.id} vector={vector} />)}
         <text x="78" y="32" className="axis-label">y</text><text x="385" y="232" className="axis-label">x</text>
