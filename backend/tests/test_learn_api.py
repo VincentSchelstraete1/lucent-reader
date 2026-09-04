@@ -29,6 +29,7 @@ def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
     assert wrong["feedbackKind"] == "incorrect"
     assert wrong["step"] is not None, (wrong["status"], wrong["objectiveIndex"], wrong["stepIndex"], wrong["report"])
     assert wrong["step"]["id"] != next_step["step"]["id"]
+    assert wrong["action"]["type"] in {"give_example", "decrease_difficulty", "clarify_definition", "give_analogy"}
 
     remediation = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "the source-grounded relationship"}).json()
     assert remediation["status"] in {"active", "completed"}
