@@ -273,8 +273,9 @@ main {
 .app-sidebar-nav { display: grid; gap: .2rem; }
 .app-sidebar-nav a { display: flex; align-items: center; gap: .7rem; min-height: 41px; padding: .45rem .65rem; border-radius: 7px; color: #4f534d; text-decoration: none; font-size: .9rem; }
 .sidebar-icon { width: 18px; height: 18px; flex: 0 0 18px; }
-.app-sidebar-nav a:hover, .app-sidebar-nav a:focus-visible { background: rgba(236,233,224,.58); color: #3f433e; outline: 2px solid transparent; }
-.app-sidebar-nav a.active { background: #eeece4; color: #30342f; font-weight: 600; outline: 2px solid transparent; }
+.app-sidebar-nav a:hover { color: #30342f; }
+.app-sidebar-nav a:focus-visible { color: #30342f; outline: 2px solid transparent; text-decoration: underline; text-underline-offset: 4px; }
+.app-sidebar-nav a.active { background: transparent; color: #30342f; font-weight: 600; }
 .app-sidebar-account { display: flex; align-items: center; gap: .6rem; margin-top: auto; padding: .65rem .55rem; border-top: 1px solid #e5dfd3; color: #575b55; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-avatar { display: grid; flex: 0 0 1.8rem; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #dce8dd; color: #315d4d; font-size: .68rem; font-weight: 600; }
 .app-shell > main { max-width: none; margin-left: 216px; padding: 0 1.5rem 64px 2.5rem; }
