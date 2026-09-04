@@ -24,8 +24,6 @@ function AppLayout() {
         </Link>
         <Link to="/app/learning-canvas" className="app-header-link">Learning Canvas</Link>
         <Link to="/app/notes" className="app-header-link">Notes</Link>
-        {import.meta.env.DEV && <Link to="/app/dev/ingestion" className="app-header-link">Document ingestion</Link>}
-        {import.meta.env.DEV && <Link to="/app/dev/step-through" className="app-header-link">Step-through</Link>}
       </header>
       <main>
         <Outlet />
