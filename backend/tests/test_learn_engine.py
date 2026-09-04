@@ -1,5 +1,5 @@
-from app.services.learn_engine import build_learn_plan, grade_step
-from app.schemas.learn import MultipleChoiceStep, ShortAnswerStep
+from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step
+from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep
 
 
 def _note():
@@ -29,3 +29,10 @@ def test_short_answer_accepts_concept_words_without_exact_sentence_match():
 def test_multiple_choice_rejects_unknown_option():
     step = MultipleChoiceStep(id="s", type="multiple_choice", title="Check", prompt="Choose", options=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], answerId="a")
     assert grade_step(step, response=None, option_id="unknown")[0] is False
+
+
+def test_ordering_evaluation_reports_partial_understanding():
+    step = OrderingStep(id="flow", type="ordering", title="Order", prompt="Order", items=[{"id": "a", "label": "A"}, {"id": "b", "label": "B"}, {"id": "c", "label": "C"}], correctOrder=["a", "b", "c"])
+    evaluation = evaluate_step(step, response=None, option_id=None, ordered_ids=["a", "c", "b"])
+    assert evaluation.result == "partially_correct"
+    assert evaluation.remediation_category == "simplify"

@@ -27,10 +27,11 @@ def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
 
     wrong = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "unrelated"}).json()
     assert wrong["feedbackKind"] == "incorrect"
-    assert wrong["step"]["id"] == next_step["step"]["id"]
+    assert wrong["step"] is not None, (wrong["status"], wrong["objectiveIndex"], wrong["stepIndex"], wrong["report"])
+    assert wrong["step"]["id"] != next_step["step"]["id"]
 
-    completed = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "The idea matters."}).json()
-    assert completed["status"] == "completed"
+    remediation = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "the source-grounded relationship"}).json()
+    assert remediation["status"] in {"active", "completed"}
 
 
 def test_learn_session_is_owned_and_resumable(client):

@@ -7,7 +7,17 @@ from pydantic import BaseModel, Field, model_validator
 
 LearnGoal = Literal["understand", "solve", "memorize", "exam"]
 Familiarity = Literal["new", "somewhat_familiar", "reviewing"]
-LearnStatus = Literal["active", "completed", "abandoned"]
+LearnStatus = Literal["active", "completed", "stopped", "abandoned"]
+EvaluationResult = Literal["correct", "partially_correct", "incorrect", "insufficient_evidence"]
+RemediationCategory = Literal["none", "simplify", "example", "prerequisite", "change_modality", "revisit"]
+ConceptStateName = Literal["NOT_SEEN", "INTRODUCED", "DEVELOPING", "DEMONSTRATED", "NEEDS_REVIEW", "STRUGGLING"]
+TutorActionType = Literal[
+    "teach_concept", "clarify_definition", "give_example", "give_analogy",
+    "ask_multiple_choice", "ask_free_response", "ask_prediction", "ask_ordering",
+    "give_hint", "revisit_prerequisite", "revisit_concept", "increase_difficulty",
+    "decrease_difficulty", "advance_to_related_concept",
+    "give_worked_example", "show_process_visual", "show_diagram",
+]
 
 
 class LearnOption(BaseModel):
@@ -74,6 +84,20 @@ class PredictionStep(LearnStepBase):
         return self
 
 
+class OrderingStep(LearnStepBase):
+    type: Literal["ordering"]
+    prompt: str = Field(min_length=1, max_length=500)
+    items: list[LearnOption] = Field(min_length=2, max_length=8)
+    correct_order: list[str] = Field(alias="correctOrder", min_length=2, max_length=8)
+
+    @model_validator(mode="after")
+    def order_contract(self):
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)) or len(self.correct_order) != len(ids) or set(self.correct_order) != set(ids):
+            raise ValueError("correctOrder must reference every ordering item exactly once")
+        return self
+
+
 class ProblemStep(LearnStepBase):
     type: Literal["problem"]
     prompt: str = Field(min_length=1, max_length=500)
@@ -98,7 +122,7 @@ class WalkthroughStep(LearnStepBase):
     component_index: int = Field(alias="componentIndex", ge=0)
 
 
-LearnStep = Annotated[Union[TeachStep, MultipleChoiceStep, ShortAnswerStep, NumericAnswerStep, PredictionStep, ProblemStep, WalkthroughStep], Field(discriminator="type")]
+LearnStep = Annotated[Union[TeachStep, MultipleChoiceStep, ShortAnswerStep, NumericAnswerStep, PredictionStep, OrderingStep, ProblemStep, WalkthroughStep], Field(discriminator="type")]
 
 
 class LearningObjective(BaseModel):
@@ -117,6 +141,54 @@ class LearnPlan(BaseModel):
     objectives: list[LearningObjective] = Field(min_length=1, max_length=6)
 
 
+class TutorAction(BaseModel):
+    id: str = Field(min_length=1, max_length=60)
+    type: TutorActionType
+    concept_id: str = Field(alias="conceptId", min_length=1, max_length=60)
+    step_id: str | None = Field(default=None, alias="stepId")
+    rationale: str = Field(min_length=1, max_length=300)
+
+
+class ConceptEvidence(BaseModel):
+    concept_id: str = Field(alias="conceptId")
+    title: str
+    state: ConceptStateName
+    attempts: int = 0
+    correct: int = 0
+    partially_correct: int = Field(default=0, alias="partiallyCorrect")
+    incorrect: int = 0
+    insufficient_evidence: int = Field(default=0, alias="insufficientEvidence")
+    hints_used: int = Field(default=0, alias="hintsUsed")
+    interaction_types: list[str] = Field(default_factory=list, alias="interactionTypes")
+    misconceptions: list[str] = Field(default_factory=list)
+    immediate_success: bool = Field(default=False, alias="immediateSuccess")
+    delayed_success: bool = Field(default=False, alias="delayedSuccess")
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
+    first_seen: str | None = Field(default=None, alias="firstSeen")
+    last_seen: str | None = Field(default=None, alias="lastSeen")
+    last_result: EvaluationResult | None = Field(default=None, alias="lastResult")
+
+
+class LearnEvaluation(BaseModel):
+    result: EvaluationResult
+    confidence: float = Field(ge=0, le=1)
+    misconception: str | None = None
+    evidence: str = Field(min_length=1, max_length=500)
+    remediation_category: RemediationCategory = Field(alias="remediationCategory")
+
+
+class LearnSessionReport(BaseModel):
+    covered: list[str] = Field(default_factory=list)
+    demonstrated: list[str] = Field(default_factory=list)
+    developing: list[str] = Field(default_factory=list)
+    struggles: list[str] = Field(default_factory=list)
+    needs_review: list[str] = Field(default_factory=list, alias="needsReview")
+    not_covered: list[str] = Field(default_factory=list, alias="notCovered")
+    next_focus: list[str] = Field(default_factory=list, alias="nextFocus")
+    stopped: bool = False
+
+
 class LearnSessionCreateRequest(BaseModel):
     goal: LearnGoal
     familiarity: Familiarity
@@ -126,6 +198,7 @@ class LearnSessionCreateRequest(BaseModel):
 class LearnResponseRequest(BaseModel):
     response: str | None = None
     option_id: str | None = Field(default=None, alias="optionId")
+    ordered_ids: list[str] | None = Field(default=None, alias="orderedIds")
 
 
 class LearnHintResponse(BaseModel):
@@ -140,6 +213,7 @@ class LearnStepView(BaseModel):
     prompt: str | None = None
     content: str | None = None
     options: list[LearnOption] = Field(default_factory=list)
+    items: list[LearnOption] = Field(default_factory=list)
     visual_ref: dict | None = Field(default=None, alias="visualRef")
     section_id: str | None = Field(default=None, alias="sectionId")
     component_index: int | None = Field(default=None, alias="componentIndex")
@@ -162,4 +236,8 @@ class LearnSessionResponse(BaseModel):
     hints_used: int = Field(default=0, alias="hintsUsed")
     completed_objectives: int = Field(default=0, alias="completedObjectives")
     weak_objectives: list[str] = Field(default_factory=list, alias="weakObjectives")
-
+    action: TutorAction | None = None
+    evaluation: LearnEvaluation | None = None
+    concept_states: list[ConceptEvidence] = Field(default_factory=list, alias="conceptStates")
+    report: LearnSessionReport | None = None
+    ended_reason: str | None = Field(default=None, alias="endedReason")

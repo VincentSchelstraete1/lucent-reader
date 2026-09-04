@@ -346,8 +346,11 @@ export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: S
 export type LearnGoal = "understand" | "solve" | "memorize" | "exam"
 export type LearnFamiliarity = "new" | "somewhat_familiar" | "reviewing"
 export type LearnOption = { id: string; label: string }
-export type LearnStepView = { id: string; type: string; title: string; prompt?: string | null; content?: string | null; options: LearnOption[]; visualRef?: { sectionId?: string; componentIndex?: number } | null; sectionId?: string | null; componentIndex?: number | null; hintsAvailable: number }
-export type LearnSession = { id: string; documentId: number; goal: LearnGoal; familiarity: LearnFamiliarity; status: "active" | "completed" | "abandoned"; objectiveIndex: number; stepIndex: number; objectiveCount: number; objectiveTitle?: string | null; step?: LearnStepView | null; feedback?: string | null; feedbackKind?: "correct" | "incorrect" | "info" | null; hintsUsed: number; completedObjectives: number; weakObjectives: string[] }
+export type LearnStepView = { id: string; type: string; title: string; prompt?: string | null; content?: string | null; options: LearnOption[]; items: LearnOption[]; visualRef?: { sectionId?: string; componentIndex?: number } | null; sectionId?: string | null; componentIndex?: number | null; hintsAvailable: number }
+export type LearnEvaluation = { result: "correct" | "partially_correct" | "incorrect" | "insufficient_evidence"; confidence: number; misconception?: string | null; evidence: string; remediationCategory: string }
+export type LearnConceptState = { conceptId: string; title: string; state: string; attempts: number; correct: number; partiallyCorrect: number; incorrect: number; insufficientEvidence: number; hintsUsed: number; interactionTypes: string[]; misconceptions: string[]; immediateSuccess: boolean; delayedSuccess: boolean; sourceSectionIds: string[]; sourceBlockIds: string[]; lastResult?: string | null }
+export type LearnReport = { covered: string[]; demonstrated: string[]; developing: string[]; struggles: string[]; needsReview: string[]; notCovered: string[]; nextFocus: string[]; stopped: boolean }
+export type LearnSession = { id: string; documentId: number; goal: LearnGoal; familiarity: LearnFamiliarity; status: "active" | "completed" | "stopped" | "abandoned"; objectiveIndex: number; stepIndex: number; objectiveCount: number; objectiveTitle?: string | null; step?: LearnStepView | null; feedback?: string | null; feedbackKind?: "correct" | "incorrect" | "info" | null; hintsUsed: number; completedObjectives: number; weakObjectives: string[]; action?: { id: string; type: string; conceptId: string; stepId?: string | null; rationale: string } | null; evaluation?: LearnEvaluation | null; conceptStates: LearnConceptState[]; report?: LearnReport | null; endedReason?: string | null }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
@@ -401,6 +404,7 @@ export const api = {
   ,createLearnSession: (documentId: number, request: { goal: LearnGoal; familiarity: LearnFamiliarity; restart?: boolean }) => post<LearnSession>(`/documents/${documentId}/learn-sessions`, request)
   ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
   ,getActiveLearnSession: (documentId: number) => get<LearnSession | null>(`/documents/${documentId}/learn-sessions/active`)
-  ,submitLearnResponse: (sessionId: string, request: { response?: string; optionId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
+  ,submitLearnResponse: (sessionId: string, request: { response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
   ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
+  ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
 }

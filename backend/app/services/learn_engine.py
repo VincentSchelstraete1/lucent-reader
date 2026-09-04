@@ -6,8 +6,8 @@ import re
 from typing import Any
 
 from app.schemas.learn import (
-    LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep,
-    PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep,
+    LearnEvaluation, LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep,
+    OrderingStep, PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep,
 )
 
 
@@ -62,6 +62,15 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            elif any(c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2 for c in comps):
+                flow = next(c for c in comps if c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2)
+                node_ids = [str(node.get("id")) for node in flow.get("nodes", []) if node.get("id")]
+                options = [{"id": node_id, "label": _clean(next((node.get("label") for node in flow.get("nodes", []) if str(node.get("id")) == node_id), node_id))} for node_id in node_ids]
+                steps.append(OrderingStep(id=f"{section.get('id', 'section')}-order", type="ordering", title="Put the process in order", prompt=f"What is the sequence for {title}?", items=options[:8], correctOrder=node_ids[:8], feedbackIncorrect="Follow the transition from one step to the next in the process.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            elif goal == "understand" and any(c.get("kind") == "key_definition" for c in comps):
+                definition = next(c for c in comps if c.get("kind") == "key_definition")
+                answer = _clean(definition.get("definition")) or big_idea
+                steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-free", type="short_answer", title="Say it in your own words", prompt=f"What does {_clean(definition.get('term')) or title} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Focus on the defining relationship, not a supporting detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement best captures {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A detail not established by this material."}, {"id": "c", "label": "A reversed version of the relationship."}], answerId="a", feedbackIncorrect=f"Return to the central idea: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -72,6 +81,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             term = _clean(definition.get("term")) if definition else title
             answer = _clean(definition.get("definition")) if definition else (takeaways[0] if takeaways else big_idea)
             steps.append(TeachStep(id=f"{section.get('id', 'section')}-definition", type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A related but different idea."}, {"id": "c", "label": "A claim not supported by this material."}], answerId="a", feedbackIncorrect="Look for the defining relationship, not a nearby detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the definition above, then try the idea again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         else:  # solve
             example = next((c for c in comps if c.get("kind") in {"worked_example", "equation"}), None)
@@ -104,25 +114,47 @@ def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     visual_ref = data.get("visualRef")
     if data["type"] == "walkthrough":
         visual_ref = {"sectionId": data.get("sectionId"), "componentIndex": data.get("componentIndex")}
-    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=data.get("items", []), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+
+
+def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | None, ordered_ids: list[str] | None = None) -> LearnEvaluation:
+    """Deterministic first-pass evaluator used by the adaptive runtime."""
+    answer = _clean(option_id or response)
+    if isinstance(step, (TeachStep, WalkthroughStep)):
+        return LearnEvaluation(result="insufficient_evidence", confidence=0.15, evidence="Teaching content does not itself demonstrate recall.", remediationCategory="none")
+    if isinstance(step, (MultipleChoiceStep, PredictionStep)):
+        correct = answer == step.answer_id
+        return LearnEvaluation(result="correct" if correct else "incorrect", confidence=0.98 if correct else 0.9, evidence="Selected option matched the source-grounded answer." if correct else "Selected option did not match the source-grounded answer.", misconception=None if correct else (step.feedback_incorrect or "The distinction needs another explanation."), remediationCategory="none" if correct else "change_modality")
+    if isinstance(step, OrderingStep):
+        submitted = ordered_ids or ([part.strip() for part in answer.split(",")] if answer else [])
+        expected = list(step.correct_order)
+        if submitted == expected:
+            result, confidence = "correct", 0.98
+        elif submitted and set(submitted) == set(expected) and sum(a == b for a, b in zip(submitted, expected)) >= max(1, len(expected) // 2):
+            result, confidence = "partially_correct", 0.75
+        else:
+            result, confidence = "incorrect", 0.9
+        return LearnEvaluation(result=result, confidence=confidence, evidence="The ordered sequence reflects the process transitions." if result == "correct" else "The sequence needs the process transition made explicit.", misconception=None if result == "correct" else (step.feedback_incorrect or "Follow the causal transition from one step to the next."), remediationCategory="none" if result == "correct" else "simplify")
+    if isinstance(step, ProblemStep) and step.response_type == "numeric":
+        try:
+            correct = abs(float(answer) - float(step.answer or 0)) <= float(step.tolerance or 0.01)
+        except (TypeError, ValueError):
+            correct = False
+        return LearnEvaluation(result="correct" if correct else "incorrect", confidence=0.98 if correct else 0.85, evidence="Numeric result is within the accepted tolerance." if correct else "Numeric result is outside the accepted tolerance.", misconception=None if correct else "Check the operation and units before calculating again.", remediationCategory="none" if correct else "example")
+    normalized = _words(answer)
+    accepted = any(_words(item) <= normalized or _clean(item).casefold() == answer.casefold() for item in getattr(step, "accepted_answers", []))
+    required = set(getattr(step, "required_concepts", []))
+    if accepted or (bool(required) and required <= normalized):
+        result = "correct"
+    elif normalized and required and normalized.intersection(required):
+        result = "partially_correct"
+    else:
+        result = "incorrect"
+    return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "Try the defining relationship rather than a supporting detail."), remediationCategory="none" if result == "correct" else "simplify")
 
 
 def grade_step(step: LearnStep, *, response: str | None, option_id: str | None) -> tuple[bool | None, str]:
-    answer = _clean(option_id or response)
-    if isinstance(step, TeachStep) or isinstance(step, WalkthroughStep):
+    evaluation = evaluate_step(step, response=response, option_id=option_id)
+    if evaluation.result == "insufficient_evidence":
         return None, "Continue when you are ready."
-    if isinstance(step, (MultipleChoiceStep, PredictionStep)):
-        correct = answer == step.answer_id
-    elif isinstance(step, ProblemStep) and step.response_type == "numeric":
-        try:
-            correct = abs(float(answer) - float(step.answer or 0)) <= float(step.tolerance or 0.01)
-        except ValueError:
-            correct = False
-    else:
-        normalized = _words(answer)
-        accepted = any(_words(item) <= normalized or _clean(item).casefold() == answer.casefold() for item in getattr(step, "accepted_answers", []))
-        required = set(getattr(step, "required_concepts", []))
-        correct = accepted or (bool(required) and required <= normalized)
-    if correct:
-        return True, step.feedback_correct or "Good. That matches the source-grounded idea."
-    return False, step.feedback_incorrect or step.remediation or "Not quite. Re-read the teaching point and try again."
+    return evaluation.result == "correct", evaluation.evidence if evaluation.result == "correct" else (step.feedback_incorrect or step.remediation or evaluation.misconception or "Not quite. Try a different way of thinking about it.")

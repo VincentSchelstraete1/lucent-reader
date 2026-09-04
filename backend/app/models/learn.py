@@ -22,6 +22,8 @@ class LearnSession(Base):
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(24), default="active")
     plan_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    ended_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -40,6 +42,7 @@ class LearnAttempt(Base):
     result: Mapped[str] = mapped_column(String(24))
     attempt_number: Mapped[int] = mapped_column(Integer, default=1)
     hints_used: Mapped[int] = mapped_column(Integer, default=0)
+    evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     session: Mapped[LearnSession] = relationship(back_populates="attempts")

@@ -101,6 +101,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   const [error, setError] = useState<string | null>(null)
   const [answer, setAnswer] = useState("")
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
+  const [orderedIds, setOrderedIds] = useState<string[]>([])
   const [hint, setHint] = useState<string | null>(null)
   const sessionRef = useRef<LearnSession | null>(null)
 
@@ -114,16 +115,21 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   async function start() {
     if (!documentId) return
     setLoading(true); setError(null)
-    try { const created = await api.createLearnSession(documentId, { goal, familiarity }); sessionRef.current = created; setSession(created); setAnswer(""); setSelectedOption(null); setHint(null) }
+    try { const created = await api.createLearnSession(documentId, { goal, familiarity }); sessionRef.current = created; setSession(created); setAnswer(""); setSelectedOption(null); setOrderedIds(created.step?.items?.map((item) => item.id) ?? []); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start this learning session.") }
     finally { setLoading(false) }
   }
   async function respond(response?: string, optionId?: string) {
     if (!session) return
     setLoading(true); setError(null)
-    try { const updated = await api.submitLearnResponse(session.id, { response, optionId }); sessionRef.current = updated; setSession(updated); setAnswer(""); setSelectedOption(null); setHint(null) }
+    try { const updated = await api.submitLearnResponse(session.id, { response, optionId, orderedIds: orderedIds.length ? orderedIds : undefined }); sessionRef.current = updated; setSession(updated); setAnswer(""); setSelectedOption(null); setOrderedIds(updated.step?.items?.map((item) => item.id) ?? []); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Your response could not be saved.") }
     finally { setLoading(false) }
+  }
+  async function stop() {
+    if (!session) return
+    try { const stopped = await api.stopLearnSession(session.id); sessionRef.current = stopped; setSession(stopped) }
+    catch (e) { setError(e instanceof Error ? e.message : "This session could not be saved.") }
   }
   async function requestHint() {
     if (!session) return
@@ -142,7 +148,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
     <button className="btn btn-primary" type="button" disabled={loading || !documentId} onClick={start}>{loading ? "Preparing your session…" : "Start learning"}</button>
   </section>
 
-  if (session.status === "completed" || !session.step) return <section className="learn-workspace learn-complete" aria-labelledby="learn-heading"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><p className="note-kicker">Session complete</p><h2 id="learn-heading">You worked through {session.completedObjectives} objective{session.completedObjectives === 1 ? "" : "s"}.</h2>{session.weakObjectives.length > 0 && <p className="learn-context">A few ideas are marked for review when you return.</p>}<div className="learn-result-actions"><button className="btn" type="button" onClick={onBack}>Review notes</button>{documentId && <button className="btn btn-primary" type="button" onClick={() => window.location.assign(`/quizzes/generating?document_id=${documentId}`)}>Take the quiz</button>}</div></section>
+  if (session.status !== "active" || !session.step) return <section className="learn-workspace learn-complete" aria-labelledby="learn-heading"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><p className="note-kicker">{session.status === "stopped" ? "Session paused" : "Session complete"}</p><h2 id="learn-heading">{session.status === "stopped" ? "Your progress is saved." : `You worked through ${session.completedObjectives} objective${session.completedObjectives === 1 ? "" : "s"}.`}</h2>{session.report && <div className="learn-report"><p><strong>Next focus:</strong> {session.report.nextFocus.join(", ") || "Continue with a new concept."}</p>{session.report.struggles.length > 0 && <p><strong>Needs attention:</strong> {session.report.struggles.join(" ")}</p>}{session.report.notCovered.length > 0 && <p><strong>Not covered yet:</strong> {session.report.notCovered.join(", ")}</p>}</div>}<div className="learn-result-actions"><button className="btn" type="button" onClick={onBack}>Review notes</button>{documentId && <button className="btn btn-primary" type="button" onClick={() => window.location.assign(`/quizzes/generating?document_id=${documentId}`)}>Take the quiz</button>}</div></section>
 
   const step = session.step
   const visualRef = step.visualRef
@@ -153,7 +159,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
     <p className="note-kicker">{session.goal === "solve" ? "Problem solving" : session.goal === "memorize" ? "Retrieval practice" : "Focused learning"}</p>
     <h2 id="learn-heading">{session.objectiveTitle ?? note.title}</h2>
     <div className="learn-progress" role="progressbar" aria-valuemin={0} aria-valuemax={session.objectiveCount} aria-valuenow={session.objectiveIndex + 1}><span style={{ width: `${((session.objectiveIndex + 1) / Math.max(1, session.objectiveCount)) * 100}%` }} /></div>
-    <article className="learn-step"><p className="learn-step-count">Step {session.stepIndex + 1}</p><h3>{step.title}</h3>{step.content && <p className="learn-step-content">{step.content}</p>}{visualComponent?.mechanism && <StepThroughMechanism data={generatedMechanismToRendererData(visualComponent.mechanism)} />}{step.prompt && <p className="learn-question">{step.prompt}</p>}{step.options.length > 0 && <div className="learn-options">{step.options.map((option) => <button type="button" key={option.id} className={selectedOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setSelectedOption(option.id)}>{option.label}</button>)}</div>}{requiresResponse && step.options.length === 0 && <input className="learn-answer" aria-label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && answer.trim()) respond(answer) }} placeholder="Type your response" />}{hint && <p className="learn-hint" role="status"><strong>Hint {session.hintsUsed}:</strong> {hint}</p>}{session.feedback && <p className={`learn-feedback ${session.feedbackKind ?? "info"}`} role="status">{session.feedback}</p>}<div className="learn-step-actions">{step.hintsAvailable > 0 && <button className="btn" type="button" onClick={requestHint}>Hint</button>}{requiresResponse ? <button className="btn btn-primary" type="button" disabled={loading || (step.options.length > 0 ? !selectedOption : !answer.trim())} onClick={() => respond(answer, selectedOption ?? undefined)}>{loading ? "Checking…" : "Submit"}</button> : <button className="btn btn-primary" type="button" disabled={loading} onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button>}</div></article>
+    <article className="learn-step"><p className="learn-step-count">Step {session.stepIndex + 1}</p><h3>{step.title}</h3>{step.content && <p className="learn-step-content">{step.content}</p>}{visualComponent?.mechanism && <StepThroughMechanism data={generatedMechanismToRendererData(visualComponent.mechanism)} />}{step.prompt && <p className="learn-question">{step.prompt}</p>}{step.options.length > 0 && <div className="learn-options">{step.options.map((option) => <button type="button" key={option.id} className={selectedOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setSelectedOption(option.id)}>{option.label}</button>)}</div>}{step.items.length > 0 && <div className="learn-ordering">{orderedIds.map((id, index) => { const item = step.items.find((candidate) => candidate.id === id); return <div className="learn-ordering-item" key={id}><span>{index + 1}. {item?.label ?? id}</span><button type="button" disabled={index === 0} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next })} aria-label="Move up">↑</button><button type="button" disabled={index === orderedIds.length - 1} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next })} aria-label="Move down">↓</button></div>})}</div>}{requiresResponse && step.options.length === 0 && step.items.length === 0 && <input className="learn-answer" aria-label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && answer.trim()) respond(answer) }} placeholder="Type your response" />}{hint && <p className="learn-hint" role="status"><strong>Hint {session.hintsUsed}:</strong> {hint}</p>}{session.feedback && <p className={`learn-feedback ${session.feedbackKind ?? "info"}`} role="status">{session.feedback}</p>}<div className="learn-step-actions">{step.hintsAvailable > 0 && <button className="btn" type="button" onClick={requestHint}>Hint</button>}<button className="btn" type="button" onClick={stop}>Stop for now</button>{requiresResponse ? <button className="btn btn-primary" type="button" disabled={loading || (step.options.length > 0 ? !selectedOption : step.items.length > 0 ? orderedIds.length !== step.items.length : !answer.trim())} onClick={() => respond(answer, selectedOption ?? undefined)}>{loading ? "Checking…" : "Submit"}</button> : <button className="btn btn-primary" type="button" disabled={loading} onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button>}</div></article>
     {error && <p className="error" role="alert">{error}</p>}
   </section>
 }
