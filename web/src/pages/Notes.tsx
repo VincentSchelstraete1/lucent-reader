@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type ProgressiveSection, type SectionNote } from "../api/client"
+import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
@@ -67,6 +68,15 @@ function ComponentView({ component, depth = "balanced" }: { component: SectionNo
     const steps = c.steps ?? []
     const visible = typeof selected === "number" ? Math.min(selected + 1, steps.length) : 0
     return <div className="note-example">{c.problem && <p className="note-example-problem">{c.problem}</p>}{c.equation && <code className="note-equation">{c.equation}</code>}{(c.knownValues ?? []).length > 0 && <dl className="note-values">{c.knownValues.map((value: any, i: number) => <Fragment key={i}><dt>{String(value.name ?? value.symbol ?? "Value")}</dt><dd>{String(value.value ?? value.meaning ?? value.description ?? "")}</dd></Fragment>)}</dl>}<ol>{steps.slice(0, visible).map((step: any, i: number) => <li key={String(step.order ?? i)}>{String(step.description ?? step.label ?? step)}</li>)}</ol>{steps.length > 0 && <button className="note-reveal" type="button" onClick={() => setSelected(visible >= steps.length ? null : visible)}>{visible >= steps.length ? "Start again" : visible === 0 ? "Reveal the reasoning" : "Reveal next step"}</button>}{visible >= steps.length && c.result && <p><strong>Result:</strong> {c.result}</p>}{visible >= steps.length && c.interpretation && <p><strong>Meaning:</strong> {c.interpretation}</p>}</div>
+  }
+  if (c.kind === "walkthrough" && c.mechanism) {
+    const mechanism = c.mechanism
+    return <div className="note-walkthrough">
+      <p className="note-walkthrough-goal">{String(c.learningGoal ?? mechanism.learningGoal)}</p>
+      <p className="note-walkthrough-bottleneck"><strong>Focus:</strong> {String(c.bottleneck)}</p>
+      {c.estimatedMinutes && <p className="note-walkthrough-time">About {String(c.estimatedMinutes)} min</p>}
+      <StepThroughMechanism data={generatedMechanismToRendererData(mechanism)} />
+    </div>
   }
   if (c.kind === "callout") return <aside className={`note-callout note-callout-${c.calloutType ?? "important"}`}><p>{c.text}</p>{c.whyItMatters && <small>{c.whyItMatters}</small>}</aside>
   return <SupportingText text={String(c.text || c.takeaway || c.definition || "")} depth={depth} />

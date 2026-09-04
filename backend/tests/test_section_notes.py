@@ -132,6 +132,12 @@ def test_generated_section_note_accepts_minimum_valid_component(component):
     assert note.components[0].kind == component["kind"]
 
 
+def test_generated_walkthrough_uses_compact_mechanism_contract():
+    mechanism = {"sceneType": "sequence_exchange_scene", "title": "Handshake", "learningGoal": "Follow the exchange", "entities": [{"id": "a", "kind": "actor", "label": "Client"}, {"id": "s", "kind": "actor", "label": "Server"}], "visualProgram": {"type": "sequence_exchange_scene", "actorIds": ["a", "s"], "messages": [{"id": "m", "sender": "a", "receiver": "s", "label": "SYN"}]}, "stages": [{"title": "Send", "explanation": "The client starts.", "visual": {"type": "sequence_exchange_scene", "visibleMessageIds": ["m"], "emphasizedMessageId": "m"}}, {"title": "Ready", "explanation": "Both sides confirm.", "visual": {"type": "sequence_exchange_scene", "visibleMessageIds": ["m"], "emphasizedMessageId": "m"}}], "conclusion": "The exchange establishes shared state."}
+    note = GeneratedSectionNote.model_validate({"title": "Section", "bigIdea": "Idea", "learningGoals": [], "components": [{"kind": "walkthrough", "title": "Handshake walkthrough", "sourceBlockIds": ["b"], "learningGoal": "Follow the exchange", "bottleneck": "The order of messages", "mechanism": mechanism}], "keyTakeaways": [], "omittedNoise": []})
+    assert note.components[0].kind == "walkthrough"
+
+
 def test_generated_schema_requires_kind_specific_fields():
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     serialized = str(schema)
@@ -181,6 +187,19 @@ def test_section_prompt_enforces_source_boundary_and_branch_topology(monkeypatch
         model_section_note(section, model_version="source-boundary-test")
     assert "SOURCE BOUNDARY" in captured["prompt"]
     assert "mutually exclusive outcomes branch" in captured["prompt"]
+
+
+def test_section_prompt_includes_teaching_depth_without_changing_contract(monkeypatch):
+    block = make_block("depth", "A process has a cause and result.")
+    section = SectionInput("section-depth", "Process", [], [block.id], [block], {})
+    captured = {}
+    def inspect(*args, **kwargs):
+        captured["prompt"] = args[0]
+        raise RuntimeError("stop")
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", inspect)
+    with pytest.raises(RuntimeError):
+        model_section_note(section, model_version="depth-test", depth="detailed")
+    assert "DETAILED EXPLANATION" in captured["prompt"]
 
 
 def test_callout_why_it_matters_is_shared_by_generation_and_runtime_contracts():

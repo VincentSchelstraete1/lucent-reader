@@ -580,6 +580,10 @@ h2 {
 .quiz-review-link { display: inline-block; color: var(--lucent-accent-dark); font-weight: 600; margin-top: .45rem; text-decoration: none; }
 .quiz-review-link:hover { text-decoration: underline; }
 .quiz-result-actions { display: flex; gap: .7rem; margin-top: 1.25rem; }
+.note-walkthrough { border-top: 1px solid var(--lucent-border); padding-top: .8rem; }
+.note-walkthrough-goal { font-weight: 600; margin: 0 0 .35rem; }
+.note-walkthrough-bottleneck { color: var(--lucent-caption); margin: 0 0 .35rem; }
+.note-walkthrough-time { color: var(--lucent-accent-dark); font-size: .85rem; margin: 0 0 .8rem; }
 @media (max-width: 620px) {
   .notes-document-heading { align-items: flex-start; flex-direction: column; }
   .notes-document-heading .btn { width: 100%; }

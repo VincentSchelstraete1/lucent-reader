@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from app.segmentation import LearningBlock
 from app.routing import RepresentationDecision
+from app.schemas.step_through import GeneratedStepThroughMechanism, StepThroughMechanism
 from .schema import LearningObject, PlainTextObject
 
 _SECTION_CACHE: dict[str, SectionNote] = {}
@@ -78,7 +79,8 @@ def is_low_value_section(section: SectionInput) -> bool:
     return False
 
 
-COMPONENT_KINDS = Literal["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway"]
+COMPONENT_KINDS = Literal["explanation", "key_definition", "flow", "structure", "relationship_map", "comparison", "worked_example", "equation", "callout", "takeaway", "walkthrough"]
+TeachingDepth = Literal["concise", "balanced", "detailed"]
 
 class SectionComponent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -297,11 +299,38 @@ class TakeawayComponent(_TypedComponent):
     takeaway: str = Field(min_length=1)
 
 
+class WalkthroughComponent(_TypedComponent):
+    """A contained, interactive learning experience rendered by the shared
+    StepThroughMechanism shell. The mechanism remains semantic; geometry and
+    controls stay owned by the trusted frontend renderer.
+    """
+    kind: Literal["walkthrough"]
+    learning_goal: str = Field(alias="learningGoal", min_length=1, max_length=300)
+    bottleneck: str = Field(min_length=1, max_length=240)
+    mechanism: StepThroughMechanism
+    estimated_minutes: int | None = Field(default=None, alias="estimatedMinutes", ge=1, le=60)
+
+
+class GeneratedWalkthroughComponent(_TypedComponent):
+    """Compact model-owned walkthrough; expanded deterministically after validation."""
+    kind: Literal["walkthrough"]
+    learning_goal: str = Field(alias="learningGoal", min_length=1, max_length=240)
+    bottleneck: str = Field(min_length=1, max_length=180)
+    mechanism: GeneratedStepThroughMechanism
+    estimated_minutes: int | None = Field(default=None, alias="estimatedMinutes", ge=1, le=60)
+
+
 TypedSectionComponent = Annotated[Union[
     ExplanationComponent, KeyDefinitionComponent, FlowComponent,
     StructureComponent, RelationshipMapComponent, ComparisonComponent,
     WorkedExampleComponent, EquationComponent, CalloutComponent,
-    TakeawayComponent,
+    TakeawayComponent, WalkthroughComponent,
+], Field(discriminator="kind")]
+GeneratedTypedSectionComponent = Annotated[Union[
+    ExplanationComponent, KeyDefinitionComponent, FlowComponent,
+    StructureComponent, RelationshipMapComponent, ComparisonComponent,
+    WorkedExampleComponent, EquationComponent, CalloutComponent,
+    TakeawayComponent, GeneratedWalkthroughComponent,
 ], Field(discriminator="kind")]
 TreeNode.model_rebuild()
 
@@ -323,7 +352,7 @@ class GeneratedSectionNote(BaseModel):
     title: str
     big_idea: str = Field(alias="bigIdea")
     learning_goals: list[str] = Field(alias="learningGoals")
-    components: list[TypedSectionComponent]
+    components: list[GeneratedTypedSectionComponent]
     key_takeaways: list[str] = Field(alias="keyTakeaways")
     omitted_noise: list[str] = Field(alias="omittedNoise")
 
@@ -436,27 +465,33 @@ def safe_deterministic_section_note(section: SectionInput, objects: dict[str, Le
         return SectionNote(id=section.id, title=title, bigIdea=text[:500], learningGoals=["Review the source-grounded explanation."], components=[component], keyTakeaways=[text[:300]], sourceBlockIds=section.learning_block_ids or [source_id])
 
 
-def model_section_note(section: SectionInput, *, model_version: str = "section-v3-grounded") -> SectionNote:
+def model_section_note(section: SectionInput, *, model_version: str = "section-v3-grounded", depth: TeachingDepth = "balanced") -> SectionNote:
     """Generate one coherent section note. The cache is process-local V1 and
     deliberately versioned so prompt/schema changes invalidate old results."""
     from app.services.anthropic_service import _run_structured_tool
     source = "\n\n".join(f"[{block.id}] {block.text}" for block in section.blocks)
-    key = hashlib.sha256(f"{model_version}:{section.title}:{source}".encode()).hexdigest()
+    key = hashlib.sha256(f"{model_version}:{depth}:{section.title}:{source}".encode()).hexdigest()
     if key in _SECTION_CACHE:
         logger.info("section_generation_cache_hit section_id=%s title=%r model=claude-haiku-4-5-20251001", section.id, section.title)
         return _SECTION_CACHE[key].model_copy()
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     started = time.perf_counter()
-    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 cache_hit=false source_chars=%d blocks=%d max_tokens=%d", section.id, section.title, len(source), len(section.blocks), SECTION_NOTE_MAX_TOKENS)
+    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 depth=%s cache_hit=false source_chars=%d blocks=%d max_tokens=%d", section.id, section.title, depth, len(source), len(section.blocks), SECTION_NOTE_MAX_TOKENS)
     try:
+        depth_instruction = {
+            "concise": "Teaching depth: CONCISE STUDY GUIDE. Prefer the fewest components that preserve exam-relevant mechanisms, definitions, equations, and relationships; use terse phrases and minimal supporting prose.",
+            "balanced": "Teaching depth: BALANCED. Include enough intuition to understand the central mechanism, with selective visuals, definitions, and examples.",
+            "detailed": "Teaching depth: DETAILED EXPLANATION. Add grounded why/how reasoning and a walkthrough when it materially clarifies a difficult mechanism, but do not write an essay or repeat the source.",
+        }[depth]
         prompt = ("Design a source-grounded learning experience for this coherent section; do not merely summarize or split the source into prose cards. "
+                  + depth_instruction + " "
                   "First identify the central mental model and the conceptual bottleneck a learner must overcome. Then compose a short, coherent sequence "
                   "of only the components that materially improve understanding (usually 2–4 strong components; never emit every type by default). "
                   "SOURCE BOUNDARY: every factual claim, property, example, recommendation, and takeaway must be stated in the supplied blocks or follow by direct arithmetic from supplied values. "
                   "Do not add plausible background knowledge, design advice, examples, properties, or causes from memory. If the source does not explain why, omit that explanation. "
                   "Check numerical comparisons and arithmetic exactly; do not turn a derived result into a broader optimization claim. "
                   "Use an explanation only for ideas that are genuinely clearer as prose, adds information beyond bigIdea, and fits in 1–2 concise sentences. For a process, mechanism, or causal chain prefer a FLOW with 2+ concise nodes, "
-                  "meaningful 1–3 word verb relations, putting any longer meaning in the edge explanation, and a separate brief explanation of why transitions matter. For containment or levels prefer a connected STRUCTURE "
+                  "meaningful 1–3 word verb relations, putting any longer meaning in the edge explanation, and a separate brief explanation of why transitions matter. For a multi-stage mechanism whose state changes are clearer interactively, you may choose one WALKTHROUGH component using the supplied semantic mechanism contract; use it selectively, keep it to 2–5 meaningful stages, and never include coordinates or presentation code. For containment or levels prefer a connected STRUCTURE "
                   "with an explicit root and children. For equations or numerical reasoning prefer EQUATION or WORKED_EXAMPLE with variables, supplied values, ordered "
                   "substitution/derivation steps, result, and interpretation. For systems of concepts use a selective connected RELATIONSHIP_MAP (3–7 concepts) with "
                   "specific relations such as uses, maps, caches, contains, enables, or depends on; never use generic related to. Preserve technical terminology, mechanisms, "
@@ -470,7 +505,13 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     try:
         logger.info("section_generation_response section_id=%s title=%r top_level_keys=%s", section.id, section.title, sorted(raw.keys()) if isinstance(raw, dict) else [])
         generated = GeneratedSectionNote.model_validate(_normalize_generated_section_payload(raw))
-        note = SectionNote.model_validate({**generated.model_dump(by_alias=True), "id": section.id, "sourceBlockIds": section.learning_block_ids})
+        generated_payload = generated.model_dump(by_alias=True)
+        for index, component in enumerate(generated_payload.get("components", [])):
+            if component.get("kind") == "walkthrough":
+                generated_component = generated.components[index]
+                assert isinstance(generated_component, GeneratedWalkthroughComponent)
+                component["mechanism"] = generated_component.mechanism.to_canonical().model_dump(by_alias=True)
+        note = SectionNote.model_validate({**generated_payload, "id": section.id, "sourceBlockIds": section.learning_block_ids})
     except Exception as exc:
         logger.exception("section_generation_failure section_id=%s title=%r stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
@@ -479,14 +520,14 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     return note.model_copy()
 
 
-async def generate_sections_concurrently(sections: list[SectionInput], objects: dict[str, LearningObject], *, concurrency: int = 3, use_model: bool = False) -> list[SectionNote]:
+async def generate_sections_concurrently(sections: list[SectionInput], objects: dict[str, LearningObject], *, concurrency: int = 3, use_model: bool = False, depth: TeachingDepth = "balanced") -> list[SectionNote]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async def one(section: SectionInput) -> SectionNote:
         async with semaphore:
             if use_model:
                 try:
-                    return await asyncio.to_thread(model_section_note, section)
+                    return await asyncio.to_thread(model_section_note, section, depth=depth)
                 except Exception as exc:
                     logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
                     pass
@@ -494,7 +535,7 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
 
     return list(await asyncio.gather(*(one(section) for section in sections if not is_low_value_section(section))))
 
-async def generate_sections_progressively(sections: list[SectionInput], objects: dict[str, LearningObject], on_complete, *, concurrency: int = 3, use_model: bool = False) -> list[SectionNote]:
+async def generate_sections_progressively(sections: list[SectionInput], objects: dict[str, LearningObject], on_complete, *, concurrency: int = 3, use_model: bool = False, depth: TeachingDepth = "balanced") -> list[SectionNote]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
     active = [(index, section) for index, section in enumerate(sections) if not is_low_value_section(section)]
     results: list[SectionNote | None] = [None] * len(sections)
@@ -502,7 +543,7 @@ async def generate_sections_progressively(sections: list[SectionInput], objects:
     async def one(index: int, section: SectionInput) -> None:
         async with semaphore:
             try:
-                note = await asyncio.to_thread(model_section_note, section) if use_model else deterministic_section_note(section, objects)
+                note = await asyncio.to_thread(model_section_note, section, depth=depth) if use_model else deterministic_section_note(section, objects)
             except Exception as exc:
                 note = safe_deterministic_section_note(section, objects)
                 logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
