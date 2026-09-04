@@ -1,5 +1,6 @@
 from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec
-from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec
+from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep
+from app.services.retrieval import retrieve_note_context
 
 
 def _note():
@@ -66,3 +67,14 @@ def test_structure_visual_preserves_containment_relationships():
     assert spec is not None
     assert spec.type == "hierarchy"
     assert [(edge.source, edge.target) for edge in spec.edges] == [("sys", "unit")]
+
+def test_matching_and_labeling_grade_partial_evidence():
+    matching = MatchingStep(id="m", type="matching", title="Match", prompt="Match", pairs=[{"id":"a","label":"A"},{"id":"b","label":"B"}], matches={"a":"1","b":"2"})
+    assert evaluate_step(matching, response='{"a":"1","b":"wrong"}', option_id=None).result == "partially_correct"
+    labeling = LabelingStep(id="l", type="labeling", title="Label", prompt="Label", targets=[{"id":"x","label":"X"},{"id":"y","label":"Y"}], labels=[{"id":"1","label":"One"},{"id":"2","label":"Two"}], answerMap={"x":"1","y":"2"})
+    assert evaluate_step(labeling, response='{"x":"1","y":"2"}', option_id=None).result == "correct"
+
+def test_retrieval_returns_grounded_section_and_block_references():
+    result = retrieve_note_context({"sectionNotes":[{"id":"s1","bigIdea":"Protons build a gradient.","sourceBlockIds":["b1"]},{"id":"s2","bigIdea":"Unrelated history.","sourceBlockIds":["b2"]}]}, "proton gradient")
+    assert result["sourceSectionIds"] == ["s1"]
+    assert result["sourceBlockIds"] == ["b1"]

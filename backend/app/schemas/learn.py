@@ -146,6 +146,35 @@ class OrderingStep(LearnStepBase):
             raise ValueError("correctOrder must reference every ordering item exactly once")
         return self
 
+class MatchingStep(LearnStepBase):
+    type: Literal["matching"]
+    prompt: str = Field(min_length=1, max_length=500)
+    pairs: list[LearnOption] = Field(min_length=2, max_length=8)
+    matches: dict[str, str] = Field(min_length=2, max_length=8)
+
+class LabelingStep(LearnStepBase):
+    type: Literal["labeling"]
+    prompt: str = Field(min_length=1, max_length=500)
+    targets: list[LearnOption] = Field(min_length=2, max_length=8)
+    labels: list[LearnOption] = Field(min_length=2, max_length=8)
+    answer_map: dict[str, str] = Field(alias="answerMap", min_length=2, max_length=8)
+
+class FillBlankStep(LearnStepBase):
+    type: Literal["fill_blank"]
+    prompt: str = Field(min_length=1, max_length=500)
+    accepted_answers: list[str] = Field(alias="acceptedAnswers", min_length=1, max_length=8)
+
+class TeachBackStep(LearnStepBase):
+    type: Literal["teach_back"]
+    prompt: str = Field(min_length=1, max_length=500)
+    required_concepts: list[str] = Field(default_factory=list, alias="requiredConcepts", max_length=8)
+
+class WorkedStepStep(LearnStepBase):
+    type: Literal["worked_step"]
+    prompt: str = Field(min_length=1, max_length=500)
+    accepted_answers: list[str] = Field(alias="acceptedAnswers", min_length=1, max_length=8)
+    solution: str = Field(min_length=1, max_length=700)
+
 
 class ProblemStep(LearnStepBase):
     type: Literal["problem"]
@@ -171,7 +200,7 @@ class WalkthroughStep(LearnStepBase):
     component_index: int = Field(alias="componentIndex", ge=0)
 
 
-LearnStep = Annotated[Union[TeachStep, MultipleChoiceStep, ShortAnswerStep, NumericAnswerStep, PredictionStep, OrderingStep, ProblemStep, WalkthroughStep], Field(discriminator="type")]
+LearnStep = Annotated[Union[TeachStep, MultipleChoiceStep, ShortAnswerStep, NumericAnswerStep, PredictionStep, OrderingStep, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, ProblemStep, WalkthroughStep], Field(discriminator="type")]
 
 
 class LearningObjective(BaseModel):

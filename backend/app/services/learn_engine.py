@@ -7,7 +7,7 @@ from typing import Any
 
 from app.schemas.learn import (
     LearnEvaluation, LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep, VisualSpec,
-    OrderingStep, PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep,
+    OrderingStep, PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep,
 )
 
 
@@ -160,10 +160,14 @@ def plan_fingerprint(note_payload: dict, goal: str, familiarity: str) -> str:
 def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     data = step.model_dump(by_alias=True, exclude_none=True)
     options = data.get("options", [])
+    if data["type"] == "matching": options = data.get("pairs", [])
+    if data["type"] == "labeling": options = data.get("labels", []); data["items"] = data.get("targets", [])
     visual_ref = data.get("visualRef")
     if data["type"] == "walkthrough":
         visual_ref = {"sectionId": data.get("sectionId"), "componentIndex": data.get("componentIndex")}
-    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=data.get("items", []), visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
+    items = data.get("items", [])
+    if data["type"] == "matching": items = data.get("pairs", [])
+    return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=items, visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used))
 
 
 def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | None, ordered_ids: list[str] | None = None) -> LearnEvaluation:
@@ -184,6 +188,16 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
         else:
             result, confidence = "incorrect", 0.9
         return LearnEvaluation(result=result, confidence=confidence, evidence="The ordered sequence reflects the process transitions." if result == "correct" else "The sequence needs the process transition made explicit.", misconception=None if result == "correct" else (step.feedback_incorrect or "Follow the causal transition from one step to the next."), remediationCategory="none" if result == "correct" else "simplify")
+    if isinstance(step, MatchingStep):
+        try: submitted = json.loads(response or "{}")
+        except json.JSONDecodeError: submitted = {}
+        hits = sum(1 for key, value in step.matches.items() if str(submitted.get(key)) == str(value)); result = "correct" if hits == len(step.matches) else "partially_correct" if hits else "incorrect"
+        return LearnEvaluation(result=result, confidence=0.95 if result == "correct" else 0.7, evidence=f"Matched {hits} of {len(step.matches)} relationships.", misconception=None if result == "correct" else "Some relationships need to be distinguished.", remediationCategory="simplify" if result != "correct" else "none")
+    if isinstance(step, LabelingStep):
+        try: submitted = json.loads(response or "{}")
+        except json.JSONDecodeError: submitted = {}
+        hits = sum(1 for key, value in step.answer_map.items() if str(submitted.get(key)) == str(value)); result = "correct" if hits == len(step.answer_map) else "partially_correct" if hits else "incorrect"
+        return LearnEvaluation(result=result, confidence=0.95 if result == "correct" else 0.7, evidence=f"Placed {hits} of {len(step.answer_map)} labels correctly.", misconception=None if result == "correct" else "Review which label belongs to each part.", remediationCategory="change_modality" if result != "correct" else "none")
     if isinstance(step, ProblemStep) and step.response_type == "numeric":
         try:
             correct = abs(float(answer) - float(step.answer or 0)) <= float(step.tolerance or 0.01)

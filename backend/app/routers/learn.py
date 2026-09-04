@@ -19,6 +19,7 @@ from app.models.source import Source
 from app.schemas.learn import ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step
 from app.services.learn_tutor import diagnose_response
+from app.services.retrieval import retrieve_note_context
 
 router = APIRouter()
 STEP_ADAPTER = TypeAdapter(LearnStep)
@@ -163,7 +164,11 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     evaluation = evaluate_step(step, response=request.response, option_id=request.option_id, ordered_ids=request.ordered_ids)
     if request.response and step.type in {"short_answer", "problem", "numeric"}:
         expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
-        evaluation = diagnose_response(prompt=getattr(step, "prompt", ""), expected=expected, response=request.response, source_context=" ".join(objective.get("sourceSectionIds", [])), fallback=evaluation)
+        note = _latest_note(db, session.document_id); context = ""
+        if note:
+            try: context = retrieve_note_context(json.loads(note.content), getattr(step, "prompt", "")).get("text", "")
+            except (TypeError, ValueError): context = ""
+        evaluation = diagnose_response(prompt=getattr(step, "prompt", ""), expected=expected, response=request.response, source_context=context or " ".join(objective.get("sourceSectionIds", [])), fallback=evaluation)
     concepts = [dict(c) for c in state.get("concepts", [])]; concept = next((c for c in concepts if c.get("conceptId") == objective["id"]), _concept_for(session, objective)); concept["attempts"] = int(concept.get("attempts", 0)) + (0 if evaluation.result == "insufficient_evidence" else 1); concept["lastSeen"] = _now(); concept["lastResult"] = evaluation.result
     state["lastRemediation"] = evaluation.remediation_category if evaluation.result in {"incorrect", "partially_correct"} else None
     concept.setdefault("firstSeen", concept["lastSeen"])
