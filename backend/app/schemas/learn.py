@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 LearnGoal = Literal["understand", "solve", "memorize", "exam"]
@@ -269,6 +269,93 @@ class TutorToolCall(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
+class LearningVisualState(BaseModel):
+    """Canonical, persisted visual state for an active LearningScene."""
+    model_config = ConfigDict(extra="forbid")
+
+    visual_key: str | None = Field(default=None, alias="visualKey", max_length=60)
+    renderer: str | None = Field(default=None, max_length=40)
+    stage: int = Field(default=0, ge=0, le=32)
+    highlighted_element_ids: list[str] = Field(default_factory=list, alias="highlightedElementIds", max_length=16)
+    revealed_element_ids: list[str] = Field(default_factory=list, alias="revealedElementIds", max_length=16)
+    parameters: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    playback: Literal["idle", "playing", "paused", "complete"] = "idle"
+    interaction_mode: Literal["watch", "predict", "label", "manipulate", "compare", "explain"] = Field(default="watch", alias="interactionMode")
+
+
+class StudentMessage(BaseModel):
+    """Explicit learner-facing copy; internal tutor reasoning is not representable here."""
+    model_config = ConfigDict(extra="forbid")
+
+    tone: Literal["encourage", "clarify", "correct", "prompt", "summarize"]
+    text: str = Field(min_length=1, max_length=900)
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+
+
+class StudentFeedback(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result: EvaluationResult
+    message: str = Field(min_length=1, max_length=900)
+    correction: str | None = Field(default=None, max_length=900)
+    responds_to_interaction_id: str = Field(alias="respondsToInteractionId", min_length=1, max_length=60)
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+
+
+class ScenePrivateState(BaseModel):
+    """Answer-bearing scene data; never include this model in an API response."""
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(alias="sceneId", min_length=1, max_length=60)
+    revision: int = Field(ge=0)
+    interaction: dict | None = None
+    objective_id: str = Field(alias="objectiveId", min_length=1, max_length=60)
+    target_concept_ids: list[str] = Field(default_factory=list, alias="targetConceptIds", max_length=6)
+    evidence_targets: list[str] = Field(default_factory=list, alias="evidenceTargets", max_length=8)
+    completion_condition: str = Field(default="", alias="completionCondition", max_length=240)
+    strategy: str | None = Field(default=None, max_length=48)
+    scaffold_level: ScaffoldLevel = Field(default="FULL", alias="scaffoldLevel")
+    decision_id: str | None = Field(default=None, alias="decisionId", max_length=60)
+
+
+TutorEventType = Literal["START", "CONTINUE", "RESPONSE", "HINT", "ASK_LUCENT", "VISUAL_RESPONSE", "PREREQUISITE_RETURN", "DELAYED_REVIEW"]
+
+
+class TutorVisualEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visual_key: str = Field(alias="visualKey", min_length=1, max_length=60)
+    event_type: Literal["SET_STAGE", "REVEAL", "HIGHLIGHT", "PREDICT", "LABEL", "MANIPULATE", "REPLAY_COMPLETE"] = Field(alias="eventType")
+    element_id: str | None = Field(default=None, alias="elementId", max_length=60)
+    stage: int | None = Field(default=None, ge=0, le=32)
+    value: str | int | float | bool | None = None
+
+
+class TutorEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=60)
+    type: TutorEventType
+    scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
+    scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
+    interaction_id: str | None = Field(default=None, alias="interactionId", max_length=60)
+    response: dict | None = None
+    message: str | None = Field(default=None, max_length=1200)
+    visual_event: TutorVisualEvent | None = Field(default=None, alias="visualEvent")
+
+    @model_validator(mode="after")
+    def event_payload_contract(self):
+        if self.type in {"RESPONSE", "HINT"} and not self.interaction_id:
+            raise ValueError("response and hint events require interactionId")
+        if self.type == "ASK_LUCENT" and not self.message:
+            raise ValueError("Ask Lucent events require a message")
+        if self.type == "VISUAL_RESPONSE" and self.visual_event is None:
+            raise ValueError("visual response events require visualEvent")
+        return self
+
+
 SceneBlockPlanKind = Literal[
     "explanation", "visual", "animation", "example", "counterexample",
     "analogy", "comparison", "worked_example", "guided_step", "practice",
@@ -404,6 +491,10 @@ class LearnSessionCreateRequest(BaseModel):
 
 
 class LearnResponseRequest(BaseModel):
+    scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
+    scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
+    interaction_id: str | None = Field(default=None, alias="interactionId", max_length=60)
+    event_type: Literal["RESPONSE", "CONTINUE"] | None = Field(default=None, alias="eventType")
     response: str | None = None
     option_id: str | None = Field(default=None, alias="optionId")
     ordered_ids: list[str] | None = Field(default=None, alias="orderedIds")
@@ -413,7 +504,14 @@ class LearnHintResponse(BaseModel):
     hint: str
     hints_used: int = Field(alias="hintsUsed")
 
+class LearnHintRequest(BaseModel):
+    scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
+    scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
+    interaction_id: str | None = Field(default=None, alias="interactionId", max_length=60)
+
 class AskLucentRequest(BaseModel):
+    scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
+    scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
     message: str = Field(min_length=1, max_length=1200)
 
 class AskLucentResponse(BaseModel):
@@ -424,6 +522,7 @@ class AskLucentResponse(BaseModel):
     tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
     visual_action: dict | None = Field(default=None, alias="visualAction")
     scene_patch: dict | None = Field(default=None, alias="scenePatch")
+    scene: LearningScene | None = None
 
 class AskLucentToolCall(BaseModel):
     tool: Literal["retrieve_source", "inspect_current_concept", "inspect_relevant_learner_evidence", "show_visual", "change_visual_stage", "highlight_visual_element", "request_example", "request_explanation", "revisit_prerequisite"]
@@ -482,22 +581,34 @@ class LearningSceneBlock(BaseModel):
 
 class LearningScene(BaseModel):
     """A bounded cohesive tutor turn containing coordinated teaching blocks."""
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
     id: str = Field(min_length=1, max_length=60)
     revision: int = Field(default=0, ge=0)
     objective_id: str = Field(alias="objectiveId", min_length=1, max_length=60)
     objective: str = Field(min_length=1, max_length=180)
     target_concepts: list[str] = Field(default_factory=list, alias="targetConcepts", max_length=4)
-    pedagogical_goal: PedagogicalGoal = Field(alias="pedagogicalGoal")
-    tutor_hypothesis: str = Field(default="", alias="tutorHypothesis", max_length=500)
-    strategy: PedagogicalStrategy
-    scaffold_level: ScaffoldLevel = Field(alias="scaffoldLevel")
     blocks: list[LearningSceneBlock] = Field(min_length=1, max_length=6)
-    evidence_targets: list[str] = Field(default_factory=list, alias="evidenceTargets", max_length=6)
     source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
-    visual_state: dict = Field(default_factory=dict, alias="visualState")
-    completion_condition: str = Field(alias="completionCondition", min_length=1, max_length=240)
-    response_step_id: str | None = Field(default=None, alias="responseStepId", max_length=60)
+    visual_state: LearningVisualState = Field(default_factory=LearningVisualState, alias="visualState")
+    response_interaction_id: str | None = Field(default=None, alias="responseInteractionId", max_length=60)
+    progress: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_fields(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            if "responseInteractionId" not in value and "responseStepId" in value:
+                value["responseInteractionId"] = value["responseStepId"]
+            value.setdefault("visualState", {})
+        return value
+
+    @property
+    def response_step_id(self) -> str | None:
+        """Compatibility accessor; this legacy name is never serialized."""
+        return self.response_interaction_id
 
 
 class LearnSessionResponse(BaseModel):
@@ -522,3 +633,8 @@ class LearnSessionResponse(BaseModel):
     report: LearnSessionReport | None = None
     ended_reason: str | None = Field(default=None, alias="endedReason")
     scene: LearningScene | None = None
+
+
+# `AskLucentResponse` is declared before `LearningScene` for request-model
+# organization; resolve its forward reference once all public scene types exist.
+AskLucentResponse.model_rebuild()

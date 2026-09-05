@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -31,6 +32,18 @@ _ACTION_BLOCKS = {
     "clarify_definition": ("explanation", "Clarify"),
     "simplify_explanation": ("explanation", "Simplify"),
 }
+
+
+@dataclass(frozen=True)
+class SceneExecutionResult:
+    """Private executor result; routers must serialize only its public scene."""
+
+    scene: LearningScene
+    private_scene: dict[str, Any] | None = None
+    tool_results: list[dict[str, Any]] = field(default_factory=list)
+    transition_proposal: dict[str, Any] | None = None
+    used_fallback: bool = False
+    fallback_reason: str | None = None
 
 
 def _id(prefix: str, *parts: object) -> str:
@@ -204,8 +217,8 @@ def compose_learning_scene(
         tutorHypothesis=(decision.hypothesis if decision else ""),
         strategy=(decision.pedagogical_strategy if decision else (action.strategy if action else "DIRECT_INSTRUCTION")),
         scaffoldLevel=str(concept.get("scaffold", "FULL")), blocks=blocks,
-        evidenceTargets=evidence, sourceSectionIds=section_ids, sourceBlockIds=block_ids,
-        visualState={"stage": state.get("visualStage", 0), "highlight": state.get("visualHighlight")},
-        completionCondition=(decision.scene_plan.completion_condition if decision and decision.scene_plan and decision.scene_plan.completion_condition else f"Show that you can explain or apply {objective.get('title', 'this idea')} with less support."),
-        responseStepId=response_step_id,
-    )
+            evidenceTargets=evidence, sourceSectionIds=section_ids, sourceBlockIds=block_ids,
+            visualState={"stage": int(state.get("visualStage", 0)), **({"highlightedElementIds": [str(state["visualHighlight"])]} if state.get("visualHighlight") else {})},
+            completionCondition=(decision.scene_plan.completion_condition if decision and decision.scene_plan and decision.scene_plan.completion_condition else f"Show that you can explain or apply {objective.get('title', 'this idea')} with less support."),
+            responseInteractionId=response_step_id,
+        )

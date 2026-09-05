@@ -1,4 +1,7 @@
-from app.schemas.learn import MultipleChoiceStep, TeachStep, TutorAction, TutorDecision, TutorScenePlan
+import pytest
+from pydantic import ValidationError
+
+from app.schemas.learn import LearningScene, MultipleChoiceStep, TeachStep, TutorAction, TutorDecision, TutorEvent, TutorScenePlan
 from app.services.learn_scene import compose_learning_scene
 
 
@@ -79,3 +82,25 @@ def test_teaching_scene_reuses_next_grounded_visual_before_practice():
     scene = compose_learning_scene(session_id="s", objective=objective, steps=[teach, visual_step], step_index=0, current_step=current, action=None, decision=None, concept={"scaffold": "FULL"}, state={})
     assert [block.kind for block in scene.blocks] == ["explanation", "visual"]
     assert scene.blocks[1].visual_spec is not None
+
+
+def test_public_scene_excludes_internal_tutor_metadata_and_normalizes_legacy_response_id():
+    scene = LearningScene.model_validate({
+        "id": "scene-1", "revision": 1, "objectiveId": "o", "objective": "Energy",
+        "blocks": [{"id": "b", "kind": "explanation", "label": "Understand", "content": "Energy changes.", "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}],
+        "responseStepId": "legacy-check", "pedagogicalGoal": "VERIFY_UNDERSTANDING", "tutorHypothesis": "internal",
+        "strategy": "DIRECT_INSTRUCTION", "scaffoldLevel": "FULL", "completionCondition": "internal",
+    })
+    payload = scene.model_dump(by_alias=True)
+    assert payload["responseInteractionId"] == "legacy-check"
+    assert "tutorHypothesis" not in payload
+    assert "pedagogicalGoal" not in payload
+    assert "strategy" not in payload
+    assert "scaffoldLevel" not in payload
+
+
+def test_tutor_event_rejects_missing_payload_and_unknown_fields():
+    with pytest.raises(ValidationError):
+        TutorEvent.model_validate({"id": "e", "type": "RESPONSE"})
+    with pytest.raises(ValidationError):
+        TutorEvent.model_validate({"id": "e", "type": "ASK_LUCENT", "message": "Explain", "unsafe": True})

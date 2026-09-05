@@ -9,6 +9,7 @@ from app.schemas.learn import (
     LearnEvaluation, LearnPlan, LearnStep, LearnStepView, LearningObjective, MultipleChoiceStep, VisualSpec,
     OrderingStep, PredictionStep, ProblemStep, ShortAnswerStep, TeachStep, WalkthroughStep, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep,
 )
+from app.services.learner_content import learner_text_quality_issues, student_facing_quality_issues, student_text
 
 
 def _clean(value: Any) -> str:
@@ -278,53 +279,7 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "State what changes and what effect it produces."), remediationCategory="none" if result == "correct" else "simplify")
 
 
-_BANNED_META_PHRASES = (
-    "the teaching point", "source-grounded relationship", "relationship described above",
-    "relevant detail", "unrelated detail", "defining relationship", "supporting detail",
-    "the concept above", "a related but different idea", "a claim not supported by this material",
-    "which response best matches", "the key relationship here", "correct concept",
-    "concept described above", "what outcome should occur when", "is applied here",
-    "notice how this element connects to the others",
-)
-_INTERNAL_FIELD_NAMES = {
-    "concept_id", "source_id", "source_block", "source_block_id", "interaction_type",
-    "target_variable", "scaffold_level", "teaching_point", "repair_step", "mutation_type",
-}
-
-
-def _student_text(step: LearnStep) -> str:
-    data = step.model_dump(by_alias=True, exclude_none=True)
-    values: list[str] = []
-    for key in ("title", "prompt", "content", "feedbackCorrect", "feedbackIncorrect", "remediation", "reveal", "solution"):
-        if data.get(key):
-            values.append(str(data[key]))
-    values.extend(str(item) for item in data.get("hints", []))
-    for key in ("options", "items", "pairs", "targets", "labels"):
-        values.extend(str(item.get("label", "")) for item in data.get(key, []) if isinstance(item, dict))
-    visual = data.get("visualSpec") or {}
-    values.extend(str(visual.get(key, "")) for key in ("title", "purpose"))
-    values.extend(str(node.get("label", "")) + " " + str(node.get("detail", "")) for node in visual.get("nodes", []) if isinstance(node, dict))
-    values.extend(str(stage.get("title", "")) + " " + str(stage.get("explanation", "")) for stage in visual.get("stages", []) if isinstance(stage, dict))
-    return " ".join(values)
-
-
-def learner_text_quality_issues(text: str, source_text: str = "") -> list[str]:
-    """Lint learner-facing prose without confusing source code with schema leaks."""
-    lowered = text.casefold()
-    issues = [phrase for phrase in _BANNED_META_PHRASES if phrase in lowered]
-    source_lower = source_text.casefold()
-    for token in re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", text):
-        if token.casefold() not in source_lower:
-            issues.append(f"internal_identifier:{token}")
-    for field_name in _INTERNAL_FIELD_NAMES:
-        if field_name in lowered and field_name not in source_lower:
-            issues.append(f"internal_field:{field_name}")
-    return list(dict.fromkeys(issues))
-
-
-def student_facing_quality_issues(step: LearnStep, source_text: str = "") -> list[str]:
-    """Reject meta/template/schema language before it reaches a learner."""
-    return learner_text_quality_issues(_student_text(step), source_text)
+_student_text = student_text
 
 
 def grade_step(step: LearnStep, *, response: str | None, option_id: str | None) -> tuple[bool | None, str]:
