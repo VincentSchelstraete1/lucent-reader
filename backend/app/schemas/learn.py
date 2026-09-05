@@ -11,6 +11,7 @@ LearnStatus = Literal["active", "completed", "stopped", "abandoned"]
 EvaluationResult = Literal["correct", "partially_correct", "incorrect", "insufficient_evidence"]
 RemediationCategory = Literal["none", "simplify", "example", "prerequisite", "change_modality", "revisit"]
 ConceptStateName = Literal["NOT_SEEN", "INTRODUCED", "DEVELOPING", "DEMONSTRATED", "NEEDS_REVIEW", "STRUGGLING"]
+PedagogicalStrategy = Literal["DIRECT_INSTRUCTION", "SOCRATIC_PROBE", "CONCEPTUAL_EXPLANATION", "VISUAL_MODEL", "ANIMATED_MECHANISM", "WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "GUIDED_DISCOVERY", "ANALOGY", "CONTRAST_CASE", "EXAMPLE_NONEXAMPLE", "PREREQUISITE_REPAIR", "ERROR_CORRECTION", "RETRIEVAL_PRACTICE", "TRANSFER_PRACTICE", "DELAYED_RECHECK"]
 TutorActionType = Literal[
     "teach_concept", "clarify_definition", "give_example", "give_analogy",
     "ask_multiple_choice", "ask_free_response", "ask_prediction", "ask_ordering",
@@ -240,6 +241,7 @@ class TutorAction(BaseModel):
     concept_id: str = Field(alias="conceptId", min_length=1, max_length=60)
     step_id: str | None = Field(default=None, alias="stepId")
     rationale: str = Field(min_length=1, max_length=300)
+    strategy: PedagogicalStrategy = "DIRECT_INSTRUCTION"
 
 
 class ConceptEvidence(BaseModel):
@@ -261,6 +263,18 @@ class ConceptEvidence(BaseModel):
     first_seen: str | None = Field(default=None, alias="firstSeen")
     last_seen: str | None = Field(default=None, alias="lastSeen")
     last_result: EvaluationResult | None = Field(default=None, alias="lastResult")
+    diagnosis_type: str | None = Field(default=None, alias="diagnosisType")
+    failed_strategies: list[str] = Field(default_factory=list, alias="failedStrategies")
+    successful_strategies: list[str] = Field(default_factory=list, alias="successfulStrategies")
+    failed_modalities: list[str] = Field(default_factory=list, alias="failedModalities")
+    successful_modalities: list[str] = Field(default_factory=list, alias="successfulModalities")
+    recognition_evidence: int = Field(default=0, alias="recognitionEvidence")
+    recall_evidence: int = Field(default=0, alias="recallEvidence")
+    explanation_evidence: int = Field(default=0, alias="explanationEvidence")
+    application_evidence: int = Field(default=0, alias="applicationEvidence")
+    transfer_evidence: int = Field(default=0, alias="transferEvidence")
+    scaffolding_level: int = Field(default=0, alias="scaffoldingLevel")
+    review_due: str | None = Field(default=None, alias="reviewDue")
 
 
 class LearnEvaluation(BaseModel):
@@ -309,6 +323,16 @@ class AskLucentResponse(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
     tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
     visual_action: dict | None = Field(default=None, alias="visualAction")
+
+class AskLucentToolCall(BaseModel):
+    tool: Literal["retrieve_source", "inspect_current_concept", "inspect_relevant_learner_evidence", "show_visual", "change_visual_stage", "highlight_visual_element", "request_example", "request_explanation", "revisit_prerequisite"]
+    arguments: dict = Field(default_factory=dict)
+
+class AskLucentModelResponse(BaseModel):
+    answer: str = Field(min_length=1, max_length=1800)
+    tool_calls: list[AskLucentToolCall] = Field(default_factory=list, alias="toolCalls", max_length=3)
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
 
 
 class LearnStepView(BaseModel):

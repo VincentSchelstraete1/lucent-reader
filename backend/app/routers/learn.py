@@ -15,12 +15,12 @@ from app.auth_dependencies import get_current_user, require_csrf
 from app.database import get_db
 from app.models.auth import User
 from app.models.document import Document
-from app.models.learn import LearnAttempt, LearnSession
+from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step
-from app.services.learn_tutor import diagnose_response
+from app.services.learn_tutor import ask_lucent_model, diagnose_response
 from app.services.retrieval import retrieve_note_context
 
 router = APIRouter()
@@ -48,6 +48,20 @@ def _concept_for(session: LearnSession, objective: dict) -> dict:
     found = next((item for item in _concepts(session) if item.get("conceptId") == objective.get("id")), None)
     return found or {"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": "NOT_SEEN", "attempts": 0, "correct": 0, "partiallyCorrect": 0, "incorrect": 0, "insufficientEvidence": 0, "hintsUsed": 0, "interactionTypes": [], "misconceptions": [], "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", [])}
 
+def _diagnosis_type(result: str, step_type: str, attempts: int, misconception: str | None) -> str:
+    if result == "insufficient_evidence": return "INSUFFICIENT_EVIDENCE"
+    if result == "partially_correct": return "KNOWLEDGE_GAP"
+    if result == "incorrect" and misconception: return "MISCONCEPTION"
+    if result == "incorrect" and step_type in {"problem", "worked_step", "numeric", "ordering"}: return "PROCEDURAL_ERROR"
+    if result == "incorrect" and attempts <= 1: return "UNCERTAINTY"
+    return "KNOWLEDGE_GAP"
+
+def _strategy_for(step, concept: dict, revisit: bool, remediation: str | None) -> str:
+    if revisit: return "DELAYED_RECHECK"
+    if remediation == "prerequisite": return "PREREQUISITE_REPAIR"
+    if concept.get("state") in {"STRUGGLING", "NEEDS_REVIEW"}: return "ERROR_CORRECTION"
+    return {"teach": "CONCEPTUAL_EXPLANATION", "walkthrough": "ANIMATED_MECHANISM", "problem": "SCAFFOLDED_PRACTICE", "worked_step": "SCAFFOLDED_PRACTICE", "numeric": "TRANSFER_PRACTICE", "multiple_choice": "RETRIEVAL_PRACTICE", "short_answer": "SOCRATIC_PROBE", "teach_back": "TRANSFER_PRACTICE", "prediction": "GUIDED_DISCOVERY", "ordering": "GUIDED_DISCOVERY", "matching": "CONTRAST_CASE", "labeling": "VISUAL_MODEL", "fill_blank": "RETRIEVAL_PRACTICE"}.get(step.type, "DIRECT_INSTRUCTION")
+
 def _action_for(step, objective: dict, concept: dict, revisit: bool = False, remediation: str | None = None) -> TutorAction:
     mapping = {"teach": "teach_concept", "multiple_choice": "ask_multiple_choice", "short_answer": "ask_free_response", "numeric": "ask_free_response", "prediction": "ask_prediction", "ordering": "ask_ordering", "matching": "ask_matching", "labeling": "ask_labeling", "fill_blank": "ask_fill_blank", "worked_step": "ask_worked_step", "teach_back": "ask_teach_back", "problem": "ask_free_response", "walkthrough": "show_process_visual"}
     remediation_map = {"simplify": "decrease_difficulty", "example": "give_example", "prerequisite": "revisit_prerequisite", "change_modality": "give_analogy", "revisit": "revisit_concept"}
@@ -60,7 +74,7 @@ def _action_for(step, objective: dict, concept: dict, revisit: bool = False, rem
     if step.type == "multiple_choice" and "multiple_choice" in used and not revisit:
         action_type = "ask_free_response"
     rationale = "Revisit with a different validated modality after earlier evidence." if revisit else "A bounded action selected for the learner's current evidence and goal."
-    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale)
+    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale, strategy=_strategy_for(step, concept, revisit, remediation))
 
 def _report(session: LearnSession) -> LearnSessionReport:
     objectives = session.plan.get("objectives", []); by_id = {item.get("conceptId"): item for item in _concepts(session)}
@@ -112,14 +126,30 @@ def _ask_scope(message: str, objective: dict, context: dict) -> str:
         return "IN_SCOPE_PREREQUISITE"
     return "OUT_OF_SCOPE"
 
+def _record_tutor_event(db, *, user_id, session_id, document_id, event_type: str, metadata: dict) -> None:
+    try:
+        db.add(LearnTutorEvent(user_id=user_id, session_id=session_id, document_id=document_id, event_type=event_type, event_metadata=metadata))
+        db.flush()
+    except Exception:
+        db.rollback()
+
+def _ask_rate_allowed(db, user_id, session_id) -> bool:
+    now = datetime.now(timezone.utc); key = str(user_id); recent = [stamp for stamp in _ASK_RATE.get(key, []) if time.monotonic() - stamp < _ASK_WINDOW_SECONDS]
+    try:
+        durable = db.execute(select(LearnTutorEvent).where(LearnTutorEvent.user_id == user_id, LearnTutorEvent.event_type == "ask_request", LearnTutorEvent.created_at >= now.replace(tzinfo=None))).scalars().all()
+        if len(durable) >= _ASK_MAX_REQUESTS: return False
+    except Exception:
+        pass
+    if len(recent) >= _ASK_MAX_REQUESTS: return False
+    recent.append(time.monotonic()); _ASK_RATE[key] = recent
+    return True
+
 @router.post("/learn-sessions/{session_id}/ask", response_model=AskLucentResponse, dependencies=[Depends(require_csrf)])
 def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
-    key = str(user.id)
-    now = time.monotonic(); recent = [stamp for stamp in _ASK_RATE.get(key, []) if now - stamp < _ASK_WINDOW_SECONDS]
-    if len(recent) >= _ASK_MAX_REQUESTS:
+    if not _ask_rate_allowed(db, user.id, session.id):
+        _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="rate_limit", metadata={"scope": "ask"}); db.commit()
         raise HTTPException(status_code=429, detail="Ask Lucent is taking a short pause. Try again in a moment.")
-    recent.append(now); _ASK_RATE[key] = recent
     objectives = session.plan.get("objectives", []); objective = objectives[min(session.objective_index, max(0, len(objectives) - 1))] if objectives else {}
     note = _latest_note(db, session.document_id); payload = {}
     if note:
@@ -127,7 +157,9 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         except (TypeError, ValueError): payload = {}
     context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
     scope = _ask_scope(request.message, objective, context)
+    _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_request", metadata={"scope": scope, "sourceSectionIds": context.get("sourceSectionIds", [])})
     if scope == "OUT_OF_SCOPE":
+        _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": scope}); db.commit()
         return AskLucentResponse(answer="I can help with the material you’re currently learning and related prerequisite concepts.", scope=scope)
     current_step = _parse_step(objective.get("steps", [])[session.step_index]) if objective.get("steps") and session.step_index < len(objective.get("steps", [])) else None
     tool = "retrieve_source" if context.get("text") else "request_explanation"
@@ -135,15 +167,37 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     lowered = request.message.lower()
     if current_step and getattr(current_step, "visual_spec", None) and any(word in lowered for word in ("show", "visual", "diagram", "stage", "highlight")):
         tool = "show_visual"; visual_action = {"type": "show_visual", "stepId": current_step.id, "stage": 0}
-    answer = context.get("text") or "I can explain the current concept, but the saved notes do not contain enough detail to support a grounded answer yet."
+    learner = _concept_for(session, objective)
+    model = ask_lucent_model(question=request.message, context={"policy": "Use only bounded allowlisted tools. Do not mutate learner state.", "learner": json.dumps({"goal": session.goal, "familiarity": session.familiarity, "recent": learner.get("lastResult"), "hints": learner.get("hintsUsed", 0)}), "concept": json.dumps({"title": objective.get("title"), "outcome": objective.get("outcome"), "misconceptions": learner.get("misconceptions", [])}), "source": context.get("text", "")})
+    if model:
+        answer = model.answer; tool = "request_explanation"; visual_action = None
+        for call in model.tool_calls:
+            args = call.arguments
+            allowed_keys = {"stage"} if call.tool == "change_visual_stage" else {"nodeId"} if call.tool == "highlight_visual_element" else set()
+            if set(args) - allowed_keys:
+                _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="validation_failure", metadata={"tool": call.tool, "reason": "unknown_arguments"}); continue
+            if call.tool in {"show_visual", "change_visual_stage"} and current_step and getattr(current_step, "visual_spec", None):
+                stages = getattr(current_step.visual_spec, "stages", [])
+                stage = int(args.get("stage", 0)) if str(args.get("stage", 0)).isdigit() else 0
+                if 0 <= stage < len(stages): tool = call.tool; visual_action = {"type": call.tool, "stepId": current_step.id, "stage": stage}; break
+                _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="validation_failure", metadata={"tool": call.tool, "reason": "stage_out_of_range"}); continue
+            if call.tool == "highlight_visual_element" and current_step and getattr(current_step, "visual_spec", None):
+                node_id = str(args.get("nodeId", "")); valid_ids = {node.id for node in current_step.visual_spec.nodes}
+                if node_id in valid_ids:
+                    tool = call.tool; visual_action = {"type": call.tool, "stepId": current_step.id, "nodeId": node_id}; break
+                _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="validation_failure", metadata={"tool": call.tool, "reason": "unknown_visual_node"}); continue
+            if call.tool in {"retrieve_source", "request_example", "request_explanation"}: tool = call.tool
+        _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_model", metadata={"scope": scope, "tool": tool, "sourceSectionIds": model.source_section_ids, "sourceBlockIds": model.source_block_ids})
+    else:
+        answer = context.get("text") or "I can explain the current concept, but the saved notes do not contain enough detail to support a grounded answer yet."
     if scope == "IN_SCOPE_PREREQUISITE": answer = "This is a related prerequisite. The saved material does not fully explain it, so treat this as supporting context rather than a claim from the source.\n\n" + answer
-    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action)
+    db.commit(); return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
     prior = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document_id).order_by(LearnSession.updated_at.desc())).scalars().first()
     prior_map = {c.get("conceptId"): c for c in ((prior.state or {}).get("concepts") if prior else [])}; concepts = []
     for objective in plan.get("objectives", []):
-        previous = dict(prior_map.get(objective.get("id"), {})); concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": 0, "correct": 0, "partiallyCorrect": 0, "incorrect": 0, "insufficientEvidence": 0, "hintsUsed": 0, "interactionTypes": [], "misconceptions": previous.get("misconceptions", []), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None})
+        previous = dict(prior_map.get(objective.get("id"), {})); concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": 0, "correct": 0, "partiallyCorrect": 0, "incorrect": 0, "insufficientEvidence": 0, "hintsUsed": 0, "interactionTypes": [], "misconceptions": previous.get("misconceptions", []), "failedStrategies": previous.get("failedStrategies", []), "successfulStrategies": previous.get("successfulStrategies", []), "failedModalities": previous.get("failedModalities", []), "successfulModalities": previous.get("successfulModalities", []), "recognitionEvidence": previous.get("recognitionEvidence", 0), "recallEvidence": previous.get("recallEvidence", 0), "explanationEvidence": previous.get("explanationEvidence", 0), "applicationEvidence": previous.get("applicationEvidence", 0), "transferEvidence": previous.get("transferEvidence", 0), "scaffoldingLevel": previous.get("scaffoldingLevel", 0), "reviewDue": previous.get("reviewDue", None), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None})
     queue = [c["conceptId"] for c in concepts if c["state"] in {"DEMONSTRATED", "NEEDS_REVIEW", "STRUGGLING"}]
     return {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": []}
 
@@ -228,6 +282,13 @@ def _append_remediation(session: LearnSession, objective: dict, failed_step) -> 
     session.plan = plan
     return len(steps) - 1
 
+def _append_prerequisite_branch(session: LearnSession, objective: dict, failed_step) -> int:
+    plan = deepcopy(session.plan); target = next(item for item in plan["objectives"] if item.get("id") == objective.get("id")); steps = target.setdefault("steps", [])
+    branch_id = f"{failed_step.id}-prerequisite-{len(steps)}"
+    branch = ShortAnswerStep(id=branch_id, type="short_answer", title="Repair the prerequisite", prompt="What basic relationship must be true before this step can work?", acceptedAnswers=[failed_step.feedback_incorrect or "the defining relationship"], requiredConcepts=[], hints=["Name the relationship the current step depends on."], feedbackIncorrect="We will revisit this prerequisite before returning to the main idea.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    steps.append(branch.model_dump(by_alias=True)); session.plan = plan
+    return len(steps) - 1
+
 @router.post("/learn-sessions/{session_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
@@ -245,6 +306,14 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         evaluation = diagnose_response(prompt=getattr(step, "prompt", ""), expected=expected, response=request.response, source_context=context or " ".join(objective.get("sourceSectionIds", [])), fallback=evaluation)
     concepts = [dict(c) for c in state.get("concepts", [])]; concept = next((c for c in concepts if c.get("conceptId") == objective["id"]), _concept_for(session, objective)); concept["attempts"] = int(concept.get("attempts", 0)) + (0 if evaluation.result == "insufficient_evidence" else 1); concept["lastSeen"] = _now(); concept["lastResult"] = evaluation.result
     state["lastRemediation"] = evaluation.remediation_category if evaluation.result in {"incorrect", "partially_correct"} else None
+    concept["diagnosisType"] = _diagnosis_type(evaluation.result, step.type, attempt_number, evaluation.misconception)
+    concept["reviewDue"] = "later_this_session" if evaluation.result in {"incorrect", "partially_correct"} else concept.get("reviewDue")
+    if step.type in {"multiple_choice", "prediction", "matching", "labeling"}: concept["recognitionEvidence"] = int(concept.get("recognitionEvidence", 0)) + (1 if evaluation.result == "correct" else 0)
+    if step.type in {"short_answer", "fill_blank"}: concept["recallEvidence"] = int(concept.get("recallEvidence", 0)) + (1 if evaluation.result == "correct" else 0)
+    if step.type in {"teach_back", "short_answer"}: concept["explanationEvidence"] = int(concept.get("explanationEvidence", 0)) + (1 if evaluation.result == "correct" else 0)
+    if step.type in {"problem", "worked_step", "numeric", "ordering"}: concept["applicationEvidence"] = int(concept.get("applicationEvidence", 0)) + (1 if evaluation.result == "correct" else 0)
+    if step.type in {"prediction", "problem", "teach_back"} and evaluation.result == "correct" and int((state.get("hints") or {}).get(step.id, 0)) == 0: concept["transferEvidence"] = int(concept.get("transferEvidence", 0)) + 1
+    concept["scaffoldingLevel"] = max(0, int(concept.get("scaffoldingLevel", 0)) - 1) if evaluation.result == "correct" else min(3, int(concept.get("scaffoldingLevel", 0)) + 1)
     concept.setdefault("firstSeen", concept["lastSeen"])
     if step.type not in {"teach", "walkthrough"} and step.type not in concept.get("interactionTypes", []): concept.setdefault("interactionTypes", []).append(step.type)
     if evaluation.result == "correct": concept["correct"] = int(concept.get("correct", 0)) + 1; concept["immediateSuccess"] = True; concept["state"] = "DEMONSTRATED" if concept.get("delayedSuccess") or concept.get("priorEvidence", 0) else "DEVELOPING"
@@ -253,6 +322,11 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         concept["incorrect"] = int(concept.get("incorrect", 0)) + 1; concept["state"] = "STRUGGLING" if concept["incorrect"] >= 2 else "DEVELOPING"; misconception = evaluation.misconception
         if misconception and misconception not in concept.setdefault("misconceptions", []): concept["misconceptions"].append(misconception)
     else: concept["insufficientEvidence"] = int(concept.get("insufficientEvidence", 0)) + 1; concept["state"] = "INTRODUCED"
+    strategy = "RETRIEVAL_PRACTICE" if step.type in {"multiple_choice", "short_answer", "fill_blank"} else "SCAFFOLDED_PRACTICE" if step.type in {"problem", "worked_step", "numeric"} else "GUIDED_DISCOVERY"
+    bucket = "successfulStrategies" if evaluation.result == "correct" else "failedStrategies" if evaluation.result in {"incorrect", "partially_correct"} else None
+    if bucket and strategy not in concept.setdefault(bucket, []): concept[bucket].append(strategy)
+    modality_bucket = "successfulModalities" if evaluation.result == "correct" else "failedModalities" if evaluation.result in {"incorrect", "partially_correct"} else None
+    if modality_bucket and step.type not in concept.setdefault(modality_bucket, []): concept[modality_bucket].append(step.type)
     state["concepts"] = [concept if c.get("conceptId") == objective["id"] else c for c in concepts]
     db.add(LearnAttempt(session_id=session.id, objective_id=objective["id"], step_id=step.id, step_type=step.type, response=request.response or request.option_id or (",".join(request.ordered_ids or [])), result=evaluation.result, attempt_number=attempt_number, hints_used=int((state.get("hints") or {}).get(step.id, 0)), evaluation=evaluation.model_dump(by_alias=True)))
     feedback = step.feedback_correct if evaluation.result == "correct" else step.feedback_incorrect or evaluation.misconception or evaluation.evidence
@@ -263,10 +337,19 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     session.state = state
     if evaluation.result in {"incorrect", "partially_correct"}:
         next_idx = _choose_next_step(objective, session.step_index, state, concept, failed=True)
-        session.step_index = next_idx if next_idx is not None else _append_remediation(session, objective, step)
+        if next_idx is None and evaluation.result == "incorrect" and int(concept.get("incorrect", 0)) >= 2 and not state.get("prerequisiteBranch"):
+            return_step = session.step_index
+            branch_index = _append_prerequisite_branch(session, objective, step)
+            state["prerequisiteBranch"] = {"conceptId": objective["id"], "returnStep": return_step, "branchIndex": branch_index}
+            session.step_index = branch_index
+        else:
+            session.step_index = next_idx if next_idx is not None else _append_remediation(session, objective, step)
     else:
         next_idx = _choose_next_step(objective, session.step_index, state, concept)
         session.step_index = next_idx if next_idx is not None else session.step_index + 1
+    if state.get("prerequisiteBranch") and evaluation.result == "correct" and session.step_index == int(state["prerequisiteBranch"].get("branchIndex", -1)):
+        session.step_index = int(state["prerequisiteBranch"].get("returnStep", session.step_index))
+        state["prerequisiteBranch"] = None
     current_steps = session.plan.get("objectives", [])[session.objective_index].get("steps", []) if session.objective_index < len(session.plan.get("objectives", [])) else []
     if session.step_index >= len(current_steps): _next_objective(session, state)
     if _completion_met(session): session.status = "completed"; session.ended_reason = "evidence_sufficient"; session.report = _report(session).model_dump(by_alias=True)

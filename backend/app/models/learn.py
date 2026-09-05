@@ -46,3 +46,14 @@ class LearnAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     session: Mapped[LearnSession] = relationship(back_populates="attempts")
+
+class LearnTutorEvent(Base):
+    __tablename__ = "learn_tutor_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("learn_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(48), index=True)
+    event_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
