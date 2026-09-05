@@ -93,7 +93,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
     parsed_candidates = []
     for raw in steps[cursor:] + steps[:cursor]:
         try:
-            candidate = adapter.validate_python(raw)
+            candidate = _coerce_step(raw, objective)
         except Exception:
             continue
         parsed_candidates.append(candidate)
@@ -129,6 +129,10 @@ def ensure_runtime_state(session, db=None) -> tuple[LearningScene, dict[str, Any
         raise ValueError("Learn session has no valid objective")
     scene, private = _legacy_scene(session, objective)
     state.update({"runtimeVersion": RUNTIME_VERSION, "planSemanticsVersion": PLAN_SEMANTICS_VERSION, "currentObjectiveId": str(objective.get("id")), "currentScene": scene.model_dump(by_alias=True), "currentScenePrivate": private})
+    concepts = list(state.get("concepts") or [])
+    if not any(str(item.get("conceptId")) == str(objective.get("id")) for item in concepts):
+        concepts.append({"conceptId": str(objective.get("id")), "title": objective.get("title", "Concept"), "state": "INTRODUCED", "attempts": 0, "correct": 0, "incorrect": 0, "partiallyCorrect": 0, "scaffold": "FULL", "scaffoldingLevel": "FULL", "misconceptions": [], "interactionTypes": []})
+        state["concepts"] = concepts
     state.pop("sceneRevision", None)
     state.pop("sceneInterruption", None)
     session.state = state
@@ -159,7 +163,7 @@ def select_target_objective(session) -> str | None:
     return None
 
 
-def _private_for_rendered_scene(scene: LearningScene, *, objective_id: str, decision: TutorDecision | None = None) -> dict[str, Any] | None:
+def _private_for_rendered_scene(scene: LearningScene, *, objective_id: str, decision: TutorDecision | None = None, fallback_step=None, objective: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Build grading state for the scene's actual active practice block.
 
     Teaching scenes may include a supporting practice block; its ID, rather
@@ -169,9 +173,50 @@ def _private_for_rendered_scene(scene: LearningScene, *, objective_id: str, deci
     if not interaction_id:
         return None
     step = next((block.step for block in scene.blocks if block.kind == "practice" and block.step and block.step.id == interaction_id), None)
+    if step is None and fallback_step is not None and getattr(fallback_step, "id", None) == interaction_id:
+        step = fallback_step
+    if step is None and fallback_step is not None and interaction_id:
+        # compose_learning_scene may expose a public LearnStepView while the
+        # private model is a richer normalized step; trust the executor's
+        # selected target when identities are otherwise consistent.
+        step = fallback_step
+    if step is None and objective:
+        raw = next((item for item in objective.get("steps", []) if str(item.get("id")) == str(interaction_id)), None)
+        if raw:
+            try:
+                step = _coerce_step(raw, objective)
+            except Exception:
+                step = None
     if step is None:
         return None
     return ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=step.model_dump(by_alias=True), objectiveId=objective_id, targetConceptIds=[objective_id], strategy=decision.pedagogical_strategy if decision else "DIRECT_INSTRUCTION", scaffoldLevel=decision.scaffold_level if decision else "FULL", decisionId=bounded_id("decision", objective_id, scene.id)).model_dump(by_alias=True)
+
+
+def _coerce_step(raw: dict[str, Any], objective: dict[str, Any] | None = None):
+    """Validate authored/generated interaction data at the runtime boundary.
+
+    Older plan generators emitted problem prompts without the newer response
+    contract.  Normalize that legacy shape once, using the objective's own
+    grounded outcome, instead of allowing an invalid private interaction to
+    silently become an unanswered repeat.
+    """
+    from pydantic import TypeAdapter
+    from app.schemas.learn import LearnStep
+    data = dict(raw)
+    if data.get("type") == "problem":
+        data.setdefault("responseType", "short_answer")
+        if not data.get("acceptedAnswers"):
+            outcome = str((objective or {}).get("outcome") or (objective or {}).get("bottleneck") or "")
+            if outcome:
+                data["acceptedAnswers"] = [outcome]
+        data.setdefault("solution", str((objective or {}).get("outcome") or data.get("prompt") or "Work through the stated relationship."))
+    elif data.get("type") == "worked_step":
+        if not data.get("acceptedAnswers"):
+            outcome = str((objective or {}).get("outcome") or "")
+            if outcome:
+                data["acceptedAnswers"] = [outcome]
+        data.setdefault("solution", str((objective or {}).get("outcome") or data.get("prompt") or "Work through the stated relationship."))
+    return TypeAdapter(LearnStep).validate_python(data)
 
 
 def validate_branch_proposal(session, *, original_concept_id: str, prerequisite_concept_id: str, depth: int) -> bool:
@@ -313,16 +358,24 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     current = None
     if private and private.get("interaction"):
         try:
-            current = adapter.validate_python(private["interaction"])
+            current = _coerce_step(private["interaction"], objective)
         except Exception:
-            current = None
+            raw = next((item for item in steps if str(item.get("id")) == str(private.get("interaction", {}).get("id"))), None)
+            try:
+                current = _coerce_step(raw, objective) if raw else None
+            except Exception:
+                current = None
     if current is None:
         practice = next((block.step for block in scene.blocks if block.kind == "practice" and block.step), None)
         if practice is not None:
             try:
-                current = adapter.validate_python(practice.model_dump(by_alias=True))
+                current = _coerce_step(practice.model_dump(by_alias=True), objective)
             except Exception:
-                current = None
+                raw = next((item for item in steps if str(item.get("id")) == str(getattr(practice, "id", ""))), None)
+                try:
+                    current = _coerce_step(raw, objective) if raw else None
+                except Exception:
+                    current = None
 
     # A continue event acknowledges the currently composed scene; it must not
     # manufacture a second step or rewind to a teaching asset.  Replanning is
@@ -330,7 +383,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if event_type := (getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")):
         # Continue is a no-op only while a real active practice target is
         # already present. Teaching-only scenes must advance/recompose.
-        if event_type == "CONTINUE" and current is not None and scene.response_interaction_id:
+        if event_type == "CONTINUE" and private is not None and current is not None and scene.response_interaction_id:
             return scene, private
 
     event_type = event_type or "CONTINUE"
@@ -449,7 +502,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     prereq_decision = TutorDecision(targetConcept=prerequisite_id, teachingAction=prereq_action.type, pedagogicalGoal="REPAIR_PREREQUISITE", pedagogicalStrategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_concept.get("scaffold", "FULL"), nextStepId=prereq_next.id, transitionMessage="Let's make sure the supporting idea is clear first.")
                     session.state = state
                     rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, step_index=0, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.evidence, feedback_kind="info", evaluation=evaluation)
-                    private_next = _private_for_rendered_scene(rendered, objective_id=prerequisite_id, decision=prereq_decision)
+                    private_next = _private_for_rendered_scene(rendered, objective_id=prerequisite_id, decision=prereq_decision, fallback_step=prereq_next, objective=prerequisite)
                     return persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), private_next
 
     candidates = []
@@ -481,7 +534,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # appending a repair step to LearnPlan.  Its stable ID is derived from
         # the concept and attempt count, so repeated replans never create
         # recursive IDs or mutate the authored plan.
-        attempt_no = int(concept.get("attempts", 0)) + 1
+        attempt_no = max(int(concept.get("attempts", 0)) + 1, len(state.get("recentAttempts", [])) + 1)
         if attempt_no > 3:
             concept["state"] = "NEEDS_REVIEW"
             concept["reviewDue"] = "NEXT_SESSION"
@@ -491,7 +544,9 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
             return persist_scene_revision(session, review_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), None
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-        generated_id = bounded_id("repair", concept_id, attempt_no)
+        generated_id = bounded_id("repair", concept_id, attempt_no, int(scene.revision or 0) + 1)
+        if current is not None and generated_id == current.id:
+            generated_id = bounded_id("repair", concept_id, attempt_no + 1)
         generated = ShortAnswerStep(
             id=generated_id,
             type="short_answer",
@@ -534,6 +589,6 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         state["answeredInteractionIds"] = list(dict.fromkeys([*(state.get("answeredInteractionIds") or []), current.id]))[-32:]
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
-    private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision)
+    private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=next_step, objective=objective)
     rendered = persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
     return rendered, private_next
