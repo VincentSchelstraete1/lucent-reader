@@ -20,7 +20,7 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
@@ -386,11 +386,35 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     ask_state = dict(session.state or {})
     ask_concept = _concept_for(session, objective)
     ask_candidates = [{"id": raw.get("id"), "type": raw.get("type"), "title": raw.get("title"), "prompt": raw.get("prompt")} for raw in objective.get("steps", []) if isinstance(raw, dict)][:12]
+    # Turn learner intent into a bounded scene augmentation.  Ask Lucent is
+    # an interruption in the active lesson, so requests for another view,
+    # an example, or the visual become blocks in the same scene rather than
+    # detached chat-only replies.
+    if any(term in lowered for term in ("show me", "show this", "visual", "diagram")):
+        ask_action, ask_strategy, ask_kind, ask_label = "show_visual", "VISUAL_MODEL", "visual", "Watch"
+    elif "example" in lowered:
+        ask_action, ask_strategy, ask_kind, ask_label = "give_example", "CONCRETE_EXAMPLE", "example", "Example"
+    elif any(term in lowered for term in ("another way", "different", "simpler", "explain")):
+        ask_action, ask_strategy, ask_kind, ask_label = "give_analogy", "ANALOGY", "analogy", "Another way to see it"
+    else:
+        ask_action, ask_strategy, ask_kind, ask_label = "clarify_definition", "CONCEPTUAL_EXPLANATION", "explanation", "Clarify"
+    fallback_block = TutorSceneBlockPlan(
+        kind=ask_kind, label=ask_label,
+        title=objective.get("title"),
+        content=objective.get("outcome") or objective.get("bottleneck") or context.get("text", "")[:500],
+        visualRef=(
+            {"sectionId": getattr(current_step, "section_id", None), "componentIndex": getattr(current_step, "component_index", None)}
+            if ask_kind == "visual" and current_step and (getattr(current_step, "visual_ref", None) or getattr(current_step, "type", None) == "walkthrough")
+            else None
+        ),
+        sourceSectionIds=list(context.get("sourceSectionIds", []))[:8], sourceBlockIds=list(context.get("sourceBlockIds", []))[:12],
+    )
     ask_fallback = TutorDecision(
         hypothesis="Learner requested an explanation in the current concept context.", diagnosis="UNCERTAINTY", confidence=0.55,
-        pedagogicalGoal="EXPLAIN_CONCEPT", pedagogicalStrategy="CONCEPTUAL_EXPLANATION", teachingAction="clarify_definition", targetConcept=objective.get("id", "concept"),
-        interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool="explain_concept", arguments={"conceptId": objective.get("id", "concept")})],
+        pedagogicalGoal="BUILD_INTUITION", pedagogicalStrategy=ask_strategy, teachingAction=ask_action, targetConcept=objective.get("id", "concept"),
+        interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool=ask_action, arguments={"conceptId": objective.get("id", "concept")})],
         expectedEvidence="The learner can restate the explanation or apply it in the next check.", transitionMessage="I’m adapting the explanation to your question.", rationale="Learner-initiated clarification in the active concept.",
+        scenePlan=TutorScenePlan(blocks=[fallback_block], expectedEvidence=["The learner can connect the explanation to the source concept."] , completionCondition="The learner can explain the concept using the source-supported relationship."),
     )
     ask_observation = _tutor_observation(session, objective, ask_concept, current_step, ask_state, source_context=context, candidates=ask_candidates) if objective else None
     if ask_observation is not None:

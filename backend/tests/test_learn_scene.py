@@ -47,3 +47,19 @@ def test_scene_ids_and_size_are_bounded():
     assert len(scene.id) <= 60
     assert len(scene.blocks) <= 6
     assert all(len(block.id) <= 60 for block in scene.blocks)
+
+
+def test_scene_plan_keeps_ask_lucent_example_on_same_teaching_surface():
+    decision = TutorDecision(
+        targetConcept="energy-objective", teachingAction="give_example",
+        pedagogicalGoal="BUILD_INTUITION", pedagogicalStrategy="CONCRETE_EXAMPLE",
+        scenePlan=TutorScenePlan(blocks=[{
+            "kind": "example", "label": "Example", "title": "Pendulum energy",
+            "content": "As the pendulum falls, gravitational potential energy becomes kinetic energy.",
+            "sourceSectionIds": ["section-energy"], "sourceBlockIds": ["block-energy"],
+        }]),
+    )
+    scene = _scene(decision=decision)
+    assert any(block.kind == "example" for block in scene.blocks)
+    assert any(block.kind == "practice" for block in scene.blocks)
+    assert scene.source_section_ids == ["section-energy"]
