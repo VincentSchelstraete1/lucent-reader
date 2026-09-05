@@ -64,3 +64,27 @@ def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):
         assert response.json()["scope"] != "OUT_OF_SCOPE"
     finally:
         set_tutor_provider(None)
+
+
+def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "solve", "familiarity": "new"}).json()
+    client.post(f"/learn-sessions/{session['id']}/responses", json={})
+    calls = []
+
+    def fake_provider(_prompt, tool_name, _schema, **_kwargs):
+        calls.append(tool_name)
+        if tool_name == "learn_tutor_decision":
+            return {"hypothesis": "The learner needs a source-specific recheck.", "diagnosis": "KNOWLEDGE_GAP", "confidence": 0.8, "pedagogicalGoal": "BUILD_INTUITION", "pedagogicalStrategy": "CONCRETE_EXAMPLE", "teachingAction": "give_example", "targetConcept": "objective-s1", "interactionType": "short_answer", "scaffoldLevel": "GUIDED", "visualAction": None, "prerequisiteBranch": None, "actions": [{"tool": "give_example", "arguments": {}}], "expectedEvidence": "The learner states the material's actual idea.", "transitionMessage": "Let’s use a concrete source example.", "nextStepId": "s1-apply-repair-2", "rationale": "A bounded alternate check is the safest next intervention."}
+        raise AssertionError(f"unexpected provider call: {tool_name}")
+
+    set_tutor_provider(fake_provider)
+    try:
+        response = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "unrelated"})
+        assert response.status_code == 200
+        payload = response.json()
+        assert "learn_tutor_decision" in calls
+        assert payload["step"]["id"] == "s1-apply-repair-2"
+        assert payload["action"]["type"] == "give_example"
+    finally:
+        set_tutor_provider(None)

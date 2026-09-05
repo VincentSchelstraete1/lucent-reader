@@ -11,7 +11,7 @@ LearnStatus = Literal["active", "completed", "stopped", "abandoned"]
 EvaluationResult = Literal["correct", "partially_correct", "incorrect", "insufficient_evidence"]
 RemediationCategory = Literal["none", "simplify", "example", "prerequisite", "change_modality", "revisit"]
 ConceptStateName = Literal["NOT_SEEN", "INTRODUCED", "DEVELOPING", "DEMONSTRATED", "NEEDS_REVIEW", "STRUGGLING"]
-PedagogicalStrategy = Literal["DIRECT_INSTRUCTION", "SOCRATIC_PROBE", "CONCEPTUAL_EXPLANATION", "VISUAL_MODEL", "ANIMATED_MECHANISM", "WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "GUIDED_DISCOVERY", "ANALOGY", "CONTRAST_CASE", "EXAMPLE_NONEXAMPLE", "PREREQUISITE_REPAIR", "ERROR_CORRECTION", "RETRIEVAL_PRACTICE", "TRANSFER_PRACTICE", "DELAYED_RECHECK"]
+PedagogicalStrategy = Literal["DIRECT_INSTRUCTION", "SOCRATIC_PROBE", "CONCEPTUAL_EXPLANATION", "VISUAL_MODEL", "ANIMATED_MECHANISM", "WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "GUIDED_DISCOVERY", "ANALOGY", "CONCRETE_EXAMPLE", "COUNTEREXAMPLE", "CONTRAST_CASE", "EXAMPLE_NONEXAMPLE", "PREREQUISITE_REPAIR", "ERROR_CORRECTION", "RETRIEVAL_PRACTICE", "TEACH_BACK", "TRANSFER_PRACTICE", "DELAYED_RECHECK"]
 ScaffoldLevel = Literal["FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"]
 ReviewDue = Literal["LATER_THIS_SESSION", "NEXT_SESSION", "FUTURE_REVIEW"]
 ContentPolicy = Literal["CONCEPTUAL", "PROCESS", "QUANTITATIVE", "MEMORIZATION", "CS_SYSTEMS"]
@@ -21,6 +21,21 @@ TutorActionType = Literal[
     "give_hint", "revisit_prerequisite", "revisit_concept", "increase_difficulty",
     "decrease_difficulty", "advance_to_related_concept",
     "give_worked_example", "show_process_visual", "show_diagram", "show_visual", "show_animation", "show_comparison", "show_process", "simplify_explanation", "give_counterexample", "ask_matching", "ask_labeling", "ask_fill_blank", "ask_worked_step", "ask_teach_back", "schedule_revisit",
+]
+PedagogicalGoal = Literal[
+    "BUILD_INTUITION", "EXPLAIN_CONCEPT", "CORRECT_MISCONCEPTION",
+    "REPAIR_PREREQUISITE", "DEMONSTRATE_PROCEDURE", "GUIDE_PRACTICE",
+    "REDUCE_SCAFFOLDING", "STRENGTHEN_RECALL", "TEST_APPLICATION",
+    "TEST_TRANSFER", "DELAYED_REVIEW", "VERIFY_UNDERSTANDING",
+]
+TutorToolName = Literal[
+    "retrieve_source", "inspect_learner_memory", "inspect_prerequisites",
+    "explain_concept", "give_example", "give_counterexample", "give_analogy",
+    "show_visual", "set_visual_stage", "highlight_visual_element", "animate_visual",
+    "focus_visual_region", "show_worked_example", "guide_problem_step",
+    "ask_question", "ask_prediction", "ask_free_response", "ask_numeric",
+    "ask_teach_back", "ask_transfer", "give_hint", "branch_to_prerequisite",
+    "return_from_prerequisite", "schedule_revisit", "advance_objective", "finish_session",
 ]
 VisualType = Literal["diagram", "process", "process_flow", "hierarchy", "causal_chain", "labeled_diagram", "relationship_map", "comparison", "sequence", "cycle", "spatial_structure", "state_transition", "timeline", "quantitative", "worked_derivation", "labeling", "ordering", "prediction", "staged_visual", "step_through"]
 AnimationOperation = Literal["highlight", "move", "appear", "disappear", "transform", "pulse", "connect", "flow", "change_value", "focus", "compare"]
@@ -249,16 +264,56 @@ class TutorAction(BaseModel):
     strategy: PedagogicalStrategy = "DIRECT_INSTRUCTION"
 
 
+class TutorToolCall(BaseModel):
+    tool: TutorToolName
+    arguments: dict = Field(default_factory=dict)
+
+
+class TutorObservation(BaseModel):
+    """Bounded learner context supplied to one tutor replanning decision."""
+    session_id: str = Field(alias="sessionId", min_length=1, max_length=64)
+    objective_id: str = Field(alias="objectiveId", min_length=1, max_length=60)
+    current_concept: str = Field(alias="currentConcept", min_length=1, max_length=180)
+    content_type: ContentPolicy = Field(alias="contentType", default="CONCEPTUAL")
+    learner_goal: LearnGoal = Field(alias="learnerGoal")
+    evidence: dict = Field(default_factory=dict)
+    recent_attempts: list[dict] = Field(default_factory=list, alias="recentAttempts", max_length=8)
+    misconceptions: list[str] = Field(default_factory=list, max_length=6)
+    previous_diagnoses: list[str] = Field(default_factory=list, alias="previousDiagnoses", max_length=6)
+    successful_strategies: list[str] = Field(default_factory=list, alias="successfulStrategies", max_length=8)
+    failed_strategies: list[str] = Field(default_factory=list, alias="failedStrategies", max_length=8)
+    successful_modalities: list[str] = Field(default_factory=list, alias="successfulModalities", max_length=8)
+    failed_modalities: list[str] = Field(default_factory=list, alias="failedModalities", max_length=8)
+    prerequisite_evidence: dict = Field(default_factory=dict, alias="prerequisiteEvidence")
+    previous_tutor_actions: list[str] = Field(default_factory=list, alias="previousTutorActions", max_length=8)
+    current_teaching_surface: str | None = Field(default=None, alias="currentTeachingSurface", max_length=120)
+    current_visual: dict | None = Field(default=None, alias="currentVisual")
+    current_visual_stage: int | None = Field(default=None, alias="currentVisualStage", ge=0, le=32)
+    review_state: str | None = Field(default=None, alias="reviewState", max_length=32)
+    source_blocks: list[dict] = Field(default_factory=list, alias="sourceBlocks", max_length=8)
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+    candidate_steps: list[dict] = Field(default_factory=list, alias="candidateSteps", max_length=12)
+
+
 class TutorDecision(BaseModel):
     """Bounded model output for one next-action decision."""
-    pedagogical_strategy: PedagogicalStrategy = Field(alias="pedagogicalStrategy")
-    teaching_action: TutorActionType = Field(alias="teachingAction")
-    target_concept: str = Field(alias="targetConcept", min_length=1, max_length=60)
+    hypothesis: str = Field(default="", max_length=500)
+    diagnosis: str = Field(default="", max_length=240)
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    pedagogical_goal: PedagogicalGoal = Field(default="VERIFY_UNDERSTANDING", alias="pedagogicalGoal")
+    pedagogical_strategy: PedagogicalStrategy = Field(default="DIRECT_INSTRUCTION", alias="pedagogicalStrategy")
+    teaching_action: TutorActionType = Field(default="teach_concept", alias="teachingAction")
+    target_concept: str = Field(default="concept", alias="targetConcept", min_length=1, max_length=60)
     interaction_type: str | None = Field(default=None, alias="interactionType", max_length=32)
     scaffold_level: ScaffoldLevel = Field(default="FULL", alias="scaffoldLevel")
     visual_action: str | None = Field(default=None, alias="visualAction", max_length=40)
     prerequisite_branch: str | None = Field(default=None, alias="prerequisiteBranch", max_length=60)
-    rationale: str = Field(min_length=1, max_length=300)
+    actions: list[TutorToolCall] = Field(default_factory=list, max_length=4)
+    expected_evidence: str = Field(default="A response that demonstrates the target concept.", alias="expectedEvidence", max_length=300)
+    transition_message: str = Field(default="Let's try a different way to build this understanding.", alias="transitionMessage", max_length=240)
+    next_step_id: str | None = Field(default=None, alias="nextStepId", max_length=60)
+    rationale: str = Field(default="A bounded action selected for the learner's current evidence.", max_length=300)
 
 
 class ConceptEvidence(BaseModel):

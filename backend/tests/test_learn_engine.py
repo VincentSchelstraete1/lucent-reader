@@ -1,6 +1,6 @@
 from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues
-from app.services.learn_tutor import ask_lucent_model, diagnose_response, set_tutor_provider
-from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep
+from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
+from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
 from app.routers.learn import _append_remediation, _ask_rate_allowed, _ask_scope, _record_tutor_event
@@ -228,3 +228,34 @@ def test_matching_failure_remediation_is_a_source_specific_contrast_case():
     assert "proto-oncogene" in text and "tumor suppressor" in text
     assert not student_facing_quality_issues(MultipleChoiceStep.model_validate(repair))
     assert repair["sourceSectionIds"] == ["genetics"]
+
+def test_tutor_agent_fake_provider_selects_a_bounded_next_intervention():
+    observation = TutorObservation(
+        sessionId="session-1", objectiveId="pendulum", currentConcept="Pendulum energy", contentType="QUANTITATIVE", learnerGoal="solve",
+        evidence={"state": "DEVELOPING", "incorrect": 1}, misconceptions=["Learner treats zero velocity as zero total energy."],
+        failedStrategies=["SOCRATIC_PROBE"], failedModalities=["short_answer"], candidateSteps=[{"id": "visual-1", "type": "walkthrough", "title": "Show energy transfer"}],
+        sourceSectionIds=["s1"], sourceBlockIds=["b1"],
+    )
+    fallback = TutorDecision(targetConcept="pendulum", teachingAction="teach_concept", pedagogicalStrategy="DIRECT_INSTRUCTION", nextStepId="visual-1")
+    def fake_provider(*_args, **_kwargs):
+        return {"hypothesis": "The learner confuses velocity with total energy.", "diagnosis": "MISCONCEPTION", "confidence": 0.94, "pedagogicalGoal": "CORRECT_MISCONCEPTION", "pedagogicalStrategy": "ANIMATED_MECHANISM", "teachingAction": "show_animation", "targetConcept": "pendulum", "interactionType": "walkthrough", "scaffoldLevel": "GUIDED", "visualAction": "set_visual_stage", "prerequisiteBranch": None, "actions": [{"tool": "set_visual_stage", "arguments": {"stepId": "visual-1", "stage": 1}}], "expectedEvidence": "Learner predicts where kinetic energy is greatest.", "transitionMessage": "The explanation was not enough, so let’s watch the energy change.", "nextStepId": "visual-1", "rationale": "A mechanism animation directly addresses the misconception."}
+    set_tutor_provider(fake_provider)
+    try:
+        decision = choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={"visual-1"})
+        assert decision.pedagogical_goal == "CORRECT_MISCONCEPTION"
+        assert decision.teaching_action == "show_animation"
+        assert decision.next_step_id == "visual-1"
+        assert decision.actions[0].tool == "set_visual_stage"
+    finally:
+        set_tutor_provider(None)
+
+def test_tutor_agent_rejects_unauthorized_next_step_and_tool_arguments():
+    observation = TutorObservation(sessionId="session-1", objectiveId="c1", currentConcept="Concept", learnerGoal="understand", sourceSectionIds=["s1"])
+    fallback = TutorDecision(targetConcept="c1", teachingAction="teach_concept", pedagogicalStrategy="DIRECT_INSTRUCTION", nextStepId="safe")
+    def fake_provider(*_args, **_kwargs):
+        return {"hypothesis": "", "diagnosis": "", "confidence": 0.8, "pedagogicalGoal": "BUILD_INTUITION", "pedagogicalStrategy": "CONCEPTUAL_EXPLANATION", "teachingAction": "teach_concept", "targetConcept": "c1", "interactionType": "teach", "scaffoldLevel": "FULL", "visualAction": None, "prerequisiteBranch": None, "actions": [{"tool": "show_visual", "arguments": {"unknown": "write-to-db"}}], "expectedEvidence": "", "transitionMessage": "", "nextStepId": "not-allowed", "rationale": "fallback"}
+    set_tutor_provider(fake_provider)
+    try:
+        assert choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={"safe"}) == fallback
+    finally:
+        set_tutor_provider(None)
