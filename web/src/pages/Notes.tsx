@@ -106,6 +106,10 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
   const [structuredAnswers, setStructuredAnswers] = useState<Record<string, string>>({})
   const [hint, setHint] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
+  const [askMessage, setAskMessage] = useState("")
+  const [askAnswer, setAskAnswer] = useState<{ answer: string; scope: string; tool?: string } | null>(null)
+  const [askLoading, setAskLoading] = useState(false)
   const sessionRef = useRef<LearnSession | null>(null)
 
   useEffect(() => {
@@ -148,6 +152,13 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
     try { const result = await api.getLearnHint(session.id); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
     catch (e) { setError(e instanceof Error ? e.message : "No hint is available right now.") }
   }
+  async function askLucent() {
+    if (!session || !askMessage.trim()) return
+    setAskLoading(true); setError(null)
+    try { const result = await api.askLucent(session.id, askMessage.trim()); setAskAnswer(result); if (result.visualAction?.stage !== undefined) window.dispatchEvent(new CustomEvent("lucent-visual-stage", { detail: { stage: result.visualAction.stage } })); setAskMessage("") }
+    catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
+    finally { setAskLoading(false) }
+  }
 
   if (!session) return <section className="learn-workspace learn-onboarding" aria-labelledby="learn-heading">
     <button className="learn-back" type="button" onClick={onBack}>← Back to notes</button>
@@ -156,7 +167,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
     <p className="learn-context">{note.title}</p>
     <div className="learn-choice-group"><p className="learn-choice-label">Choose a goal</p><div className="learn-choice-grid">{([['understand', 'Understand the concepts', 'Build intuition and see how ideas connect.'], ['solve', 'Learn to solve problems', 'Practice methods and apply them step by step.'], ['memorize', 'Memorize the content', 'Practice important facts, terms, and formulas.'], ['exam', 'Prepare for an exam', 'Mix understanding, recall, and application.']] as const).map(([value, label, description]) => <button type="button" key={value} className={goal === value ? "learn-choice selected" : "learn-choice"} onClick={() => setGoal(value)}><strong>{label}</strong><span>{description}</span></button>)}</div></div>
     <div className="learn-choice-group"><p className="learn-choice-label">How familiar are you with this already?</p><div className="learn-familiarity-row">{([['new', 'New to this'], ['somewhat_familiar', 'Somewhat familiar'], ['reviewing', 'Mostly reviewing']] as const).map(([value, label]) => <button type="button" key={value} className={familiarity === value ? "learn-familiarity selected" : "learn-familiarity"} onClick={() => setFamiliarity(value)}>{label}</button>)}</div></div>
-    {error && <p className="error" role="alert">{error}</p>}
+    {error && <p className="error learn-onboarding-error" role="alert">{error}</p>}
     <button className="btn btn-primary" type="button" disabled={loading || !documentId} onClick={start}>{loading ? "Preparing your session…" : "Start learning"}</button>
   </section>
 
@@ -178,6 +189,7 @@ function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId
     <h2 id="learn-heading">{session.objectiveTitle ?? note.title}</h2>
     <div className="learn-progress" role="progressbar" aria-valuemin={0} aria-valuemax={session.objectiveCount} aria-valuenow={session.objectiveIndex + 1}><span style={{ width: `${((session.objectiveIndex + 1) / Math.max(1, session.objectiveCount)) * 100}%` }} /></div>
     <article className="learn-step"><div className="learn-action-kicker">{stateLabel}</div><h3>{step.title}</h3>{adaptationMessage && <p className="learn-adaptation" role="status">{adaptationMessage}</p>}{step.content && <p className="learn-step-content">{step.content}</p>}{step.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={step.visualSpec} /></div>}{visualComponent?.mechanism && <div className="learn-teaching-visual"><StepThroughMechanism data={generatedMechanismToRendererData(visualComponent.mechanism)} /></div>}{step.prompt && <p className="learn-question">{step.prompt}</p>}{step.options.length > 0 && !isStructured && <div className="learn-options">{step.options.map((option) => <button type="button" key={option.id} className={selectedOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setSelectedOption(option.id)}>{option.label}</button>)}</div>}{isStructured && <div className="learn-structured-response">{step.items.map((item) => <label key={item.id}>{item.label}<select aria-label={item.label} value={structuredAnswers[item.id] ?? ""} onChange={(event) => setStructuredAnswers((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Choose a match…</option>{step.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>)}</div>}{step.items.length > 0 && step.type === "ordering" && <div className="learn-ordering">{orderedIds.map((id, index) => { const item = step.items.find((candidate) => candidate.id === id); return <div className="learn-ordering-item" key={id}><span>{index + 1}. {item?.label ?? id}</span><button type="button" disabled={index === 0} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next })} aria-label="Move up">↑</button><button type="button" disabled={index === orderedIds.length - 1} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next })} aria-label="Move down">↓</button></div>})}</div>}{requiresResponse && !isStructured && step.options.length === 0 && step.items.length === 0 && <input className="learn-answer" aria-label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && answer.trim()) respond(submitResponse) }} placeholder="Type your response" />}{hint && <p className="learn-hint" role="status"><strong>Hint {session.hintsUsed}:</strong> {hint}</p>}{session.feedback && <p className={`learn-feedback ${session.feedbackKind ?? "info"}`} role="status">{session.feedback}</p>}<div className="learn-step-actions">{step.hintsAvailable > 0 && <button className="btn" type="button" onClick={requestHint}>Hint</button>}<button className="btn" type="button" onClick={stop}>Stop for now</button>{requiresResponse ? <button className="btn btn-primary" type="button" disabled={loading || !canSubmit} onClick={() => respond(submitResponse, selectedOption ?? undefined)}>{loading ? "Checking…" : "Submit"}</button> : <button className="btn btn-primary" type="button" disabled={loading} onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button>}</div></article>
+    <div className="learn-ask-lucent"><button type="button" className="learn-ask-toggle" onClick={() => setAskOpen((value) => !value)} aria-expanded={askOpen}>Ask Lucent</button>{askOpen && <div className="learn-ask-panel"><p className="learn-ask-context">Ask about this concept or a related prerequisite.</p><div className="learn-ask-row"><input aria-label="Ask Lucent a question" value={askMessage} onChange={(event) => setAskMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") askLucent() }} placeholder="Why does this step matter?" /><button className="btn btn-primary" type="button" onClick={askLucent} disabled={askLoading || !askMessage.trim()}>{askLoading ? "Thinking…" : "Ask"}</button></div>{askAnswer && <div className="learn-ask-answer" role="status"><p>{askAnswer.answer}</p><small>{askAnswer.scope === "IN_SCOPE_PREREQUISITE" ? "Related prerequisite context" : "Grounded in this material"}</small></div>}</div>}</div>
     {error && <p className="error" role="alert">{error}</p>}
   </section>
 }

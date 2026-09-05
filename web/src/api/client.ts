@@ -352,6 +352,7 @@ export type LearnEvaluation = { result: "correct" | "partially_correct" | "incor
 export type LearnConceptState = { conceptId: string; title: string; state: string; attempts: number; correct: number; partiallyCorrect: number; incorrect: number; insufficientEvidence: number; hintsUsed: number; interactionTypes: string[]; misconceptions: string[]; immediateSuccess: boolean; delayedSuccess: boolean; sourceSectionIds: string[]; sourceBlockIds: string[]; lastResult?: string | null }
 export type LearnReport = { covered: string[]; demonstrated: string[]; developing: string[]; struggles: string[]; misconceptions?: string[]; needsReview: string[]; notCovered: string[]; nextFocus: string[]; stopped: boolean }
 export type LearnSession = { id: string; documentId: number; goal: LearnGoal; familiarity: LearnFamiliarity; status: "active" | "completed" | "stopped" | "abandoned"; objectiveIndex: number; stepIndex: number; objectiveCount: number; objectiveTitle?: string | null; step?: LearnStepView | null; feedback?: string | null; feedbackKind?: "correct" | "incorrect" | "info" | null; hintsUsed: number; completedObjectives: number; weakObjectives: string[]; action?: { id: string; type: string; conceptId: string; stepId?: string | null; rationale: string } | null; evaluation?: LearnEvaluation | null; conceptStates: LearnConceptState[]; report?: LearnReport | null; endedReason?: string | null }
+export type AskLucentResponse = { answer: string; scope: "IN_SCOPE_SOURCE" | "IN_SCOPE_CURRENT_CONCEPT" | "IN_SCOPE_PREREQUISITE" | "OUT_OF_SCOPE"; sourceSectionIds: string[]; sourceBlockIds: string[]; tool: string; visualAction?: { type: string; stepId?: string; stage?: number } | null }
 
 // Legacy alias kept because it was the original (PDF-only) name for this shape.
 export type PdfIngestionResult = DocumentIngestionResult
@@ -408,4 +409,5 @@ export const api = {
   ,submitLearnResponse: (sessionId: string, request: { response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
   ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
   ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
+  ,askLucent: (sessionId: string, message: string) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message })
 }

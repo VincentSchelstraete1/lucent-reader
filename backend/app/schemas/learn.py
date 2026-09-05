@@ -299,6 +299,17 @@ class LearnHintResponse(BaseModel):
     hint: str
     hints_used: int = Field(alias="hintsUsed")
 
+class AskLucentRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1200)
+
+class AskLucentResponse(BaseModel):
+    answer: str = Field(min_length=1, max_length=1800)
+    scope: Literal["IN_SCOPE_SOURCE", "IN_SCOPE_CURRENT_CONCEPT", "IN_SCOPE_PREREQUISITE", "OUT_OF_SCOPE"]
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
+    tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
+    visual_action: dict | None = Field(default=None, alias="visualAction")
+
 
 class LearnStepView(BaseModel):
     id: str

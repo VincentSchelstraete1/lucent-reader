@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from uuid import UUID
@@ -16,13 +18,16 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step
 from app.services.learn_tutor import diagnose_response
 from app.services.retrieval import retrieve_note_context
 
 router = APIRouter()
 STEP_ADAPTER = TypeAdapter(LearnStep)
+_ASK_RATE: dict[str, list[float]] = {}
+_ASK_WINDOW_SECONDS = 60
+_ASK_MAX_REQUESTS = 12
 
 def _owned_document(db, document_id: int, user: User) -> Document:
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
@@ -97,6 +102,42 @@ def _get_owned_session(db, session_id: UUID, user: User) -> LearnSession:
     session = db.execute(select(LearnSession).where(LearnSession.id == session_id, LearnSession.user_id == user.id)).scalar_one_or_none()
     if not session: raise HTTPException(status_code=404, detail="Learning session not found")
     return session
+
+def _ask_scope(message: str, objective: dict, context: dict) -> str:
+    terms = set(re.findall(r"[a-z0-9]{3,}", message.lower()))
+    concept_terms = set(re.findall(r"[a-z0-9]{3,}", (objective.get("title", "") + " " + objective.get("outcome", "")).lower()))
+    source_terms = set(re.findall(r"[a-z0-9]{3,}", context.get("text", "").lower()))
+    if terms & (concept_terms | source_terms): return "IN_SCOPE_SOURCE"
+    if any(word in message.lower() for word in ("why", "how", "what does", "formula", "prerequisite", "mean")):
+        return "IN_SCOPE_PREREQUISITE"
+    return "OUT_OF_SCOPE"
+
+@router.post("/learn-sessions/{session_id}/ask", response_model=AskLucentResponse, dependencies=[Depends(require_csrf)])
+def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
+    session = _get_owned_session(db, session_id, user)
+    key = str(user.id)
+    now = time.monotonic(); recent = [stamp for stamp in _ASK_RATE.get(key, []) if now - stamp < _ASK_WINDOW_SECONDS]
+    if len(recent) >= _ASK_MAX_REQUESTS:
+        raise HTTPException(status_code=429, detail="Ask Lucent is taking a short pause. Try again in a moment.")
+    recent.append(now); _ASK_RATE[key] = recent
+    objectives = session.plan.get("objectives", []); objective = objectives[min(session.objective_index, max(0, len(objectives) - 1))] if objectives else {}
+    note = _latest_note(db, session.document_id); payload = {}
+    if note:
+        try: payload = json.loads(note.content)
+        except (TypeError, ValueError): payload = {}
+    context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
+    scope = _ask_scope(request.message, objective, context)
+    if scope == "OUT_OF_SCOPE":
+        return AskLucentResponse(answer="I can help with the material you’re currently learning and related prerequisite concepts.", scope=scope)
+    current_step = _parse_step(objective.get("steps", [])[session.step_index]) if objective.get("steps") and session.step_index < len(objective.get("steps", [])) else None
+    tool = "retrieve_source" if context.get("text") else "request_explanation"
+    visual_action = None
+    lowered = request.message.lower()
+    if current_step and getattr(current_step, "visual_spec", None) and any(word in lowered for word in ("show", "visual", "diagram", "stage", "highlight")):
+        tool = "show_visual"; visual_action = {"type": "show_visual", "stepId": current_step.id, "stage": 0}
+    answer = context.get("text") or "I can explain the current concept, but the saved notes do not contain enough detail to support a grounded answer yet."
+    if scope == "IN_SCOPE_PREREQUISITE": answer = "This is a related prerequisite. The saved material does not fully explain it, so treat this as supporting context rather than a claim from the source.\n\n" + answer
+    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
     prior = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document_id).order_by(LearnSession.updated_at.desc())).scalars().first()
