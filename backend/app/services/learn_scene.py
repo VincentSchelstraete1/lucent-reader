@@ -173,6 +173,13 @@ def compose_learning_scene(
                 if candidate_spec is not None or candidate_ref is not None:
                     add(kind="animation" if candidate.type == "walkthrough" else "visual", label="Watch", title=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
                     break
+        if not any(block.kind == "practice" for block in blocks):
+            for raw in steps[step_index + 1:] + steps[:step_index]:
+                candidate = _parse(raw)
+                if candidate and candidate.type in _INTERACTIVE_TYPES and not student_facing_quality_issues(candidate, source_text):
+                    label = {"prediction": "Predict", "matching": "Compare", "labeling": "Label", "ordering": "Reconstruct", "worked_step": "Solve", "problem": "Try", "numeric": "Solve", "teach_back": "Explain", "fill_blank": "Recall", "short_answer": "Explain", "multiple_choice": "Check"}.get(candidate.type, "Try")
+                    add(kind="practice", label=label, title=candidate.title, content=None, step=candidate, visual_spec=getattr(candidate, "visual_spec", None), visual_ref=None)
+                    break
 
     if decision:
         for tool in decision.actions:
@@ -183,7 +190,7 @@ def compose_learning_scene(
             content = getattr(current_step, "feedback_incorrect", None) or objective.get("bottleneck") or objective.get("outcome")
             add(kind=kind, label=label, title=objective.get("title"), content=content, step=None, visual_spec=None, visual_ref=None)
 
-    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and not planned_practice:
+    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and not planned_practice and not any(block.kind == "practice" for block in blocks):
         label = {
             "prediction": "Predict", "matching": "Compare", "labeling": "Label",
             "ordering": "Reconstruct", "worked_step": "Solve", "problem": "Try",

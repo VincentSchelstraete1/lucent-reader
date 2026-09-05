@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearningScene, ScenePrivateState, TutorObservation
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -98,6 +99,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
     scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
+    scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     scene_data = scene.model_dump(by_alias=True)
     private = None if parsed.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=parsed.model_dump(by_alias=True), objectiveId=str(objective.get("id")), targetConceptIds=[str(objective.get("id"))]).model_dump(by_alias=True)
     return scene, private
@@ -124,7 +126,6 @@ def ensure_runtime_state(session, db=None) -> tuple[LearningScene, dict[str, Any
     if objective is None:
         raise ValueError("Learn session has no valid objective")
     scene, private = _legacy_scene(session, objective)
-    scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     state.update({"runtimeVersion": RUNTIME_VERSION, "planSemanticsVersion": PLAN_SEMANTICS_VERSION, "currentObjectiveId": str(objective.get("id")), "currentScene": scene.model_dump(by_alias=True), "currentScenePrivate": private})
     state.pop("sceneRevision", None)
     state.pop("sceneInterruption", None)
@@ -180,6 +181,120 @@ def build_student_feedback(evaluation: Any, *, interaction_id: str, source_block
 
 
 def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dict[str, Any]] | None = None):
-    """Single runtime seam; full observe/decide/execute arrives in Phase 3."""
+    """Process one bounded event and return the authoritative scene/private pair.
+
+    This is intentionally the only response/continue decision seam.  Phase 3
+    extends the operation vocabulary, but all persistence already flows through
+    this function rather than a cursor-based router branch.
+    """
+    from pydantic import TypeAdapter
+    from app.models.learn import LearnAttempt
+    from app.services.learn_engine import evaluate_step, public_step
+    from app.services.learn_scene import compose_learning_scene
+    from app.services.learn_tutor import choose_tutor_decision, diagnose_response
+
     scene, private = ensure_runtime_state(session, db=db)
-    return scene, private
+    state = _state(session)
+    objective = _objective(session.plan or {}, scene.objective_id)
+    if objective is None:
+        return scene, private
+    steps = list(objective.get("steps") or [])
+    adapter = TypeAdapter(LearnStep)
+    current = None
+    if private and private.get("interaction"):
+        try:
+            current = adapter.validate_python(private["interaction"])
+        except Exception:
+            current = None
+    if current is None:
+        practice = next((block.step for block in scene.blocks if block.kind == "practice" and block.step), None)
+        if practice is not None:
+            try:
+                current = adapter.validate_python(practice.model_dump(by_alias=True))
+            except Exception:
+                current = None
+
+    # A continue event acknowledges the currently composed scene; it must not
+    # manufacture a second step or rewind to a teaching asset.  Replanning is
+    # triggered by a learner response (or an explicit Ask/visual event).
+    if event_type := (getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")):
+        if event_type == "CONTINUE" and current is not None:
+            return scene, private
+
+    event_type = event_type or "CONTINUE"
+    response = getattr(event, "response", None) if not isinstance(event, dict) else event.get("response")
+    if isinstance(response, dict):
+        response_text = response.get("response")
+        option_id = response.get("optionId")
+        ordered_ids = response.get("orderedIds")
+    else:
+        response_text = response
+        option_id = None
+        ordered_ids = None
+
+    evaluation = None
+    concept_id = str(objective.get("id"))
+    concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == concept_id), {"conceptId": concept_id, "title": objective.get("title", "Concept"), "state": "INTRODUCED"})
+    if event_type == "RESPONSE" and current is not None:
+        evaluation = evaluate_step(current, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
+        if response_text and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
+            expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
+            evaluation = diagnose_response(prompt=getattr(current, "prompt", ""), expected=expected, response=str(response_text), source_context=" ".join(str(x) for x in objective.get("sourceBlockIds", [])), fallback=evaluation)
+        now = datetime.now(timezone.utc).isoformat()
+        concept = dict(concept)
+        concept.update({"attempts": int(concept.get("attempts", 0)) + 1, "lastSeen": now, "lastResult": evaluation.result})
+        if evaluation.result == "correct":
+            concept["correct"] = int(concept.get("correct", 0)) + 1
+            concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 else "DEMONSTRATED"
+        elif evaluation.result == "partially_correct":
+            concept["partiallyCorrect"] = int(concept.get("partiallyCorrect", 0)) + 1; concept["state"] = "DEVELOPING"
+        elif evaluation.result == "incorrect":
+            concept["incorrect"] = int(concept.get("incorrect", 0)) + 1; concept["state"] = "STRUGGLING" if int(concept.get("incorrect", 0)) >= 2 else "DEVELOPING"
+            if evaluation.misconception and evaluation.misconception not in concept.setdefault("misconceptions", []): concept["misconceptions"].append(evaluation.misconception)
+        else:
+            concept["insufficientEvidence"] = int(concept.get("insufficientEvidence", 0)) + 1
+        concept["interactionTypes"] = list(dict.fromkeys(list(concept.get("interactionTypes", [])) + [current.type]))
+        existing_concepts = list(state.get("concepts", []))
+        if any(item.get("conceptId") == concept_id for item in existing_concepts):
+            state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in existing_concepts]
+        else:
+            state["concepts"] = existing_concepts + [concept]
+        state.setdefault("recentAttempts", []).append({"interactionId": current.id, "conceptId": concept_id, "type": current.type, "result": evaluation.result})
+        state["recentAttempts"] = state["recentAttempts"][-8:]
+        if db is not None:
+            db.add(LearnAttempt(session_id=session.id, objective_id=concept_id, step_id=current.id, step_type=current.type, response=str(response_text or option_id or ",".join(ordered_ids or [])), result=evaluation.result, attempt_number=int(concept.get("attempts", 1)), hints_used=0, evaluation=evaluation.model_dump(by_alias=True)))
+
+    candidates = []
+    for raw in steps:
+        try:
+            candidate = adapter.validate_python(raw)
+        except Exception:
+            continue
+        candidates.append(candidate)
+    if evaluation and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
+        teaching = next((item for item in candidates if item.type in {"teach", "walkthrough"}), None)
+        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None)), current)
+    else:
+        next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"}), None) or current
+    if next_step is None:
+        return scene, private
+    fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale="Continue with the next grounded learning move.")
+    fallback = TutorDecision(targetConcept=concept_id, teachingAction=fallback_action.type, pedagogicalGoal="BUILD_INTUITION" if not evaluation or evaluation.result != "correct" else "VERIFY_UNDERSTANDING", pedagogicalStrategy="CONCEPTUAL_EXPLANATION" if next_step.type in {"teach", "walkthrough"} else "RETRIEVAL_PRACTICE", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=next_step.id, actions=[])
+    observation = build_tutor_observation(session, event=event, source_blocks=source_blocks)
+    try:
+        decision = choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={item.id for item in candidates})
+    except Exception:
+        decision = fallback
+    feedback = None
+    if evaluation is not None:
+        feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or evaluation.evidence
+        state["lastFeedback"] = feedback
+    state["lastTutorDecision"] = decision.model_dump(by_alias=True)
+    state["previousTutorActions"] = (list(state.get("previousTutorActions", [])) + [decision.teaching_action])[-8:]
+    state["lastFeedback"] = feedback
+    state["lastFeedbackKind"] = "correct" if evaluation and evaluation.result == "correct" else "incorrect" if evaluation else "info"
+    session.state = state
+    rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
+    private_next = None if next_step.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=rendered.id, revision=rendered.revision, interaction=next_step.model_dump(by_alias=True), objectiveId=concept_id, targetConceptIds=[concept_id], strategy=decision.pedagogical_strategy, scaffoldLevel=decision.scaffold_level, decisionId=bounded_id("decision", session.id, rendered.id)).model_dump(by_alias=True)
+    persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
+    return rendered, private_next

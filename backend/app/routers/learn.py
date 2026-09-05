@@ -20,10 +20,10 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
-from app.services.learn_runtime import ensure_runtime_state, load_current_scene, persist_scene_revision
+from app.services.learn_runtime import ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -447,9 +447,9 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         ask_state["previousTutorActions"] = (list(ask_state.get("previousTutorActions", [])) + [ask_decision.teaching_action])[-8:]
         session.state = ask_state
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="tutor_observation", metadata={"event": "learner_question", "goal": ask_decision.pedagogical_goal, "strategy": ask_decision.pedagogical_strategy, "action": ask_decision.teaching_action, "confidence": ask_decision.confidence})
-    # Ask Lucent is an interruption in the same scene.  Persist presentation
-    # state and let the normal scene compiler produce the authoritative scene
-    # snapshot; no graded evidence is changed by chat.
+    # Ask Lucent is an interruption in the same scene.  Mutate the persisted
+    # scene itself so the learner sees the change immediately; no graded
+    # evidence is changed by chat.
     ask_state["sceneInterruption"] = {"question": request.message[:240], "answer": answer[:900]}
     ask_state["sceneRevision"] = int(ask_state.get("sceneRevision", 0)) + 1
     if visual_action and visual_action.get("stage") is not None:
@@ -457,10 +457,18 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     if visual_action and visual_action.get("nodeId"):
         ask_state["visualHighlight"] = visual_action["nodeId"]
     session.state = ask_state
+    active_scene = load_current_scene(session)
+    if active_scene is not None:
+        blocks = list(active_scene.blocks)
+        blocks.append(LearningSceneBlock(id=_bounded_id("ask", session.id, request.message[:80]), kind="tutor_message", label="Ask Lucent", title="", content=answer[:900], sourceSectionIds=list(context.get("sourceSectionIds", []))[:8], sourceBlockIds=list(context.get("sourceBlockIds", []))[:12]))
+        visual_state = active_scene.visual_state
+        if visual_action:
+            visual_state = visual_state.model_copy(update={"stage": int(visual_action.get("stage", visual_state.stage)), "highlightedElementIds": [str(visual_action["nodeId"])] if visual_action.get("nodeId") else visual_state.highlighted_element_ids}) if visual_state else LearningVisualState(stage=int(visual_action.get("stage", 0)), highlightedElementIds=[str(visual_action["nodeId"])] if visual_action.get("nodeId") else [])
+        active_scene = active_scene.model_copy(update={"blocks": blocks[-8:], "visualState": visual_state.model_dump(by_alias=True) if visual_state else None})
+        persist_scene_revision(session, active_scene, (session.state or {}).get("currentScenePrivate"), event_id=f"ask-{session.id}", db=db)
     scene_response = _session_payload(session)
-    _persist_scene(session, scene_response.scene)
     db.commit()
-    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene)
+    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene, scene=scene_response.scene)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
     prior = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document_id).order_by(LearnSession.updated_at.desc())).scalars().first()
@@ -662,11 +670,28 @@ def _leave_degenerate_repair_loop(session: LearnSession, state: dict, objective:
 @router.post("/learn-sessions/{session_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
-    if session.status != "active": return _session_payload(session, feedback="This session is no longer active.", feedback_kind="info")
-    objective = session.plan["objectives"][session.objective_index]; step = _safe_step(objective, objective["steps"][session.step_index])
-    if not step: session.step_index += 1; db.commit(); return _session_payload(session, feedback="That step was skipped because it was unavailable.", feedback_kind="info")
-    state = dict(session.state or {}); state.pop("sceneInterruption", None); attempts = dict(state.get("attempts") or {}); attempt_number = int(attempts.get(step.id, 0)) + 1; attempts[step.id] = attempt_number; state["attempts"] = attempts
-    evaluation = evaluate_step(step, response=request.response, option_id=request.option_id, ordered_ids=request.ordered_ids)
+    if session.status != "active":
+        return _session_payload(session, feedback="This session is no longer active.", feedback_kind="info")
+    _ensure_session_runtime(db, session)
+    scene = load_current_scene(session)
+    private = (session.state or {}).get("currentScenePrivate") or {}
+    interaction_id = request.interaction_id or private.get("interaction", {}).get("id")
+    event = {"id": f"response-{session.id}-{interaction_id or 'scene'}", "type": request.event_type or "RESPONSE", "sceneId": request.scene_id or (scene.id if scene else None), "sceneRevision": request.scene_revision or (scene.revision if scene else None), "interactionId": interaction_id, "response": {"response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}}
+    try:
+        rendered, _private = process_tutor_event(session, event, db=db)
+    except Exception:
+        db.rollback()
+        raise
+    feedback = (session.state or {}).get("lastFeedback")
+    kind = (session.state or {}).get("lastFeedbackKind")
+    db.commit()
+    return _session_payload(session, feedback=feedback, feedback_kind=kind)
+    """
+    Legacy cursor-based implementation retained below only in source history.
+    It is intentionally unreachable; the authoritative runtime above owns all
+    learner-visible progression.
+    """
+    evaluation = None
     retrieved_context: dict = {}
     if request.response and step.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
         expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
