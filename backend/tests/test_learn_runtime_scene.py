@@ -49,7 +49,8 @@ def test_correct_response_does_not_represent_same_unanswered_interaction():
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "a"}})
     before = scene.revision
-    scene, _ = process_tutor_event(session, {"id": "right", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "b"}})
+    current_id = scene.response_interaction_id
+    scene, _ = process_tutor_event(session, {"id": "right", "type": "RESPONSE", "interactionId": current_id, "response": {"optionId": "b"}})
     assert scene.revision > before
     assert scene.response_interaction_id != "check"
     assert not any(block.kind == "practice" and block.step and block.step.id == "check" for block in scene.blocks)

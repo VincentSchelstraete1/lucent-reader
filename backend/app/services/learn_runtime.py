@@ -328,7 +328,9 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     # manufacture a second step or rewind to a teaching asset.  Replanning is
     # triggered by a learner response (or an explicit Ask/visual event).
     if event_type := (getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")):
-        if event_type == "CONTINUE" and current is not None:
+        # Continue is a no-op only while a real active practice target is
+        # already present. Teaching-only scenes must advance/recompose.
+        if event_type == "CONTINUE" and current is not None and scene.response_interaction_id:
             return scene, private
 
     event_type = event_type or "CONTINUE"
@@ -513,7 +515,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         decision = fallback
     # The decision selects the next candidate; the fallback is only used when
     # the provider is unavailable or fails validation.
-    selected = next((item for item in candidates if item.id == decision.next_step_id), None)
+    answered_ids = set(state.get("answeredInteractionIds") or [])
+    selected = next((item for item in candidates if item.id == decision.next_step_id and item.id not in answered_ids), None)
     if selected is not None:
         next_step = selected
         fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale=decision.rationale or "Continue with the grounded concept.")
@@ -527,6 +530,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     state["previousTutorActions"] = (list(state.get("previousTutorActions", [])) + [decision.teaching_action])[-8:]
     state["lastFeedback"] = feedback
     state["lastFeedbackKind"] = "correct" if evaluation and evaluation.result == "correct" else "incorrect" if evaluation else "info"
+    if evaluation is not None and current is not None:
+        state["answeredInteractionIds"] = list(dict.fromkeys([*(state.get("answeredInteractionIds") or []), current.id]))[-32:]
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
     private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision)
