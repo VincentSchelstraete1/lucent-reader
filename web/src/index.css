@@ -153,7 +153,7 @@
 .learn-focus-mode { position: fixed; inset: 0; z-index: 80; max-width: none !important; margin: 0; padding: clamp(1rem, 4vw, 3rem); overflow: auto; background: #f8f6f0; }
 .learn-focus-mode .learn-session-top, .learn-focus-mode > .note-kicker, .learn-focus-mode > h2, .learn-focus-mode > .learn-progress, .learn-focus-mode > .learn-step, .learn-focus-mode > .error { position: relative; z-index: 1; max-width: 980px; margin-left: auto; margin-right: auto; }
 .learn-focus-mode > .learn-ask-lucent { position: relative; z-index: 2; width: min(980px, 100%); max-width: 980px; margin: 1rem auto 0; }
-.learn-focus-mode .learn-ask-panel { max-height: min(30vh, 260px); overflow: auto; }
+.learn-focus-mode .learn-ask-panel { max-height: min(52vh, 520px); overflow-y: auto; overflow-x: hidden; }
 .learn-focus-mode .learn-step { border: 1px solid #d8d2c5; border-radius: 18px; background: #fffdf8; padding: clamp(1.2rem, 3vw, 2.5rem); box-shadow: 0 18px 50px rgba(45, 52, 43, .08); }
 .learn-focus-mode .learn-teaching-visual .structured-visual { max-width: 900px; margin: 0 auto; }
 .learn-focus-mode .learn-focus-toggle { background: #eaf1e8; }
@@ -213,9 +213,9 @@
 .learn-ask-panel { margin-top: .55rem; padding: .85rem; border: 1px solid #d9ddd3; border-radius: 12px; background: rgba(255,253,248,.75); }
 .learn-ask-context { color: #6c746e; font-size: .82rem; margin: 0 0 .6rem; }
 .learn-ask-row { display: flex; gap: .5rem; }
-.learn-ask-row input { flex: 1; min-width: 0; border: 1px solid #bfc9bd; border-radius: 8px; padding: .7rem .75rem; background: #fffdf8; color: #282b27; font: inherit; }
+.learn-ask-row input { flex: 1; min-width: 0; min-height: 2.7rem; border: 1px solid #bfc9bd; border-radius: 8px; padding: .7rem .75rem; background: #fffdf8; color: #282b27; font: inherit; }
 .learn-ask-answer { margin-top: .7rem; padding: .7rem .8rem; border-left: 3px solid #58735d; background: #f1f5ef; }
-.learn-ask-answer p { margin: 0; white-space: pre-line; }
+.learn-ask-answer p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; max-height: 36vh; overflow-y: auto; }
 .learn-ask-answer small { display: block; margin-top: .45rem; color: #6c746e; }
 .learn-step-actions, .learn-result-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
 .learn-feedback { margin-top: 1rem; padding: .75rem .85rem; border-left: 3px solid #58735d; background: #f1f5ef; }

@@ -338,7 +338,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale=decision.rationale or "Continue with the grounded concept.")
     feedback = None
     if evaluation is not None:
-        feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or evaluation.evidence
+        feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or "Good — that matches the material."
         state["lastFeedback"] = feedback
     state["lastTutorDecision"] = decision.model_dump(by_alias=True)
     state["previousTutorActions"] = (list(state.get("previousTutorActions", [])) + [decision.teaching_action])[-8:]

@@ -132,7 +132,7 @@ def compose_learning_scene(
     transition = decision.transition_message if decision else None
     if transition and any(phrase in transition.casefold() for phrase in ("using your response", "changing the approach", "choose the next", "evidence")):
         transition = "Let's try this idea from a different angle."
-    if transition and feedback and not learner_text_quality_issues(transition, source_text):
+    if transition and feedback and getattr(evaluation, "result", None) != "correct" and not learner_text_quality_issues(transition, source_text):
         add(kind="tutor_message", label="Try this", content=transition, step=None, visual_spec=None, visual_ref=None)
 
     planned_practice = False
@@ -208,6 +208,23 @@ def compose_learning_scene(
     # Last-resort content is source-specific and can never be a schema/meta template.
     if not blocks:
         blocks.append(LearningSceneBlock(id=_id("block", scene_seed, "fallback"), kind="explanation", label="Understand", title=objective.get("title", "Current concept"), content=objective.get("outcome") or objective.get("title", "Review this idea."), sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+
+    # Normalize obvious broken compositions before they become public scene
+    # state: adjacent duplicate headings/content and empty visual blocks are
+    # never useful learner-facing blocks.
+    normalized: list[LearningSceneBlock] = []
+    seen_signatures: set[tuple[str, str | None, str | None]] = set()
+    for block in blocks:
+        if block.kind in {"visual", "animation"} and block.visual_spec is None and block.visual_ref is None:
+            continue
+        signature = (block.kind, block.title, block.content)
+        if signature in seen_signatures and block.kind != "practice":
+            continue
+        if normalized and normalized[-1].title and block.title and normalized[-1].title == block.title and normalized[-1].content == block.content:
+            continue
+        seen_signatures.add(signature)
+        normalized.append(block)
+    blocks = normalized[:6]
 
     evidence = {
         "multiple_choice": ["recognition"], "prediction": ["application"], "matching": ["comparison"],

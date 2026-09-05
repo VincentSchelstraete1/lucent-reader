@@ -127,7 +127,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         steps: list[LearnStep] = []
 
         if goal in {"understand", "exam"}:
-            refresher = TeachStep(id=_bounded_plan_id("teach", section_identity), type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
+            refresher = TeachStep(id=_bounded_plan_id("teach", section_identity), type="teach", title="Quick refresher" if familiarity == "reviewing" else f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
             visual_candidate = next((c for c in comps if c.get("kind") in {"flow", "structure", "relationship_map", "comparison"}), None)
             if visual_candidate:
                 refresher.visual_spec = synthesize_visual_spec(visual_candidate, title, section_ids, block_ids)
