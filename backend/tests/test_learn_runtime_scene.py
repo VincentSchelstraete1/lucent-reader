@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import apply_scene_message, process_tutor_event
+from app.services.learn_runtime import apply_scene_message, completion_met, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
 
 
 def _session():
@@ -56,3 +56,12 @@ def test_ask_message_mutates_authoritative_scene_and_visual_state():
     assert scene and scene.visual_state.stage == 2
     assert any(block.label == "Ask Lucent" for block in scene.blocks)
     assert session.state["currentScene"]["visualState"]["stage"] == 2
+
+
+def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
+    session = _session()
+    session.plan["objectives"].append({"id": "prereq", "title": "Prerequisite", "outcome": "Know the prerequisite", "steps": [{"id": "p", "type": "teach", "title": "Prerequisite", "content": "A prerequisite idea."}]})
+    branch = push_prerequisite_branch(session, original_concept_id="energy", prerequisite_concept_id="prereq", reason="The prerequisite is not demonstrated.", return_scene_id="scene-1")
+    assert branch and session.state["currentObjectiveId"] == "prereq"
+    assert return_from_prerequisite(session)["returnObjectiveId"] == "energy"
+    assert session.state["currentObjectiveId"] == "energy"
