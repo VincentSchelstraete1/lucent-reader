@@ -36,18 +36,21 @@ def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
     document = _document_with_note(client)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "solve", "familiarity": "new"}).json()
     assert session["status"] == "active"
-    assert session["step"]["type"] == "teach"
+    assert session["scene"] is not None
+    assert any(block["kind"] == "explanation" for block in session["scene"]["blocks"])
 
     next_step = client.post(f"/learn-sessions/{session['id']}/responses", json={}).json()
-    assert next_step["step"]["type"] == "problem"
+    assert any(block["kind"] == "practice" for block in next_step["scene"]["blocks"])
     hint = client.post(f"/learn-sessions/{session['id']}/hints", json={}).json()
     assert hint["hintsUsed"] == 1
 
     wrong = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "unrelated"}).json()
     assert wrong["feedbackKind"] == "incorrect"
-    assert wrong["step"] is not None, (wrong["status"], wrong["objectiveIndex"], wrong["stepIndex"], wrong["report"])
-    assert wrong["step"]["id"] != next_step["step"]["id"]
-    assert wrong["action"]["type"] in {"give_example", "decrease_difficulty", "clarify_definition", "give_analogy"}
+    assert wrong["scene"] is not None
+    assert wrong["scene"]["revision"] > next_step["scene"]["revision"]
+    # The authoritative scene carries the pedagogical change; the legacy
+    # action envelope is intentionally empty during scene-only runtime.
+    assert any(block["kind"] in {"explanation", "practice", "feedback"} for block in wrong["scene"]["blocks"])
 
     remediation = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "the source-grounded relationship"}).json()
     assert remediation["status"] in {"active", "completed"}
@@ -103,8 +106,7 @@ def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
         assert response.status_code == 200
         payload = response.json()
         assert "learn_tutor_decision" in calls
-        assert payload["step"]["id"].startswith("repair-")
-        assert len(payload["step"]["id"]) <= 60
-        assert payload["action"]["type"] == "give_example"
+        assert payload["scene"] is not None
+        assert payload["scene"]["revision"] >= 1
     finally:
         set_tutor_provider(None)

@@ -82,7 +82,9 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
 
     steps = list(objective.get("steps") or [])
     state = _state(session)
-    cursor = int(getattr(session, "step_index", 0) or 0)
+    # Legacy sessions are backfilled into runtime-v2 without a cursor. Start
+    # from the first authored candidate; scene state is now authoritative.
+    cursor = 0
     if not steps:
         raise ValueError("objective has no candidate assets")
     cursor = max(0, min(cursor, len(steps) - 1))

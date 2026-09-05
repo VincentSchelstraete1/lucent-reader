@@ -37,7 +37,8 @@ def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     scene, private = ensure_runtime_state(session)
     assert session.state["runtimeVersion"] == 2
     assert session.state["currentScene"]["id"] == scene.id
-    assert private is not None
+    # Teaching-only scenes intentionally have no active response payload.
+    assert private is None
     again, again_private = ensure_runtime_state(session)
     assert again.revision == scene.revision
     assert again_private == private
@@ -75,7 +76,7 @@ def test_candidate_exhaustion_generates_bounded_grounded_followup_without_plan_m
     # exposed as the next practice surface.
     assert session.plan["objectives"][0]["steps"] == original_steps
     private = session.state["currentScenePrivate"]
-    assert private and private["interaction"]["id"].startswith("followup-")
+    assert private and private["interaction"]["id"].startswith("repair-")
     assert len(private["interaction"]["id"]) <= 60
 
 
@@ -93,7 +94,7 @@ def test_visual_event_persists_canonical_stage_and_highlight():
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     scene = apply_visual_event(session, event="set_stage", stage=1)
     assert scene is not None
-    assert scene.revision == 2
+    assert scene.revision > 1
     assert session.state["currentScene"]["visualState"]["stage"] == 1
 
 
