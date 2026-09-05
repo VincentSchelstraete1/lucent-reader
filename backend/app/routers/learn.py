@@ -20,7 +20,7 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
 from app.services.learn_runtime import apply_scene_message, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
@@ -502,10 +502,12 @@ def get_active_learn_session(document_id: int, db=Depends(get_db), user: User = 
     return _session_payload(session) if session else None
 
 @router.post("/learn-sessions/{session_id}/hints", response_model=LearnHintResponse, dependencies=[Depends(require_csrf)])
-def get_learn_hint(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
+def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
     if session.status != "active": raise HTTPException(status_code=409, detail="This learning session is no longer active")
-    parsed = _parse_step(session.plan["objectives"][session.objective_index]["steps"][session.step_index])
+    _ensure_session_runtime(db, session)
+    private = (session.state or {}).get("currentScenePrivate") or {}
+    parsed = _parse_step(private.get("interaction")) if private.get("interaction") else None
     if not parsed: raise HTTPException(status_code=409, detail="This teaching step is unavailable")
     state = dict(session.state or {}); hints = dict(state.get("hints") or {}); used = int(hints.get(parsed.id, 0))
     if used >= len(parsed.hints): raise HTTPException(status_code=409, detail="No more hints are available")
