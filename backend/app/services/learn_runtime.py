@@ -235,14 +235,14 @@ def apply_evaluation(session, evaluation: Any, *, interaction_id: str | None = N
     return {"evaluation": evaluation, "interactionId": interaction_id}
 
 
-def apply_scene_message(session, *, message: str, answer: str, source_section_ids: list[str] | None = None, source_block_ids: list[str] | None = None, visual_action: dict[str, Any] | None = None, db=None) -> LearningScene | None:
+def apply_scene_message(session, *, message: str, answer: str, source_section_ids: list[str] | None = None, source_block_ids: list[str] | None = None, visual_action: dict[str, Any] | None = None, block_kind: str = "tutor_message", block_label: str = "Ask Lucent", db=None) -> LearningScene | None:
     """Apply an Ask Lucent response to the same persisted LearningScene."""
     from app.schemas.learn import LearningSceneBlock, LearningVisualState
     scene = load_current_scene(session)
     if scene is None:
         return None
     blocks = list(scene.blocks)
-    block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind="tutor_message", label="Ask Lucent", title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+    block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
     visual_state = scene.visual_state
     if visual_action:
         updates: dict[str, Any] = {"stage": int(visual_action.get("stage", visual_state.stage if visual_state else 0))}

@@ -394,6 +394,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # It records a structured replan, but never mutates learner evidence
     # directly; only the response evaluator may do that.
     ask_state = dict(session.state or {})
+    ask_decision = None
     ask_concept = _concept_for(session, objective)
     ask_candidates = [{"id": raw.get("id"), "type": raw.get("type"), "title": raw.get("title"), "prompt": raw.get("prompt")} for raw in objective.get("steps", []) if isinstance(raw, dict)][:12]
     # Turn learner intent into a bounded scene augmentation.  Ask Lucent is
@@ -435,12 +436,29 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         ask_state["previousTutorActions"] = (list(ask_state.get("previousTutorActions", [])) + [ask_decision.teaching_action])[-8:]
         session.state = ask_state
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="tutor_observation", metadata={"event": "learner_question", "goal": ask_decision.pedagogical_goal, "strategy": ask_decision.pedagogical_strategy, "action": ask_decision.teaching_action, "confidence": ask_decision.confidence})
+        # The shared tutor decision, not the chat keyword parser, owns the
+        # pedagogical shape of an interruption.  Keyword matching remains only
+        # the deterministic fallback used when no valid decision is available.
+        action_kinds = {
+            "give_example": ("example", "Example"),
+            "give_counterexample": ("counterexample", "Contrast"),
+            "give_analogy": ("analogy", "Another way to see it"),
+            "clarify_definition": ("explanation", "Clarify"),
+            "simplify_explanation": ("explanation", "Let's simplify it"),
+            "show_visual": ("visual", "Watch"),
+            "show_animation": ("animation", "Watch"),
+        }
+        if ask_decision.teaching_action in action_kinds:
+            ask_action = ask_decision.teaching_action
+            ask_strategy = ask_decision.pedagogical_strategy
+            ask_kind, ask_label = action_kinds[ask_action]
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
     ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
     session.state = ask_state
-    apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, db=db)
+    scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
+    apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, block_kind=scene_kind, block_label=ask_label, db=db)
     scene_response = _session_payload(session)
     db.commit()
     return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene, scene=scene_response.scene)
