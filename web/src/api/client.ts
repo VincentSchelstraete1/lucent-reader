@@ -414,4 +414,5 @@ export const api = {
   ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
   ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
   ,askLucent: (sessionId: string, message: string) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message })
+  ,learnVisualEvent: (sessionId: string, request: { sceneId: string; sceneRevision: number; event: "set_stage" | "highlight" | "replay"; stage?: number; elementId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/visual-events`, request)
 }

@@ -20,10 +20,10 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState, VisualEventRequest
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
-from app.services.learn_runtime import apply_scene_message, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -516,6 +516,31 @@ def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db
     for concept in state.get("concepts", []):
         if concept.get("conceptId") == objective_id: concept["hintsUsed"] = int(concept.get("hintsUsed", 0)) + 1
     session.state = state; db.commit(); return LearnHintResponse(hint=parsed.hints[used], hintsUsed=used + 1)
+
+
+@router.post("/learn-sessions/{session_id}/visual-events", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
+def handle_learn_visual_event(session_id: UUID, request: VisualEventRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
+    session = _get_owned_session(db, session_id, user)
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="This learning session is no longer active")
+    _ensure_session_runtime(db, session)
+    scene = load_current_scene(session)
+    if scene is None or str(scene.id) != request.scene_id or int(scene.revision) != request.scene_revision:
+        raise HTTPException(status_code=409, detail="This visual is out of date")
+    specs = [block.visual_spec for block in scene.blocks if block.visual_spec is not None]
+    if not specs:
+        raise HTTPException(status_code=409, detail="This scene has no interactive visual")
+    if request.event in {"set_stage", "replay"}:
+        max_stage = max((len(getattr(spec, "stages", [])) for spec in specs), default=0)
+        if request.event == "set_stage" and (request.stage is None or request.stage >= max_stage):
+            raise HTTPException(status_code=422, detail="Visual stage is out of range")
+    if request.event == "highlight":
+        valid_nodes = {str(node.id) for spec in specs for node in getattr(spec, "nodes", [])}
+        if not request.element_id or request.element_id not in valid_nodes:
+            raise HTTPException(status_code=422, detail="Visual element is not available")
+    apply_visual_event(session, event=request.event, stage=request.stage, element_id=request.element_id, db=db)
+    db.commit()
+    return _session_payload(session)
 
 def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int | None:
     """Create a source-specific alternate check instead of a meta-template."""

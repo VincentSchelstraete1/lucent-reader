@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import apply_scene_message, completion_met, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, completion_met, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
 
 
 def _session():
@@ -56,6 +56,15 @@ def test_ask_message_mutates_authoritative_scene_and_visual_state():
     assert scene and scene.visual_state.stage == 2
     assert any(block.label == "Ask Lucent" for block in scene.blocks)
     assert session.state["currentScene"]["visualState"]["stage"] == 2
+
+
+def test_visual_event_persists_canonical_stage_and_highlight():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene = apply_visual_event(session, event="set_stage", stage=1)
+    assert scene is not None
+    assert scene.revision == 2
+    assert session.state["currentScene"]["visualState"]["stage"] == 1
 
 
 def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():

@@ -253,6 +253,22 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
     return persist_scene_revision(session, scene, _state(session).get("currentScenePrivate"), event_id=bounded_id("ask-event", session.id, message[:80]), db=db)
 
 
+def apply_visual_event(session, *, event: str, stage: int | None = None, element_id: str | None = None, db=None) -> LearningScene | None:
+    """Mutate only the canonical visual state and persist a new scene revision."""
+    from app.schemas.learn import LearningVisualState
+    scene = load_current_scene(session)
+    if scene is None:
+        return None
+    current = scene.visual_state or LearningVisualState()
+    updates: dict[str, Any] = {}
+    if event in {"set_stage", "replay"}:
+        updates["stage"] = 0 if event == "replay" else int(stage if stage is not None else current.stage)
+    if event == "highlight":
+        updates["highlightedElementIds"] = [str(element_id)] if element_id else []
+    visual = current.model_copy(update=updates)
+    return persist_scene_revision(session, scene.model_copy(update={"visual_state": visual}), _state(session).get("currentScenePrivate"), event_id=bounded_id("visual-event", session.id, event, stage, element_id), db=db)
+
+
 def build_student_feedback(evaluation: Any, *, interaction_id: str, source_blocks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {"result": getattr(evaluation, "result", "insufficient_evidence"), "message": getattr(evaluation, "evidence", "Let's look at this together."), "respondsToInteractionId": interaction_id, "sourceSectionIds": [str(item) for block in (source_blocks or []) for item in block.get("sectionIds", [])][:8], "sourceBlockIds": [str(item) for block in (source_blocks or []) for item in block.get("blockIds", [])][:12]}
 

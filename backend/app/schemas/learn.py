@@ -509,6 +509,13 @@ class LearnHintRequest(BaseModel):
     scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
     interaction_id: str | None = Field(default=None, alias="interactionId", max_length=60)
 
+class VisualEventRequest(BaseModel):
+    scene_id: str = Field(alias="sceneId", min_length=1, max_length=60)
+    scene_revision: int = Field(alias="sceneRevision", ge=0)
+    event: Literal["set_stage", "highlight", "replay"]
+    stage: int | None = Field(default=None, ge=0, le=32)
+    element_id: str | None = Field(default=None, alias="elementId", max_length=80)
+
 class AskLucentRequest(BaseModel):
     scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
     scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
