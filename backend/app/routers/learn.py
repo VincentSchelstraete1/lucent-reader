@@ -23,7 +23,7 @@ from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState, VisualEventRequest
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
-from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -68,6 +68,23 @@ def _owned_document(db, document_id: int, user: User) -> Document:
 
 def _latest_note(db, document_id: int) -> Note | None:
     return db.execute(select(Note).where(Note.document_id == document_id, Note.content_type == "section_note").order_by(Note.updated_at.desc())).scalars().first()
+
+def _objective_context(payload: dict, objective: dict, context: dict) -> dict:
+    """Keep Ask Lucent grounded to the active objective's source sections.
+
+    Retrieval ranks sections for recall, but the objective is the authoritative
+    scope for an interruption.  Without this narrowing, a generic question
+    such as "explain another way" can pull unrelated sections into the scene.
+    """
+    allowed = {str(value) for value in (objective.get("sourceSectionIds") or [])}
+    if not allowed:
+        return context
+    sections = [item for item in (payload.get("sectionNotes") or []) if str(item.get("id")) in allowed]
+    if not sections:
+        return context
+    text = "\n\n".join(str(item.get("bigIdea", "")) for item in sections if item.get("bigIdea"))
+    block_ids = [str(block) for item in sections for block in (item.get("sourceBlockIds") or [])]
+    return {**context, "text": text, "sourceSectionIds": [str(item.get("id")) for item in sections], "sourceBlockIds": block_ids[:12]}
 
 def _now() -> str: return datetime.now(timezone.utc).isoformat()
 def _parse_step(raw: dict):
@@ -302,6 +319,11 @@ def _get_owned_session(db, session_id: UUID, user: User) -> LearnSession:
 
 def _ask_scope(message: str, objective: dict, context: dict) -> str:
     terms = set(re.findall(r"[a-z0-9]{3,}", message.lower()))
+    # Learner-initiated tutoring requests are scoped to the active concept even
+    # when they contain no subject noun ("give me an example", "show me").
+    # This is a relevance decision, not a pedagogical shortcut.
+    if any(phrase in message.lower() for phrase in ("another way", "different explanation", "give me an example", "show me", "another question", "different question", "don't understand", "do not understand", "not sure", "why was my answer wrong")):
+        return "IN_SCOPE_CURRENT_CONCEPT"
     concept_terms = set(re.findall(r"[a-z0-9]{3,}", (objective.get("title", "") + " " + objective.get("outcome", "")).lower()))
     source_terms = set(re.findall(r"[a-z0-9]{3,}", context.get("text", "").lower()))
     if terms & (concept_terms | source_terms): return "IN_SCOPE_SOURCE"
@@ -352,6 +374,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         try: payload = json.loads(note.content)
         except (TypeError, ValueError): payload = {}
     context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
+    context = _objective_context(payload, objective, context)
     scope = _ask_scope(request.message, objective, context)
     _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_request", metadata={"scope": scope, "sourceSectionIds": context.get("sourceSectionIds", [])})
     if scope == "OUT_OF_SCOPE":
@@ -359,9 +382,14 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         return AskLucentResponse(answer="I can help with the material you’re currently learning and related prerequisite concepts.", scope=scope)
     current_private = (session.state or {}).get("currentScenePrivate") or {}
     current_step = _parse_step(current_private.get("interaction")) if current_private.get("interaction") else None
+    if current_step is None:
+        active_scene = load_current_scene(session)
+        active_practice = next((block.step for block in (active_scene.blocks if active_scene else []) if block.kind == "practice" and block.step), None)
+        current_step = _parse_step(active_practice.model_dump(by_alias=True)) if active_practice is not None else None
     tool = "retrieve_source" if context.get("text") else "request_explanation"
     visual_action = None
     lowered = request.message.lower()
+    requested_visual = any(word in lowered for word in ("show me", "visual", "diagram", "stage", "highlight"))
     if current_step and getattr(current_step, "visual_spec", None) and any(word in lowered for word in ("show", "visual", "diagram", "stage", "highlight")):
         tool = "show_visual"; visual_action = {"type": "show_visual", "stepId": current_step.id, "stage": 0}
     learner = _concept_for(session, objective)
@@ -409,13 +437,22 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         ask_action, ask_strategy, ask_kind, ask_label = "give_analogy", "ANALOGY", "analogy", "Another way to see it"
     else:
         ask_action, ask_strategy, ask_kind, ask_label = "clarify_definition", "CONCEPTUAL_EXPLANATION", "explanation", "Clarify"
+    visual_candidate = current_step
+    if visual_candidate is None or (getattr(visual_candidate, "visual_spec", None) is None and getattr(visual_candidate, "visual_ref", None) is None):
+        for raw in objective.get("steps", []):
+            candidate = _parse_step(raw) if isinstance(raw, dict) else None
+            if candidate is not None and (getattr(candidate, "visual_spec", None) is not None or getattr(candidate, "visual_ref", None) is not None or getattr(candidate, "type", None) == "walkthrough"):
+                visual_candidate = candidate
+                break
+    if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
+        visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True)}
     fallback_block = TutorSceneBlockPlan(
         kind=ask_kind, label=ask_label,
         title=objective.get("title"),
         content=objective.get("outcome") or objective.get("bottleneck") or context.get("text", "")[:500],
         visualRef=(
-            {"sectionId": getattr(current_step, "section_id", None), "componentIndex": getattr(current_step, "component_index", None)}
-            if ask_kind == "visual" and current_step and (getattr(current_step, "visual_ref", None) or getattr(current_step, "type", None) == "walkthrough")
+            {"sectionId": getattr(visual_candidate, "section_id", None), "componentIndex": getattr(visual_candidate, "component_index", None), "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True) if getattr(visual_candidate, "visual_spec", None) else None}
+            if ask_kind == "visual" and visual_candidate and (getattr(visual_candidate, "visual_ref", None) or getattr(visual_candidate, "type", None) == "walkthrough")
             else None
         ),
         sourceSectionIds=list(context.get("sourceSectionIds", []))[:8], sourceBlockIds=list(context.get("sourceBlockIds", []))[:12],
@@ -452,13 +489,57 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             ask_action = ask_decision.teaching_action
             ask_strategy = ask_decision.pedagogical_strategy
             ask_kind, ask_label = action_kinds[ask_action]
+        # Preserve an explicit visual request when the bounded provider only
+        # returned a generic explanation action; the candidate/spec validation
+        # above still controls whether a visual can actually be introduced.
+        if requested_visual and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
+            ask_kind, ask_label = "visual", "Watch"
+            visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True)}
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
     ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
     session.state = ask_state
+    replacement_step = None
+    # A request for another question is a scene re-composition, not another
+    # chat paragraph. Choose an unanswered practice asset from the active
+    # objective and replace only the practice block in the same scene.
+    if any(term in lowered for term in ("another question", "different question", "ask me a different")):
+        answered = set(ask_state.get("answeredInteractionIds") or [])
+        active_id = str((load_current_scene(session).response_interaction_id if load_current_scene(session) else "") or getattr(current_step, "id", ""))
+        alternatives = [candidate for candidate in (_parse_step(raw) for raw in objective.get("steps", [])) if candidate and candidate.id not in answered and candidate.id != active_id and candidate.type not in {"teach", "walkthrough"}]
+        if not alternatives:
+            # Authored candidates are optional source material, not a finite
+            # question bank. Compose one bounded, source-grounded alternative
+            # when the learner explicitly asks for a different question.
+            outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+            alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=f"Apply {objective.get('title', 'this idea')}", prompt=f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?", acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
+        if alternatives:
+            replacement = alternatives[0]
+            replacement_step = replacement
+            _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_scene_recompose", metadata={"request": "different_question", "replacementId": replacement.id, "previousId": getattr(current_step, "id", None)})
+            active_scene = load_current_scene(session)
+            if active_scene:
+                practice = LearningSceneBlock(id=_bounded_id("practice", session.id, replacement.id), kind="practice", label="Try", title=replacement.title, content=replacement.prompt or replacement.content, step=public_step(replacement), sourceSectionIds=list(getattr(replacement, "source_section_ids", []) or []), sourceBlockIds=list(getattr(replacement, "source_block_ids", []) or []))
+                blocks = [block for block in active_scene.blocks if block.kind != "practice"] + [practice]
+                active_scene = active_scene.model_copy(update={"blocks": blocks[-6:], "response_interaction_id": replacement.id})
+                private = _private_for_rendered_scene(active_scene, objective_id=str(objective.get("id")), fallback_step=replacement, objective=objective)
+                persist_scene_revision(session, active_scene, private, event_id=_bounded_id("ask-question", session.id, replacement.id), db=db)
+                visual_action = None
+                scene_kind, ask_label = "tutor_message", "Try"
     scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
     apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, block_kind=scene_kind, block_label=ask_label, db=db)
+    if replacement_step is not None:
+        # Re-assert the practice target after appending the conversational
+        # block; this keeps the active interaction authoritative even when
+        # scene normalization trims older blocks.
+        active_scene = load_current_scene(session)
+        if active_scene:
+            practice = LearningSceneBlock(id=_bounded_id("practice", session.id, replacement_step.id), kind="practice", label="Try", title=replacement_step.title, content=replacement_step.prompt or replacement_step.content, step=public_step(replacement_step), sourceSectionIds=list(getattr(replacement_step, "source_section_ids", []) or []), sourceBlockIds=list(getattr(replacement_step, "source_block_ids", []) or []))
+            blocks = [block for block in active_scene.blocks if block.kind != "practice"] + [practice]
+            active_scene = active_scene.model_copy(update={"blocks": blocks[-6:], "response_interaction_id": replacement_step.id})
+            private = _private_for_rendered_scene(active_scene, objective_id=str(objective.get("id")), fallback_step=replacement_step, objective=objective)
+            persist_scene_revision(session, active_scene, private, event_id=_bounded_id("ask-question-final", session.id, replacement_step.id), db=db)
     scene_response = _session_payload(session)
     db.commit()
     return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene, scene=scene_response.scene)

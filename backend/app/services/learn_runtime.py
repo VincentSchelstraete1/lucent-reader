@@ -307,6 +307,17 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
     block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
     visual_state = scene.visual_state
     if visual_action:
+        # Ask Lucent may introduce a grounded visual when the active scene has
+        # none.  The spec is carried through the validated candidate step;
+        # arbitrary model-generated visual JSON is never accepted here.
+        visual_spec = visual_action.get("visualSpec")
+        if visual_spec and not any(existing.visual_spec is not None for existing in blocks):
+            try:
+                from app.schemas.learn import VisualSpec
+                visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec), sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+                blocks.append(visual_block)
+            except Exception:
+                pass
         updates: dict[str, Any] = {"stage": int(visual_action.get("stage", visual_state.stage if visual_state else 0))}
         if visual_action.get("nodeId"):
             updates["highlightedElementIds"] = [str(visual_action["nodeId"])]

@@ -89,6 +89,17 @@ def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):
     finally:
         set_tutor_provider(None)
 
+def test_ask_another_question_recomposes_active_scene(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    before = session["scene"]
+    response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me another question."})
+    assert response.status_code == 200
+    scene = response.json()["scene"]
+    assert scene["revision"] > before["revision"]
+    assert scene.get("responseInteractionId") != before.get("responseInteractionId")
+    assert any(block.get("kind") == "practice" for block in scene["blocks"])
+
 
 def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
     document = _document_with_note(client)
