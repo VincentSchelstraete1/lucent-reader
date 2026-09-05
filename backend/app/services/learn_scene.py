@@ -141,7 +141,7 @@ def compose_learning_scene(
         for directive in decision.scene_plan.blocks:
             if len(blocks) >= 5:
                 break
-            planned_step = by_step_id.get(str(directive.step_id)) if directive.step_id else None
+            planned_step = by_step_id.get(str(directive.step_id)) if directive.step_id and str(directive.step_id) not in set(state.get("answeredInteractionIds") or []) else None
             if directive.kind == "practice" and planned_step is not None:
                 add(kind="practice", label=directive.label, title=directive.title or planned_step.title, content=directive.content, step=planned_step, visual_spec=getattr(planned_step, "visual_spec", None), visual_ref=directive.visual_ref)
                 planned_practice = True
@@ -164,7 +164,7 @@ def compose_learning_scene(
         if visual_spec is None and visual_ref is None:
             for raw in steps[step_index + 1:]:
                 candidate = _parse(raw)
-                if not candidate or student_facing_quality_issues(candidate, source_text):
+                if not candidate or candidate.id in set(state.get("answeredInteractionIds") or []) or student_facing_quality_issues(candidate, source_text):
                     continue
                 candidate_spec = getattr(candidate, "visual_spec", None)
                 candidate_ref = getattr(candidate, "visual_ref", None)
@@ -176,7 +176,7 @@ def compose_learning_scene(
         if not any(block.kind == "practice" for block in blocks):
             for raw in steps[step_index + 1:] + steps[:step_index]:
                 candidate = _parse(raw)
-                if candidate and candidate.type in _INTERACTIVE_TYPES and not student_facing_quality_issues(candidate, source_text):
+                if candidate and candidate.id not in set(state.get("answeredInteractionIds") or []) and candidate.type in _INTERACTIVE_TYPES and not student_facing_quality_issues(candidate, source_text):
                     label = {"prediction": "Predict", "matching": "Compare", "labeling": "Label", "ordering": "Reconstruct", "worked_step": "Solve", "problem": "Try", "numeric": "Solve", "teach_back": "Explain", "fill_blank": "Recall", "short_answer": "Explain", "multiple_choice": "Check"}.get(candidate.type, "Try")
                     add(kind="practice", label=label, title=candidate.title, content=None, step=candidate, visual_spec=getattr(candidate, "visual_spec", None), visual_ref=None)
                     break
@@ -190,7 +190,7 @@ def compose_learning_scene(
             content = getattr(current_step, "feedback_incorrect", None) or objective.get("bottleneck") or objective.get("outcome")
             add(kind=kind, label=label, title=objective.get("title"), content=content, step=None, visual_spec=None, visual_ref=None)
 
-    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and not planned_practice and not any(block.kind == "practice" for block in blocks):
+    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and getattr(current_step, "id", None) not in set(state.get("answeredInteractionIds") or []) and not planned_practice and not any(block.kind == "practice" for block in blocks):
         label = {
             "prediction": "Predict", "matching": "Compare", "labeling": "Label",
             "ordering": "Reconstruct", "worked_step": "Solve", "problem": "Try",

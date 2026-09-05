@@ -298,6 +298,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             state["concepts"] = existing_concepts + [concept]
         state.setdefault("recentAttempts", []).append({"interactionId": current.id, "conceptId": concept_id, "type": current.type, "result": evaluation.result})
         state["recentAttempts"] = state["recentAttempts"][-8:]
+        answered = list(state.get("answeredInteractionIds") or [])
+        if current.id not in answered:
+            answered.append(current.id)
+        state["answeredInteractionIds"] = answered[-32:]
         if db is not None:
             db.add(LearnAttempt(session_id=session.id, objective_id=concept_id, step_id=current.id, step_type=current.type, response=str(response_text or option_id or ",".join(ordered_ids or [])), result=evaluation.result, attempt_number=int(concept.get("attempts", 1)), hints_used=0, evaluation=evaluation.model_dump(by_alias=True)))
 
@@ -310,10 +314,14 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         candidates.append(candidate)
     if evaluation and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
         teaching = next((item for item in candidates if item.type in {"teach", "walkthrough"}), None)
-        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None)), current)
+        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in set(state.get("answeredInteractionIds") or [])), current)
     else:
-        next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"}), None) or current
+        next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in set(state.get("answeredInteractionIds") or []) and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"} and item.id not in set(state.get("answeredInteractionIds") or [])), None)
     if next_step is None:
+        if evaluation is not None and evaluation.result == "correct":
+            completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
+            completed_scene = persist_scene_revision(session, completed_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
+            return completed_scene, None
         return scene, private
     fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale="Continue with the next grounded learning move.")
     fallback = TutorDecision(targetConcept=concept_id, teachingAction=fallback_action.type, pedagogicalGoal="BUILD_INTUITION" if not evaluation or evaluation.result != "correct" else "VERIFY_UNDERSTANDING", pedagogicalStrategy="CONCEPTUAL_EXPLANATION" if next_step.type in {"teach", "walkthrough"} else "RETRIEVAL_PRACTICE", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=next_step.id, actions=[])

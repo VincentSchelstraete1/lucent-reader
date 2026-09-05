@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.learn import LearningScene, MultipleChoiceStep, TeachStep, TutorAction, TutorDecision, TutorEvent, TutorScenePlan
+from app.schemas.learn import AskLucentResponse, LearningScene, MultipleChoiceStep, TeachStep, TutorAction, TutorDecision, TutorEvent, TutorScenePlan
 from app.services.learn_scene import compose_learning_scene
 
 
@@ -104,3 +104,10 @@ def test_tutor_event_rejects_missing_payload_and_unknown_fields():
         TutorEvent.model_validate({"id": "e", "type": "RESPONSE"})
     with pytest.raises(ValidationError):
         TutorEvent.model_validate({"id": "e", "type": "ASK_LUCENT", "message": "Explain", "unsafe": True})
+
+
+def test_ask_response_accepts_typed_scene_on_compatibility_alias():
+    scene = LearningScene(id="scene-1", revision=2, objectiveId="o", objective="Energy", targetConcepts=["Energy"], blocks=[{"id": "b", "kind": "explanation", "label": "Understand", "content": "Energy changes."}])
+    response = AskLucentResponse(answer="Watch this.", scope="IN_SCOPE_SOURCE", scene=scene, scenePatch=scene)
+    assert response.scene and response.scene_patch
+    assert response.scene_patch.revision == 2

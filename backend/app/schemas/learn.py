@@ -521,7 +521,7 @@ class AskLucentResponse(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
     tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
     visual_action: dict | None = Field(default=None, alias="visualAction")
-    scene_patch: dict | None = Field(default=None, alias="scenePatch")
+    scene_patch: LearningScene | None = Field(default=None, alias="scenePatch")
     scene: LearningScene | None = None
 
 class AskLucentToolCall(BaseModel):
