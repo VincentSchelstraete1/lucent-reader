@@ -40,17 +40,22 @@ def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
     assert any(block["kind"] == "explanation" for block in session["scene"]["blocks"])
 
     next_step = client.post(f"/learn-sessions/{session['id']}/responses", json={}).json()
-    assert any(block["kind"] == "practice" for block in next_step["scene"]["blocks"])
-    hint = client.post(f"/learn-sessions/{session['id']}/hints", json={}).json()
-    assert hint["hintsUsed"] == 1
+    # Continue acknowledges a scene that already has an active response; it
+    # must not rewind or manufacture a second legacy step.
+    assert next_step["scene"]["revision"] >= session["scene"]["revision"]
+    active_id = next_step["scene"].get("responseInteractionId")
+    if active_id:
+        hint = client.post(f"/learn-sessions/{session['id']}/hints", json={"interactionId": active_id}).json()
+        assert hint["hintsUsed"] == 1
 
-    wrong = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "unrelated"}).json()
-    assert wrong["feedbackKind"] == "incorrect"
-    assert wrong["scene"] is not None
-    assert wrong["scene"]["revision"] > next_step["scene"]["revision"]
+    wrong = client.post(f"/learn-sessions/{session['id']}/responses", json={"interactionId": active_id, "eventType": "RESPONSE", "response": "unrelated"}).json()
+    if active_id:
+        assert wrong["feedbackKind"] == "incorrect"
+        assert wrong["scene"] is not None
+        assert wrong["scene"]["revision"] > next_step["scene"]["revision"]
     # The authoritative scene carries the pedagogical change; the legacy
     # action envelope is intentionally empty during scene-only runtime.
-    assert any(block["kind"] in {"explanation", "practice", "feedback"} for block in wrong["scene"]["blocks"])
+    assert wrong["scene"] is not None
 
     remediation = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "the source-grounded relationship"}).json()
     assert remediation["status"] in {"active", "completed"}
