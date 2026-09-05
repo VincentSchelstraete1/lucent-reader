@@ -156,7 +156,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   async function respond(response?: string, optionId?: string) {
     if (!session) return
     setLoading(true); setError(null)
-    try { const practice = session.scene?.blocks.find((block) => block.kind === "practice")?.step; const updated = await api.submitLearnResponse(session.id, { sceneId: session.scene?.id, sceneRevision: session.scene?.revision, interactionId: practice?.id, response, optionId, orderedIds: orderedIds.length ? orderedIds : undefined }); sessionRef.current = updated; setSession(updated); setAnswer(""); setSelectedOption(null); setOrderedIds(updated.scene?.blocks.find((block) => block.kind === "practice")?.step?.items?.map((item) => item.id) ?? []); setStructuredAnswers({}); setHint(null) }
+    try { const practice = session.scene?.blocks.find((block) => block.kind === "practice")?.step; const updated = await api.submitLearnResponse(session.id, { sceneId: session.scene?.id, sceneRevision: session.scene?.revision, interactionId: practice?.id, eventType: practice ? "RESPONSE" : "CONTINUE", response, optionId, orderedIds: orderedIds.length ? orderedIds : undefined }); sessionRef.current = updated; setSession(updated); setAnswer(""); setSelectedOption(null); setOrderedIds(updated.scene?.blocks.find((block) => block.kind === "practice")?.step?.items?.map((item) => item.id) ?? []); setStructuredAnswers({}); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Your response could not be saved.") }
     finally { setLoading(false) }
   }

@@ -322,6 +322,12 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         decision = choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={item.id for item in candidates})
     except Exception:
         decision = fallback
+    # The decision selects the next candidate; the fallback is only used when
+    # the provider is unavailable or fails validation.
+    selected = next((item for item in candidates if item.id == decision.next_step_id), None)
+    if selected is not None:
+        next_step = selected
+        fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale=decision.rationale or "Continue with the grounded concept.")
     feedback = None
     if evaluation is not None:
         feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or evaluation.evidence
