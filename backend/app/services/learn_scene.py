@@ -201,10 +201,6 @@ def compose_learning_scene(
     elif not blocks:
         add(kind="explanation", label="Understand", title=objective.get("title"), content=objective.get("outcome") or objective.get("title"), step=None, visual_spec=None, visual_ref=None)
 
-    interruption = state.get("sceneInterruption")
-    if isinstance(interruption, dict) and interruption.get("answer"):
-        add(kind="tutor_message", label="Ask Lucent", title=interruption.get("question"), content=str(interruption["answer"])[:900], step=None, visual_spec=None, visual_ref=None)
-
     # Last-resort content is source-specific and can never be a schema/meta template.
     if not blocks:
         blocks.append(LearningSceneBlock(id=_id("block", scene_seed, "fallback"), kind="explanation", label="Understand", title=objective.get("title", "Current concept"), content=objective.get("outcome") or objective.get("title", "Review this idea."), sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -242,7 +238,7 @@ def compose_learning_scene(
         strategy=(decision.pedagogical_strategy if decision else (action.strategy if action else "DIRECT_INSTRUCTION")),
         scaffoldLevel=str(concept.get("scaffold", "FULL")), blocks=blocks,
             evidenceTargets=evidence, sourceSectionIds=section_ids, sourceBlockIds=block_ids,
-            visualState={"stage": int(state.get("visualStage", 0)), **({"highlightedElementIds": [str(state["visualHighlight"])]} if state.get("visualHighlight") else {})},
+            visualState=(state.get("visualState") if isinstance(state.get("visualState"), dict) else {}),
             completionCondition=(decision.scene_plan.completion_condition if decision and decision.scene_plan and decision.scene_plan.completion_condition else f"Show that you can explain or apply {objective.get('title', 'this idea')} with less support."),
             responseInteractionId=response_step_id,
         )

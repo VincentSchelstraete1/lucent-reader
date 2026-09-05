@@ -96,8 +96,8 @@ export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; 
 
 function SceneSupportBlocks({ session, note }: { session: LearnSession; note: SectionNote }) {
   const blocks = (session.scene?.blocks ?? []).filter((block) => block.kind !== "practice")
-  if (!blocks.length && !session.step?.content && !session.step?.visualSpec && !session.step?.visualRef) return null
-  const fallbackBlocks = blocks.length ? blocks : [{ id: `legacy-${session.step?.id ?? "step"}`, kind: "explanation" as const, label: "Understand", title: session.step?.title, content: session.step?.content, step: null, visualSpec: session.step?.visualSpec, visualRef: session.step?.visualRef, sourceSectionIds: session.step?.sourceSectionIds ?? [], sourceBlockIds: session.step?.sourceBlockIds ?? [] }]
+  if (!blocks.length) return null
+  const fallbackBlocks = blocks
   return <div className="learn-scene-support" aria-label="Tutor teaching">
     {fallbackBlocks.map((block) => {
       const referenced = block.visualRef && typeof block.visualRef.componentIndex === "number" ? note.components[block.visualRef.componentIndex] : null

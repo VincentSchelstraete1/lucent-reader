@@ -425,7 +425,7 @@ class TutorDecision(BaseModel):
     actions: list[TutorToolCall] = Field(default_factory=list, max_length=4)
     scene_plan: TutorScenePlan | None = Field(default=None, alias="scenePlan")
     expected_evidence: str = Field(default="A response that demonstrates the target concept.", alias="expectedEvidence", max_length=300)
-    transition_message: str = Field(default="Let's try a different way to build this understanding.", alias="transitionMessage", max_length=240)
+    transition_message: str = Field(default="Let's look at the key idea together.", alias="transitionMessage", max_length=240)
     next_step_id: str | None = Field(default=None, alias="nextStepId", max_length=60)
     rationale: str = Field(default="A bounded action selected for the learner's current evidence.", max_length=300)
 

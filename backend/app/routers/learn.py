@@ -250,7 +250,7 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
         objective_title = scene.objective
         practice_block = next((block for block in scene.blocks if block.kind == "practice" and block.step), None)
         current = practice_block.step if practice_block else None
-    elif session.status == "active" and session.objective_index < len(objectives):
+    elif False and session.status == "active" and session.objective_index < len(objectives):
         objective = objectives[session.objective_index]; objective_title = objective.get("title"); steps = objective.get("steps", [])
         if session.step_index < len(steps):
             parsed = _safe_step(objective, steps[session.step_index])
@@ -357,7 +357,8 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     if scope == "OUT_OF_SCOPE":
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": scope}); db.commit()
         return AskLucentResponse(answer="I can help with the material you’re currently learning and related prerequisite concepts.", scope=scope)
-    current_step = _parse_step(objective.get("steps", [])[session.step_index]) if objective.get("steps") and session.step_index < len(objective.get("steps", [])) else None
+    current_private = (session.state or {}).get("currentScenePrivate") or {}
+    current_step = _parse_step(current_private.get("interaction")) if current_private.get("interaction") else None
     tool = "retrieve_source" if context.get("text") else "request_explanation"
     visual_action = None
     lowered = request.message.lower()
@@ -438,11 +439,6 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
     ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
-    ask_state["sceneRevision"] = int(ask_state.get("sceneRevision", 0)) + 1
-    if visual_action and visual_action.get("stage") is not None:
-        ask_state["visualStage"] = int(visual_action["stage"])
-    if visual_action and visual_action.get("nodeId"):
-        ask_state["visualHighlight"] = visual_action["nodeId"]
     session.state = ask_state
     apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, db=db)
     scene_response = _session_payload(session)
@@ -502,39 +498,6 @@ def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db
     for concept in state.get("concepts", []):
         if concept.get("conceptId") == objective_id: concept["hintsUsed"] = int(concept.get("hintsUsed", 0)) + 1
     session.state = state; db.commit(); return LearnHintResponse(hint=parsed.hints[used], hintsUsed=used + 1)
-
-def _next_objective(session: LearnSession, state: dict) -> None:
-    objectives = session.plan.get("objectives", []); queue = list(state.get("revisitQueue") or []); concepts = {c.get("conceptId"): c for c in state.get("concepts", [])}
-    target = queue[0] if queue else next((o.get("id") for o in objectives if concepts.get(o.get("id"), {}).get("state") == "NOT_SEEN"), None)
-    if target is None: target = next((o.get("id") for o in objectives if concepts.get(o.get("id"), {}).get("state") not in {"DEMONSTRATED"}), None)
-    if target is None: session.objective_index = len(objectives); session.step_index = 0; return
-    session.objective_index = next(i for i, o in enumerate(objectives) if o.get("id") == target); steps = objectives[session.objective_index].get("steps", [])
-    session.step_index = next((i for i, raw in enumerate(steps) if _parse_step(raw) and _parse_step(raw).type not in {"teach", "walkthrough"}), 0); state["revisitMode"] = bool(queue and target == queue[0])
-
-def _choose_next_step(objective: dict, current_index: int, state: dict, concept: dict, *, failed: bool = False) -> int | None:
-    """Choose the next validated teaching/checking action from evidence.
-
-    The persisted plan is a bounded vocabulary of candidate actions, not a
-    script. Prefer unseen modalities after failure and avoid repeating a
-    modality that already failed unless there is no safe alternative.
-    """
-    steps = objective.get("steps", [])
-    used = set(concept.get("interactionTypes") or [])
-    attempts = state.get("attempts") or {}
-    candidates: list[tuple[int, object]] = []
-    for index in range(current_index + 1, len(steps)):
-        parsed = _parse_step(steps[index])
-        if not parsed or parsed.type in {"teach", "walkthrough"}:
-            continue
-        if int(attempts.get(parsed.id, 0)) == 0:
-            candidates.append((index, parsed))
-    if failed:
-        fresh = [item for item in candidates if item[1].type not in used]
-        if fresh:
-            return fresh[0][0]
-    if candidates:
-        return candidates[0][0]
-    return None
 
 def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int | None:
     """Create a source-specific alternate check instead of a meta-template."""
