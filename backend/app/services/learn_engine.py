@@ -236,7 +236,7 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     """Deterministic first-pass evaluator used by the adaptive runtime."""
     answer = _clean(option_id or response)
     if isinstance(step, (TeachStep, WalkthroughStep)):
-        return LearnEvaluation(result="insufficient_evidence", confidence=0.15, evidence="Teaching content does not itself demonstrate recall.", remediationCategory="none")
+        return LearnEvaluation(result="insufficient_evidence", confidence=0.15, evidence=f"Let's check what you noticed about {step.title}.", remediationCategory="none")
     if isinstance(step, (MultipleChoiceStep, PredictionStep)):
         correct = answer == step.answer_id
         return LearnEvaluation(result="correct" if correct else "incorrect", confidence=0.98 if correct else 0.9, evidence="Selected option matched the source-grounded answer." if correct else "Selected option did not match the source-grounded answer.", misconception=None if correct else (step.feedback_incorrect or "The distinction needs another explanation."), remediationCategory="none" if correct else "change_modality")
