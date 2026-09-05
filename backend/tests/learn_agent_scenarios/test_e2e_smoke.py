@@ -12,7 +12,7 @@ def test_browser_contract_survives_teach_hint_answer_ask_and_resume(client):
         if session["step"].get("hintsAvailable"):
             hint = client.post(f"/learn-sessions/{session['id']}/hints", json={})
             assert hint.status_code == 200
-        session = run_turn(client, trace, session, response_for(session.get("step"), text="I'm not sure; partially"))
+        session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text="I'm not sure; partially"))
         ask = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Can you explain the energy conversion another way?"})
         assert ask.status_code == 200
         resumed = client.get(f"/documents/{document['id']}/learn-sessions/active")

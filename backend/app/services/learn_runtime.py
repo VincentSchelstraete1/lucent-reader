@@ -159,6 +159,21 @@ def select_target_objective(session) -> str | None:
     return None
 
 
+def _private_for_rendered_scene(scene: LearningScene, *, objective_id: str, decision: TutorDecision | None = None) -> dict[str, Any] | None:
+    """Build grading state for the scene's actual active practice block.
+
+    Teaching scenes may include a supporting practice block; its ID, rather
+    than the selected teaching asset, is the response target.
+    """
+    interaction_id = scene.response_interaction_id
+    if not interaction_id:
+        return None
+    step = next((block.step for block in scene.blocks if block.kind == "practice" and block.step and block.step.id == interaction_id), None)
+    if step is None:
+        return None
+    return ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=step.model_dump(by_alias=True), objectiveId=objective_id, targetConceptIds=[objective_id], strategy=decision.pedagogical_strategy if decision else "DIRECT_INSTRUCTION", scaffoldLevel=decision.scaffold_level if decision else "FULL", decisionId=bounded_id("decision", objective_id, scene.id)).model_dump(by_alias=True)
+
+
 def validate_branch_proposal(session, *, original_concept_id: str, prerequisite_concept_id: str, depth: int) -> bool:
     """Validate an agent-proposed prerequisite branch against the saved plan."""
     if depth < 1 or depth > 3 or original_concept_id == prerequisite_concept_id:
@@ -340,8 +355,11 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         concept = dict(concept)
         concept.update({"attempts": int(concept.get("attempts", 0)) + 1, "lastSeen": now, "lastResult": evaluation.result})
         hints_used = int((state.get("hints") or {}).get(current.id, 0))
-        independent = hints_used == 0 and concept.get("scaffold", "FULL") in {"INDEPENDENT", "TRANSFER"}
-        transfer = current.type in {"problem", "teach_back", "prediction", "numeric"} and independent and evaluation.result == "correct"
+        # "Independent" describes whether the learner answered without an
+        # explicit hint; the current scaffold level controls how far support
+        # can fade after that success.
+        independent = hints_used == 0
+        transfer = current.type in {"problem", "teach_back", "prediction", "numeric"} and independent and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"} and evaluation.result == "correct"
         concept["scaffold"] = next_scaffold(concept.get("scaffold"), evaluation.result, hints_used, independent=independent)
         concept["scaffoldingLevel"] = concept["scaffold"]
         concept["hintDependence"] = int(concept.get("hintDependence", 0)) + (1 if hints_used else 0)
@@ -350,6 +368,23 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         if evaluation.result == "correct":
             concept["correct"] = int(concept.get("correct", 0)) + 1
             concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 else "DEMONSTRATED"
+            evidence_key = {
+                "multiple_choice": "recognitionEvidence",
+                "prediction": "applicationEvidence",
+                "problem": "applicationEvidence",
+                "numeric": "applicationEvidence",
+                "worked_step": "applicationEvidence",
+                "teach_back": "explanationEvidence",
+                "short_answer": "recallEvidence",
+                "fill_blank": "recallEvidence",
+                "ordering": "applicationEvidence",
+                "matching": "recognitionEvidence",
+                "labeling": "recognitionEvidence",
+            }.get(current.type)
+            if evidence_key:
+                concept[evidence_key] = int(concept.get(evidence_key, 0)) + 1
+            if transfer:
+                concept["transferEvidence"] = int(concept.get("transferEvidence", 0)) + 1
         elif evaluation.result == "partially_correct":
             concept["partiallyCorrect"] = int(concept.get("partiallyCorrect", 0)) + 1; concept["state"] = "DEVELOPING"
         elif evaluation.result == "incorrect":
@@ -412,7 +447,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     prereq_decision = TutorDecision(targetConcept=prerequisite_id, teachingAction=prereq_action.type, pedagogicalGoal="REPAIR_PREREQUISITE", pedagogicalStrategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_concept.get("scaffold", "FULL"), nextStepId=prereq_next.id, transitionMessage="Let's make sure the supporting idea is clear first.")
                     session.state = state
                     rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, step_index=0, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.evidence, feedback_kind="info", evaluation=evaluation)
-                    private_next = None if prereq_next.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=rendered.id, revision=rendered.revision, interaction=prereq_next.model_dump(by_alias=True), objectiveId=prerequisite_id, targetConceptIds=[prerequisite_id], strategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_decision.scaffold_level, decisionId=bounded_id("decision", session.id, rendered.id)).model_dump(by_alias=True)
+                    private_next = _private_for_rendered_scene(rendered, objective_id=prerequisite_id, decision=prereq_decision)
                     return persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), private_next
 
     candidates = []
@@ -423,8 +458,13 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             continue
         candidates.append(candidate)
     if evaluation and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
-        teaching = next((item for item in candidates if item.type in {"teach", "walkthrough"}), None)
-        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in set(state.get("answeredInteractionIds") or [])), current)
+        answered_ids = set(state.get("answeredInteractionIds") or [])
+        used_teaching = set(state.get("usedTeachingIds") or [])
+        # Do not replay the same explanation after a failed intervention.
+        # Prefer an unused grounded teaching asset, then a different unanswered
+        # check, and finally the bounded scene-local fallback below.
+        teaching = next((item for item in candidates if item.id != getattr(current, "id", None) and item.type in {"teach", "walkthrough"} and item.id not in used_teaching), None)
+        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in answered_ids), None)
     else:
         answered_ids = set(state.get("answeredInteractionIds") or [])
         used_teaching = set(state.get("usedTeachingIds") or [])
@@ -489,6 +529,6 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     state["lastFeedbackKind"] = "correct" if evaluation and evaluation.result == "correct" else "incorrect" if evaluation else "info"
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
-    private_next = None if next_step.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=rendered.id, revision=rendered.revision, interaction=next_step.model_dump(by_alias=True), objectiveId=concept_id, targetConceptIds=[concept_id], strategy=decision.pedagogical_strategy, scaffoldLevel=decision.scaffold_level, decisionId=bounded_id("decision", session.id, rendered.id)).model_dump(by_alias=True)
+    private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision)
     rendered = persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
     return rendered, private_next

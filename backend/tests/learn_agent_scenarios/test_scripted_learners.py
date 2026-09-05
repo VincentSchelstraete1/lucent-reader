@@ -38,7 +38,7 @@ def test_scripted_learner_replans_with_a_complete_trace(client, name, response):
         _, session = create_source_material(client)
         trace = TutorScenarioTrace(name)
         session = run_turn(client, trace, session, {})
-        session = run_turn(client, trace, session, response_for(session.get("step"), text=response))
+        session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text=response))
     assert_trace_invariants(trace)
     assert "learn_tutor_decision" in provider.calls
     assert trace.turns[-1].decision.get("pedagogicalStrategy") == "CONTRAST_CASE"
@@ -51,7 +51,7 @@ def test_repeated_incorrect_answers_do_not_repeat_or_grow_repairs(client):
         _, session = create_source_material(client)
         trace = TutorScenarioTrace("repeated_incorrect")
         for _ in range(12):
-            session = run_turn(client, trace, session, response_for(session.get("step"), text="confidently wrong"))
+            session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text="confidently wrong"))
     assert_trace_invariants(trace)
     with SessionLocal() as db:
         stored = db.get(LearnSession, session["id"])
@@ -82,8 +82,8 @@ def test_prerequisite_gap_records_a_bounded_branch_trace(client):
             db.commit()
         trace = TutorScenarioTrace("prerequisite_gap_branch")
         session = run_turn(client, trace, session, {})
-        session = run_turn(client, trace, session, response_for(session.get("step"), text="I do not understand height."))
-        session = run_turn(client, trace, session, response_for(session.get("step"), text="I still do not understand height."))
+        session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text="I do not understand height."))
+        session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text="I still do not understand height."))
     assert_trace_invariants(trace)
     assert trace.turns[-1].session_state.get("prerequisiteBranch")
     assert len(trace.turns[-1].session_state.get("branchStack", [])) == 1
@@ -95,7 +95,7 @@ def test_fifty_replans_keep_runtime_and_persistence_bounded(client):
         _, session = create_source_material(client)
         trace = TutorScenarioTrace("fifty_replans")
         for _ in range(50):
-            session = run_turn(client, trace, session, response_for(session.get("step"), text="confidently wrong"))
+                session = run_turn(client, trace, session, response_for(session.get("step") or session.get("scene"), text="confidently wrong"))
     assert len(trace.turns) == 50
     assert_trace_invariants(trace)
     with SessionLocal() as db:
@@ -171,7 +171,7 @@ def test_independent_then_transfer_success_reduces_scaffolding(client):
         session = run_turn(client, trace, session, {})
         session = run_turn(client, trace, session, {"response": "independent correct"})
         first_scaffold = trace.turns[-1].evidence_update[0]["scaffold"]
-        if session.get("status") == "active" and session.get("step"):
+        if session.get("status") == "active" and session.get("scene"):
             session = run_turn(client, trace, session, {"response": "transfer success"})
     assert_trace_invariants(trace)
     assert first_scaffold == "GUIDED"

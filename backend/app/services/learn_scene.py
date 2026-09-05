@@ -215,6 +215,15 @@ def compose_learning_scene(
     if not blocks:
         blocks.append(LearningSceneBlock(id=_id("block", scene_seed, "fallback"), kind="explanation", label="Understand", title=objective.get("title", "Current concept"), content=objective.get("outcome") or objective.get("title", "Review this idea."), sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
+    # A scene has exactly one active response target. Support content may be
+    # composed before the current practice block; retain the latest/current
+    # practice and discard stale response surfaces from prior revisions.
+    practice_blocks = [block for block in blocks if block.kind == "practice" and block.step]
+    if len(practice_blocks) > 1:
+        active_id = getattr(current_step, "id", None)
+        keep = next((block for block in reversed(practice_blocks) if not active_id or block.step.id == active_id), practice_blocks[-1])
+        blocks = [block for block in blocks if block.kind != "practice" or block is keep]
+
     # Normalize obvious broken compositions before they become public scene
     # state: adjacent duplicate headings/content and empty visual blocks are
     # never useful learner-facing blocks.

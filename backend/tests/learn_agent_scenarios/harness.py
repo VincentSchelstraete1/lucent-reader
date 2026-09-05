@@ -111,6 +111,11 @@ def create_source_material(client, *, title: str = "Pendulum energy", goal: str 
 
 
 def response_for(step: dict[str, Any] | None, *, text: str = "I don't know") -> dict[str, Any]:
+    # Scene-only API responses no longer expose the legacy `step` field. Keep
+    # scenario scripts readable by accepting a scene payload when supplied.
+    if step and "blocks" in step:
+        active_id = step.get("responseInteractionId")
+        step = next((block.get("step") for block in step.get("blocks", []) if block.get("kind") == "practice" and block.get("step") and active_id and block["step"].get("id") == active_id), None)
     if not step or step.get("type") in {"teach", "walkthrough"}:
         return {}
     if step.get("type") in {"multiple_choice", "prediction"}:
@@ -134,20 +139,31 @@ def _session_snapshot(session_id: str) -> tuple[LearnSession, dict[str, Any]]:
 
 def run_turn(client, trace: TutorScenarioTrace, session_payload: dict[str, Any], learner_payload: dict[str, Any]) -> dict[str, Any]:
     before, state_before = _session_snapshot(session_payload["id"])
-    objective = before.plan["objectives"][before.objective_index]
-    step = _parse_step(objective["steps"][before.step_index])
+    objective_id = state_before.get("currentObjectiveId")
+    objective = next((item for item in before.plan["objectives"] if str(item.get("id")) == str(objective_id)), before.plan["objectives"][before.objective_index])
+    private = state_before.get("currentScenePrivate") or {}
+    raw_step = private.get("interaction")
+    if raw_step is None:
+        raw_scene = state_before.get("currentScene") or {}
+        raw_step = next((block.get("step") for block in raw_scene.get("blocks", []) if block.get("kind") == "practice" and block.get("step")), None)
+    step = _parse_step(raw_step) if raw_step else None
     concept = next((item for item in state_before.get("concepts", []) if item.get("conceptId") == objective["id"]), _concept_for(before, objective))
     observation = _tutor_observation(before, objective, concept, step, state_before).model_dump(by_alias=True)
     response = client.post(f"/learn-sessions/{session_payload['id']}/responses", json=learner_payload)
     payload = response.json()
     _, state_after = _session_snapshot(session_payload["id"])
     decision = dict(state_after.get("lastTutorDecision") or {})
+    selected_step = ((state_after.get("currentScenePrivate") or {}).get("interaction")) or payload.get("step")
+    if selected_step is None:
+        scene_payload = payload.get("scene") or {}
+        active_id = scene_payload.get("responseInteractionId")
+        selected_step = next((block.get("step") for block in scene_payload.get("blocks", []) if block.get("kind") == "practice" and block.get("step") and active_id and block["step"].get("id") == active_id), None)
     trace.turns.append(TutorTraceTurn(
         observation=observation,
         decision=decision,
         tool_calls=list(decision.get("actions") or []),
         tool_results=list(state_after.get("lastTutorToolResults") or []),
-        selected_step=payload.get("step"),
+        selected_step=selected_step,
         selected_action=payload.get("action"),
         learner_response=learner_payload,
         evidence_update=list(payload.get("conceptStates") or []),
@@ -172,7 +188,7 @@ def assert_trace_invariants(trace: TutorScenarioTrace) -> None:
             assert turn.selected_step.get("sourceSectionIds") or turn.selected_step.get("sourceBlockIds")
             seen_step_ids.add(step_id)
             if turn.learner_response and previous_response_step:
-                assert step_id != previous_response_step, "failed interaction repeated without an intervening teaching change"
+                    assert step_id != previous_response_step, f"failed interaction repeated without an intervening teaching change: {step_id} previous={previous_response_step}"
             previous_response_step = step_id if turn.learner_response else None
         if turn.selected_action:
             assert len(str(turn.selected_action["id"])) <= 60
