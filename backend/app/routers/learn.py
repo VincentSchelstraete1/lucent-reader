@@ -20,8 +20,9 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
+from app.services.learn_scene import compose_learning_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -71,6 +72,50 @@ def _now() -> str: return datetime.now(timezone.utc).isoformat()
 def _parse_step(raw: dict):
     try: return STEP_ADAPTER.validate_python(raw)
     except Exception: return None
+
+
+def _safe_step(objective: dict, raw: dict):
+    """Return a renderable source-specific step for legacy or malformed plans."""
+    parsed = _parse_step(raw)
+    if not parsed:
+        return parsed
+    # Older visual plans used a generic stage sentence. Keep the grounded
+    # visual asset, but replace only that narration with the active elements'
+    # actual labels so legacy sessions become useful without regeneration.
+    if getattr(parsed, "visual_spec", None):
+        spec = parsed.visual_spec
+        stages = []
+        for stage in spec.stages:
+            stage_data = dict(stage)
+            explanation = str(stage_data.get("explanation") or "")
+            if not explanation or any(phrase in explanation.casefold() for phrase in ("notice how this element connects", "relationship described above")):
+                active = [node.label for node in spec.nodes if node.id in set(stage_data.get("activeNodeIds") or [])]
+                stage_data["explanation"] = f"Watch how {', '.join(active[:2]) or 'this part of the process'} changes in this stage."
+            stages.append(stage_data)
+        try:
+            parsed = parsed.model_copy(update={"visual_spec": spec.model_copy(update={"stages": stages})})
+        except Exception:
+            pass
+    source_text = " ".join(str(value) for value in (
+        objective.get("title", ""), objective.get("outcome", ""),
+        objective.get("bottleneck", ""), getattr(parsed, "content", ""),
+        getattr(parsed, "prompt", ""),
+    ) if value)
+    if not student_facing_quality_issues(parsed, source_text):
+        return parsed
+    support = next(
+        (
+            candidate for candidate in (_parse_step(item) for item in objective.get("steps", []))
+            if candidate and candidate.type == "teach" and not student_facing_quality_issues(candidate, source_text)
+        ),
+        None,
+    )
+    content = getattr(support, "content", None) or objective.get("bottleneck") or objective.get("outcome") or objective.get("title", "Review this concept.")
+    return TeachStep(
+        id=parsed.id, type="teach", title=f"Understand {objective.get('title', 'this concept')}",
+        content=content, sourceSectionIds=objective.get("sourceSectionIds", []),
+        sourceBlockIds=objective.get("sourceBlockIds", []),
+    )
 
 def _concepts(session: LearnSession) -> list[dict]:
     concepts = list((session.state or {}).get("concepts") or [])
@@ -195,23 +240,11 @@ def _completion_met(session: LearnSession) -> bool:
     return True
 
 def _session_payload(session: LearnSession, feedback: str | None = None, feedback_kind: str | None = None, evaluation: LearnEvaluation | None = None) -> LearnSessionResponse:
-    plan = session.plan or {}; objectives = plan.get("objectives", []); state = session.state or {}; current = None; objective_title = None; action = None
+    plan = session.plan or {}; objectives = plan.get("objectives", []); state = session.state or {}; current = None; objective_title = None; action = None; scene = None
     if session.status == "active" and session.objective_index < len(objectives):
         objective = objectives[session.objective_index]; objective_title = objective.get("title"); steps = objective.get("steps", [])
         if session.step_index < len(steps):
-            parsed = _parse_step(steps[session.step_index])
-            # Older active sessions may contain a step persisted before the
-            # student-facing quality gate was added.  Never expose that
-            # legacy placeholder; render a grounded teaching step instead.
-            if parsed and student_facing_quality_issues(parsed):
-                parsed = TeachStep(
-                    id=_bounded_id("grounded", objective.get("id", "concept"), parsed.id),
-                    type="teach",
-                    title=f"Understand {objective_title or 'this concept'}",
-                    content=objective.get("outcome") or objective_title or "Review the material.",
-                    sourceSectionIds=objective.get("sourceSectionIds", []),
-                    sourceBlockIds=objective.get("sourceBlockIds", []),
-                )
+            parsed = _safe_step(objective, steps[session.step_index])
             if parsed:
                 hints_used = int((state.get("hints") or {}).get(parsed.id, 0)); current = public_step(parsed, hints_used); action = _action_for(parsed, objective, _concept_for(session, objective), bool(state.get("revisitMode")), state.get("lastRemediation"))
                 saved_decision = state.get("lastTutorDecision") or {}
@@ -221,9 +254,37 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
                         action = TutorAction(id=_bounded_id("action", objective.get("id", "concept"), parsed.id, action_type), type=action_type, conceptId=saved_decision.get("targetConcept", action.concept_id), stepId=parsed.id, rationale=saved_decision.get("rationale", action.rationale), strategy=saved_decision.get("pedagogicalStrategy", action.strategy))
                     except Exception:
                         pass
+                decision = None
+                try:
+                    if saved_decision:
+                        decision = TutorDecision.model_validate(saved_decision)
+                except Exception:
+                    decision = None
+                scene = compose_learning_scene(
+                    session_id=str(session.id), objective=objective, steps=steps,
+                    step_index=session.step_index, current_step=parsed, action=action,
+                    decision=decision, concept=_concept_for(session, objective), state=state,
+                    feedback=feedback or state.get("lastFeedback"),
+                    feedback_kind=feedback_kind or state.get("lastFeedbackKind"),
+                    evaluation=evaluation,
+                )
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
     report = LearnSessionReport.model_validate(session.report) if session.report else None
-    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=feedback, feedbackKind=feedback_kind, hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason)
+    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=feedback or state.get("lastFeedback"), feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
+
+
+def _persist_scene(session: LearnSession, scene: object | None) -> None:
+    """Persist only the bounded, validated scene snapshot for resume."""
+    if scene is None or not hasattr(scene, "model_dump"):
+        return
+    state = dict(session.state or {})
+    state["stateSchemaVersion"] = 2
+    state["currentScene"] = scene.model_dump(by_alias=True)
+    state["sceneHistory"] = [
+        *list(state.get("sceneHistory") or [])[-7:],
+        {"id": scene.id, "objectiveId": scene.objective_id, "revision": int(state.get("sceneRevision", 0))},
+    ][-8:]
+    session.state = state
 
 def _get_owned_session(db, session_id: UUID, user: User) -> LearnSession:
     session = db.execute(select(LearnSession).where(LearnSession.id == session_id, LearnSession.user_id == user.id)).scalar_one_or_none()
@@ -340,7 +401,20 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         ask_state["previousTutorActions"] = (list(ask_state.get("previousTutorActions", [])) + [ask_decision.teaching_action])[-8:]
         session.state = ask_state
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="tutor_observation", metadata={"event": "learner_question", "goal": ask_decision.pedagogical_goal, "strategy": ask_decision.pedagogical_strategy, "action": ask_decision.teaching_action, "confidence": ask_decision.confidence})
-    db.commit(); return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action)
+    # Ask Lucent is an interruption in the same scene.  Persist presentation
+    # state and let the normal scene compiler produce the authoritative scene
+    # snapshot; no graded evidence is changed by chat.
+    ask_state["sceneInterruption"] = {"question": request.message[:240], "answer": answer[:900]}
+    ask_state["sceneRevision"] = int(ask_state.get("sceneRevision", 0)) + 1
+    if visual_action and visual_action.get("stage") is not None:
+        ask_state["visualStage"] = int(visual_action["stage"])
+    if visual_action and visual_action.get("nodeId"):
+        ask_state["visualHighlight"] = visual_action["nodeId"]
+    session.state = ask_state
+    scene_response = _session_payload(session)
+    _persist_scene(session, scene_response.scene)
+    db.commit()
+    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
     prior = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document_id).order_by(LearnSession.updated_at.desc())).scalars().first()
@@ -363,7 +437,11 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
         if existing: return _session_payload(existing)
     plan = build_learn_plan(payload, request.goal, request.familiarity); plan_data = plan.model_dump(by_alias=True)
     session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, step_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
-    db.add(session); db.commit(); db.refresh(session); return _session_payload(session)
+    db.add(session); db.commit(); db.refresh(session)
+    initial = _session_payload(session)
+    _persist_scene(session, initial.scene)
+    db.commit()
+    return _session_payload(session)
 
 @router.get("/learn-sessions/{session_id}", response_model=LearnSessionResponse)
 def get_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)): return _session_payload(_get_owned_session(db, session_id, user))
@@ -456,8 +534,16 @@ def _append_remediation(session: LearnSession, objective: dict, failed_step) -> 
     elif failed_step.type in {"multiple_choice", "prediction", "ordering", "matching", "labeling"} and answer:
         repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Explain {title}", prompt=f"In one sentence, explain the key change in {title}.", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], feedbackIncorrect=f"Connect {title} to this source-supported idea: {answer[:240]}", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     else:
-        repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Apply {title}", prompt=f"What outcome should occur when {title} is applied here?", acceptedAnswers=[answer or title], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer or title)[:5]], feedbackIncorrect=f"Use the source explanation of {title} to state the outcome.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
-    if student_facing_quality_issues(repair):
+        grounded_answer = answer or str(getattr(failed_step, "content", "") or objective.get("outcome") or title)
+        repair = ShortAnswerStep(
+            id=repair_id, type="short_answer", title=f"Apply {title}",
+            prompt=f"In your own words, what does {title} do in this material?",
+            acceptedAnswers=[grounded_answer],
+            requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", grounded_answer)[:5]],
+            feedbackIncorrect=f"Use this source-supported idea to guide your answer: {grounded_answer[:240]}",
+            sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids,
+        )
+    if student_facing_quality_issues(repair, source_text):
         raise ValueError("generated remediation contained generic meta language")
     steps.append(repair.model_dump(by_alias=True))
     session.plan = plan
@@ -519,9 +605,9 @@ def _leave_degenerate_repair_loop(session: LearnSession, state: dict, objective:
 def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     session = _get_owned_session(db, session_id, user)
     if session.status != "active": return _session_payload(session, feedback="This session is no longer active.", feedback_kind="info")
-    objective = session.plan["objectives"][session.objective_index]; step = _parse_step(objective["steps"][session.step_index])
+    objective = session.plan["objectives"][session.objective_index]; step = _safe_step(objective, objective["steps"][session.step_index])
     if not step: session.step_index += 1; db.commit(); return _session_payload(session, feedback="That step was skipped because it was unavailable.", feedback_kind="info")
-    state = dict(session.state or {}); attempts = dict(state.get("attempts") or {}); attempt_number = int(attempts.get(step.id, 0)) + 1; attempts[step.id] = attempt_number; state["attempts"] = attempts
+    state = dict(session.state or {}); state.pop("sceneInterruption", None); attempts = dict(state.get("attempts") or {}); attempt_number = int(attempts.get(step.id, 0)) + 1; attempts[step.id] = attempt_number; state["attempts"] = attempts
     evaluation = evaluate_step(step, response=request.response, option_id=request.option_id, ordered_ids=request.ordered_ids)
     retrieved_context: dict = {}
     if request.response and step.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
@@ -635,7 +721,15 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
             feedback = f"{feedback} {decision.transition_message}".strip()
     if session.step_index >= len(current_steps): _next_objective(session, state)
     if _completion_met(session): session.status = "completed"; session.ended_reason = "evidence_sufficient"; session.report = _report(session).model_dump(by_alias=True)
-    db.commit(); return _session_payload(session, feedback=feedback, feedback_kind="correct" if evaluation.result == "correct" else "incorrect" if evaluation.result in {"incorrect", "partially_correct"} else "info", evaluation=evaluation)
+    state["lastFeedback"] = feedback
+    state["lastFeedbackKind"] = "correct" if evaluation.result == "correct" else "incorrect" if evaluation.result in {"incorrect", "partially_correct"} else "info"
+    state["sceneRevision"] = int(state.get("sceneRevision", 0)) + 1
+    session.state = state
+    response_kind = "correct" if evaluation.result == "correct" else "incorrect" if evaluation.result in {"incorrect", "partially_correct"} else "info"
+    response_payload = _session_payload(session, feedback=feedback, feedback_kind=response_kind, evaluation=evaluation)
+    _persist_scene(session, response_payload.scene)
+    db.commit()
+    return _session_payload(session, feedback=feedback, feedback_kind=response_kind, evaluation=evaluation)
 
 @router.post("/learn-sessions/{session_id}/stop", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def stop_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):

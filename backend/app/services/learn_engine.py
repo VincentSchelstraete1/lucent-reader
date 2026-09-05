@@ -71,7 +71,23 @@ def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], 
     valid_ids = {node["id"] for node in nodes}; edges = [edge for edge in edges if edge["source"] in valid_ids and edge["target"] in valid_ids]
     structure_type = str(component.get("structureType", "hierarchy"))
     visual_type = {"flow": "process_flow", "relationship_map": "relationship_map", "comparison": "comparison", "structure": "hierarchy" if structure_type == "hierarchy" else "spatial_structure"}.get(kind, "diagram")
-    stages = [{"title": f"Focus on {node['label']}", "explanation": node.get("detail") or "Notice how this element connects to the others.", "activeNodeIds": [node["id"]]} for node in nodes[:8]] if visual_type in {"process_flow", "comparison"} else []
+    stages = []
+    if visual_type in {"process_flow", "comparison"}:
+        for node in nodes[:8]:
+            outgoing = next((edge for edge in edges if edge["source"] == node["id"]), None)
+            incoming = next((edge for edge in edges if edge["target"] == node["id"]), None)
+            relation = outgoing or incoming
+            if node.get("detail"):
+                narration = node["detail"]
+            elif relation and outgoing:
+                target = next((item["label"] for item in nodes if item["id"] == outgoing["target"]), "the next state")
+                narration = f"{node['label']} leads to {target}" + (f" through {outgoing['label']}" if outgoing.get("label") else "") + "."
+            elif relation:
+                source = next((item["label"] for item in nodes if item["id"] == incoming["source"]), "the prior state")
+                narration = f"{node['label']} follows {source}" + (f" through {incoming['label']}" if incoming.get("label") else "") + "."
+            else:
+                narration = f"Compare the role of {node['label']} with the other source-supported parts shown here."
+            stages.append({"title": f"Focus on {node['label']}", "explanation": narration, "activeNodeIds": [node["id"]]})
     animations = [{"operation": "flow", "targetIds": [edge["source"], edge["target"]], "durationMs": 850, "explanation": edge.get("label") or "Follow the relationship."} for edge in edges[:16]] if visual_type in {"process_flow", "causal_chain", "sequence", "hierarchy", "spatial_structure"} else []
     if visual_type == "comparison" and len(nodes) >= 2:
         animations = [{"operation": "compare", "targetIds": [node["id"] for node in nodes[:2]], "durationMs": 1400, "explanation": "Compare the two mechanisms side by side."}]
@@ -122,7 +138,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 matches = {pair["id"]: _clean(next((item.get("values", {}).get(dimension) for item in comparison.get("items", []) if str(item.get("id")) == pair["id"]), "")) for pair in pairs}
                 values = [value for value in dict.fromkeys(matches.values()) if value]
                 if len(pairs) >= 2 and len(values) >= 2:
-                    steps.append(MatchingStep(id=_bounded_plan_id("match", section_identity), type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", f"Look at how {title} changes in each case."], feedbackIncorrect=f"Compare the {dimension} for each {title} pathway."))
+                    steps.append(MatchingStep(id=_bounded_plan_id("match", section_identity), type="matching", title="Compare the two cases", prompt=f"Match each part of {title} with the effect described in the material.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare how each part of {title} changes function.", f"Look for the consequence described for each pathway."], feedbackIncorrect=f"Keep the two effects in {title} separate, then match each cause with its consequence."))
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=_bounded_plan_id("visual", section_identity), type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -185,7 +201,8 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         safe_steps = []
         for candidate in steps:
             grounded_id = f"grounded-{hashlib.sha256(f'{title}|{candidate.id}'.encode()).hexdigest()[:16]}"
-            safe_steps.append(candidate if not student_facing_quality_issues(candidate) else TeachStep(id=grounded_id, type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            source_text = " ".join([title, big_idea, *takeaways, json.dumps(comps, default=str)])
+            safe_steps.append(candidate if not student_facing_quality_issues(candidate, source_text) else TeachStep(id=grounded_id, type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         steps = safe_steps
         outcome = {"understand": f"Explain how {title} works.", "solve": f"Apply {title} to a new step.", "memorize": f"Recall the essential facts about {title}.", "exam": f"Recognize and use {title} under exam conditions."}[goal]
         objectives.append(LearningObjective(id=_bounded_plan_id("objective", section_identity), title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
@@ -261,14 +278,53 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "State what changes and what effect it produces."), remediationCategory="none" if result == "correct" else "simplify")
 
 
-_BANNED_META_PHRASES = ("the teaching point", "source-grounded relationship", "relationship described above", "relevant detail", "unrelated detail", "defining relationship", "supporting detail", "the concept above", "a related but different idea", "a claim not supported by this material", "which response best matches", "the key relationship here")
+_BANNED_META_PHRASES = (
+    "the teaching point", "source-grounded relationship", "relationship described above",
+    "relevant detail", "unrelated detail", "defining relationship", "supporting detail",
+    "the concept above", "a related but different idea", "a claim not supported by this material",
+    "which response best matches", "the key relationship here", "correct concept",
+    "concept described above", "what outcome should occur when", "is applied here",
+    "notice how this element connects to the others",
+)
+_INTERNAL_FIELD_NAMES = {
+    "concept_id", "source_id", "source_block", "source_block_id", "interaction_type",
+    "target_variable", "scaffold_level", "teaching_point", "repair_step", "mutation_type",
+}
 
-def student_facing_quality_issues(step: LearnStep) -> list[str]:
-    """Reject contextless fallback language before a step reaches the UI."""
-    data = step.model_dump()
-    text = " ".join(str(value) for value in data.values() if isinstance(value, (str, list, dict)))
+
+def _student_text(step: LearnStep) -> str:
+    data = step.model_dump(by_alias=True, exclude_none=True)
+    values: list[str] = []
+    for key in ("title", "prompt", "content", "feedbackCorrect", "feedbackIncorrect", "remediation", "reveal", "solution"):
+        if data.get(key):
+            values.append(str(data[key]))
+    values.extend(str(item) for item in data.get("hints", []))
+    for key in ("options", "items", "pairs", "targets", "labels"):
+        values.extend(str(item.get("label", "")) for item in data.get(key, []) if isinstance(item, dict))
+    visual = data.get("visualSpec") or {}
+    values.extend(str(visual.get(key, "")) for key in ("title", "purpose"))
+    values.extend(str(node.get("label", "")) + " " + str(node.get("detail", "")) for node in visual.get("nodes", []) if isinstance(node, dict))
+    values.extend(str(stage.get("title", "")) + " " + str(stage.get("explanation", "")) for stage in visual.get("stages", []) if isinstance(stage, dict))
+    return " ".join(values)
+
+
+def learner_text_quality_issues(text: str, source_text: str = "") -> list[str]:
+    """Lint learner-facing prose without confusing source code with schema leaks."""
     lowered = text.casefold()
-    return [phrase for phrase in _BANNED_META_PHRASES if phrase in lowered]
+    issues = [phrase for phrase in _BANNED_META_PHRASES if phrase in lowered]
+    source_lower = source_text.casefold()
+    for token in re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", text):
+        if token.casefold() not in source_lower:
+            issues.append(f"internal_identifier:{token}")
+    for field_name in _INTERNAL_FIELD_NAMES:
+        if field_name in lowered and field_name not in source_lower:
+            issues.append(f"internal_field:{field_name}")
+    return list(dict.fromkeys(issues))
+
+
+def student_facing_quality_issues(step: LearnStep, source_text: str = "") -> list[str]:
+    """Reject meta/template/schema language before it reaches a learner."""
+    return learner_text_quality_issues(_student_text(step), source_text)
 
 
 def grade_step(step: LearnStep, *, response: str | None, option_id: str | None) -> tuple[bool | None, str]:

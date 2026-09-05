@@ -269,6 +269,32 @@ class TutorToolCall(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
+SceneBlockPlanKind = Literal[
+    "explanation", "visual", "animation", "example", "counterexample",
+    "analogy", "comparison", "worked_example", "guided_step", "practice",
+    "reflection", "tutor_message",
+]
+
+
+class TutorSceneBlockPlan(BaseModel):
+    """Bounded model directive for one learner-facing scene block."""
+    kind: SceneBlockPlanKind
+    label: str = Field(min_length=1, max_length=40)
+    title: str | None = Field(default=None, max_length=180)
+    content: str | None = Field(default=None, max_length=900)
+    step_id: str | None = Field(default=None, alias="stepId", max_length=60)
+    visual_ref: dict | None = Field(default=None, alias="visualRef")
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+
+
+class TutorScenePlan(BaseModel):
+    blocks: list[TutorSceneBlockPlan] = Field(default_factory=list, max_length=5)
+    response_step_id: str | None = Field(default=None, alias="responseStepId", max_length=60)
+    expected_evidence: list[str] = Field(default_factory=list, alias="expectedEvidence", max_length=6)
+    completion_condition: str | None = Field(default=None, alias="completionCondition", max_length=240)
+
+
 class TutorObservation(BaseModel):
     """Bounded learner context supplied to one tutor replanning decision."""
     session_id: str = Field(alias="sessionId", min_length=1, max_length=64)
@@ -310,6 +336,7 @@ class TutorDecision(BaseModel):
     visual_action: str | None = Field(default=None, alias="visualAction", max_length=40)
     prerequisite_branch: str | None = Field(default=None, alias="prerequisiteBranch", max_length=60)
     actions: list[TutorToolCall] = Field(default_factory=list, max_length=4)
+    scene_plan: TutorScenePlan | None = Field(default=None, alias="scenePlan")
     expected_evidence: str = Field(default="A response that demonstrates the target concept.", alias="expectedEvidence", max_length=300)
     transition_message: str = Field(default="Let's try a different way to build this understanding.", alias="transitionMessage", max_length=240)
     next_step_id: str | None = Field(default=None, alias="nextStepId", max_length=60)
@@ -396,6 +423,7 @@ class AskLucentResponse(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
     tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
     visual_action: dict | None = Field(default=None, alias="visualAction")
+    scene_patch: dict | None = Field(default=None, alias="scenePatch")
 
 class AskLucentToolCall(BaseModel):
     tool: Literal["retrieve_source", "inspect_current_concept", "inspect_relevant_learner_evidence", "show_visual", "change_visual_stage", "highlight_visual_element", "request_example", "request_explanation", "revisit_prerequisite"]
@@ -425,6 +453,53 @@ class LearnStepView(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
 
 
+SceneBlockKind = Literal[
+    "explanation", "visual", "animation", "example", "counterexample",
+    "analogy", "comparison", "worked_example", "guided_step", "practice",
+    "feedback", "reflection", "tutor_message",
+]
+
+
+class LearningSceneBlock(BaseModel):
+    """One coordinated part of a tutor-composed learning scene."""
+    id: str = Field(min_length=1, max_length=60)
+    kind: SceneBlockKind
+    label: str = Field(min_length=1, max_length=40)
+    title: str | None = Field(default=None, max_length=180)
+    content: str | None = Field(default=None, max_length=900)
+    step: LearnStepView | None = None
+    visual_spec: VisualSpec | None = Field(default=None, alias="visualSpec")
+    visual_ref: dict | None = Field(default=None, alias="visualRef")
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+
+    @model_validator(mode="after")
+    def contains_renderable_content(self):
+        if not any((self.content, self.step, self.visual_spec, self.visual_ref)):
+            raise ValueError("scene blocks require content, a step, or a visual")
+        return self
+
+
+class LearningScene(BaseModel):
+    """A bounded cohesive tutor turn containing coordinated teaching blocks."""
+    id: str = Field(min_length=1, max_length=60)
+    revision: int = Field(default=0, ge=0)
+    objective_id: str = Field(alias="objectiveId", min_length=1, max_length=60)
+    objective: str = Field(min_length=1, max_length=180)
+    target_concepts: list[str] = Field(default_factory=list, alias="targetConcepts", max_length=4)
+    pedagogical_goal: PedagogicalGoal = Field(alias="pedagogicalGoal")
+    tutor_hypothesis: str = Field(default="", alias="tutorHypothesis", max_length=500)
+    strategy: PedagogicalStrategy
+    scaffold_level: ScaffoldLevel = Field(alias="scaffoldLevel")
+    blocks: list[LearningSceneBlock] = Field(min_length=1, max_length=6)
+    evidence_targets: list[str] = Field(default_factory=list, alias="evidenceTargets", max_length=6)
+    source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
+    source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+    visual_state: dict = Field(default_factory=dict, alias="visualState")
+    completion_condition: str = Field(alias="completionCondition", min_length=1, max_length=240)
+    response_step_id: str | None = Field(default=None, alias="responseStepId", max_length=60)
+
+
 class LearnSessionResponse(BaseModel):
     id: str
     document_id: int = Field(alias="documentId")
@@ -446,3 +521,4 @@ class LearnSessionResponse(BaseModel):
     concept_states: list[ConceptEvidence] = Field(default_factory=list, alias="conceptStates")
     report: LearnSessionReport | None = None
     ended_reason: str | None = Field(default=None, alias="endedReason")
+    scene: LearningScene | None = None
