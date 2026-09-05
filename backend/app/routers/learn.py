@@ -295,19 +295,6 @@ def _ensure_session_runtime(db, session: LearnSession) -> None:
         db.refresh(session)
 
 
-def _persist_scene(session: LearnSession, scene: object | None) -> None:
-    """Persist only the bounded, validated scene snapshot for resume."""
-    if scene is None or not hasattr(scene, "model_dump"):
-        return
-    state = dict(session.state or {})
-    state["stateSchemaVersion"] = 2
-    state["currentScene"] = scene.model_dump(by_alias=True)
-    state["sceneHistory"] = [
-        *list(state.get("sceneHistory") or [])[-7:],
-        {"id": scene.id, "objectiveId": scene.objective_id, "revision": int(state.get("sceneRevision", 0))},
-    ][-8:]
-    session.state = state
-
 def _get_owned_session(db, session_id: UUID, user: User) -> LearnSession:
     session = db.execute(select(LearnSession).where(LearnSession.id == session_id, LearnSession.user_id == user.id)).scalar_one_or_none()
     if not session: raise HTTPException(status_code=404, detail="Learning session not found")
@@ -680,11 +667,9 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     kind = (session.state or {}).get("lastFeedbackKind")
     db.commit()
     return _session_payload(session, feedback=feedback, feedback_kind=kind)
-    """
-    Legacy cursor-based implementation retained below only in source history.
+    """Legacy cursor-based implementation retained below only in source history.
     It is intentionally unreachable; the authoritative runtime above owns all
     learner-visible progression.
-    """
     evaluation = None
     retrieved_context: dict = {}
     if request.response and step.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
@@ -804,9 +789,10 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     session.state = state
     response_kind = "correct" if evaluation.result == "correct" else "incorrect" if evaluation.result in {"incorrect", "partially_correct"} else "info"
     response_payload = _session_payload(session, feedback=feedback, feedback_kind=response_kind, evaluation=evaluation)
-    _persist_scene(session, response_payload.scene)
     db.commit()
     return _session_payload(session, feedback=feedback, feedback_kind=response_kind, evaluation=evaluation)
+
+    """
 
 @router.post("/learn-sessions/{session_id}/stop", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def stop_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
