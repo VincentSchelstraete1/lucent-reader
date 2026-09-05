@@ -157,6 +157,65 @@ def select_target_objective(session) -> str | None:
     return None
 
 
+def validate_branch_proposal(session, *, original_concept_id: str, prerequisite_concept_id: str, depth: int) -> bool:
+    """Validate an agent-proposed prerequisite branch against the saved plan."""
+    if depth < 1 or depth > 3 or original_concept_id == prerequisite_concept_id:
+        return False
+    objective_ids = {str(item.get("id")) for item in (session.plan or {}).get("objectives", [])}
+    if original_concept_id not in objective_ids or prerequisite_concept_id not in objective_ids:
+        return False
+    return all(str(item.get("targetConceptId")) != prerequisite_concept_id for item in (_state(session).get("branchStack") or []))
+
+
+def push_prerequisite_branch(session, *, original_concept_id: str, prerequisite_concept_id: str, reason: str, return_scene_id: str) -> dict[str, Any] | None:
+    state = _state(session)
+    depth = len(state.get("branchStack") or []) + 1
+    if not validate_branch_proposal(session, original_concept_id=original_concept_id, prerequisite_concept_id=prerequisite_concept_id, depth=depth):
+        return None
+    branch = {"originalConceptId": original_concept_id, "prerequisiteConceptId": prerequisite_concept_id, "reason": reason[:240], "depth": depth, "returnSceneId": return_scene_id, "returnObjectiveId": original_concept_id}
+    state.setdefault("branchStack", []).append(branch)
+    state["currentObjectiveId"] = prerequisite_concept_id
+    session.state = state
+    return branch
+
+
+def return_from_prerequisite(session) -> dict[str, Any] | None:
+    state = _state(session)
+    stack = list(state.get("branchStack") or [])
+    if not stack:
+        return None
+    branch = stack.pop()
+    state["branchStack"] = stack
+    state["currentObjectiveId"] = branch.get("returnObjectiveId")
+    session.state = state
+    return branch
+
+
+def apply_review_schedule(concept: dict[str, Any], *, result: str, hints_used: int = 0, transfer: bool = False) -> str:
+    if result != "correct":
+        return "LATER_THIS_SESSION"
+    if transfer:
+        return "FUTURE_REVIEW"
+    return "NEXT_SESSION" if hints_used else "NEXT_SESSION"
+
+
+def select_due_review(session) -> str | None:
+    for concept in _state(session).get("concepts", []):
+        if concept.get("reviewDue") in {"LATER_THIS_SESSION", "NEXT_SESSION", "FUTURE_REVIEW"} and concept.get("state") in {"NEEDS_REVIEW", "STRUGGLING", "DEVELOPING"}:
+            return str(concept.get("conceptId"))
+    return None
+
+
+def completion_met(session) -> bool:
+    state = _state(session)
+    concepts = list(state.get("concepts") or [])
+    objectives = list((session.plan or {}).get("objectives") or [])
+    if not objectives or state.get("revisitQueue") or state.get("branchStack"):
+        return False
+    by_id = {str(item.get("conceptId")): item for item in concepts}
+    return all(by_id.get(str(item.get("id")), {}).get("state") == "DEMONSTRATED" for item in objectives)
+
+
 def persist_scene_revision(session, scene: LearningScene, private: dict[str, Any] | None = None, *, event_id: str | None = None, db=None) -> LearningScene:
     state = _state(session)
     previous = load_current_scene(session)
