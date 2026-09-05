@@ -88,14 +88,14 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
     cursor = max(0, min(cursor, len(steps) - 1))
     parsed = None
     adapter = __import__("pydantic", fromlist=["TypeAdapter"]).TypeAdapter(LearnStep)
+    parsed_candidates = []
     for raw in steps[cursor:] + steps[:cursor]:
         try:
             candidate = adapter.validate_python(raw)
         except Exception:
             continue
-        parsed = candidate
-        if candidate.type not in {"teach", "walkthrough"}:
-            break
+        parsed_candidates.append(candidate)
+    parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"}), None) or (parsed_candidates[0] if parsed_candidates else None)
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
     scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
@@ -447,7 +447,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
             return persist_scene_revision(session, review_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), None
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-        generated_id = bounded_id("followup", concept_id, attempt_no)
+        generated_id = bounded_id("repair", concept_id, attempt_no)
         generated = ShortAnswerStep(
             id=generated_id,
             type="short_answer",

@@ -282,7 +282,7 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
         persisted_feedback = f"Let's connect this response to the evidence for {objective_title or 'the current concept'}."
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
     report = LearnSessionReport.model_validate(session.report) if session.report else None
-    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=persisted_feedback, feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
+    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=0, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=persisted_feedback, feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
 
 
 def _ensure_session_runtime(db, session: LearnSession) -> None:
@@ -423,7 +423,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     ask_fallback = TutorDecision(
         hypothesis="Learner requested an explanation in the current concept context.", diagnosis="UNCERTAINTY", confidence=0.55,
         pedagogicalGoal="BUILD_INTUITION", pedagogicalStrategy=ask_strategy, teachingAction=ask_action, targetConcept=objective.get("id", "concept"),
-        interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool=ask_action, arguments={"conceptId": objective.get("id", "concept")})],
+            interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool={"clarify_definition": "explain_concept"}.get(ask_action, ask_action), arguments={"conceptId": objective.get("id", "concept")})],
         expectedEvidence="The learner can restate the explanation or apply it in the next check.", transitionMessage="I’m adapting the explanation to your question.", rationale="Learner-initiated clarification in the active concept.",
         scenePlan=TutorScenePlan(blocks=[fallback_block], expectedEvidence=["The learner can connect the explanation to the source concept."] , completionCondition="The learner can explain the concept using the source-supported relationship."),
     )
@@ -483,7 +483,7 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
         existing = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.plan_fingerprint == fingerprint, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
         if existing: return _session_payload(existing)
     plan = build_learn_plan(payload, request.goal, request.familiarity); plan_data = plan.model_dump(by_alias=True)
-    session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, step_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
+    session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
     db.add(session); db.commit(); db.refresh(session)
     _ensure_session_runtime(db, session)
     db.commit()

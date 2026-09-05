@@ -18,7 +18,6 @@ class LearnSession(Base):
     familiarity: Mapped[str] = mapped_column(String(24))
     plan: Mapped[dict] = mapped_column(JSON)
     objective_index: Mapped[int] = mapped_column(Integer, default=0)
-    step_index: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(24), default="active")
     plan_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
