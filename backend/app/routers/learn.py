@@ -23,7 +23,7 @@ from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, LearningVisualState
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
-from app.services.learn_runtime import ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
+from app.services.learn_runtime import apply_scene_message, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -450,22 +450,14 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
-    ask_state["sceneInterruption"] = {"question": request.message[:240], "answer": answer[:900]}
+    ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
     ask_state["sceneRevision"] = int(ask_state.get("sceneRevision", 0)) + 1
     if visual_action and visual_action.get("stage") is not None:
         ask_state["visualStage"] = int(visual_action["stage"])
     if visual_action and visual_action.get("nodeId"):
         ask_state["visualHighlight"] = visual_action["nodeId"]
     session.state = ask_state
-    active_scene = load_current_scene(session)
-    if active_scene is not None:
-        blocks = list(active_scene.blocks)
-        blocks.append(LearningSceneBlock(id=_bounded_id("ask", session.id, request.message[:80]), kind="tutor_message", label="Ask Lucent", title="", content=answer[:900], sourceSectionIds=list(context.get("sourceSectionIds", []))[:8], sourceBlockIds=list(context.get("sourceBlockIds", []))[:12]))
-        visual_state = active_scene.visual_state
-        if visual_action:
-            visual_state = visual_state.model_copy(update={"stage": int(visual_action.get("stage", visual_state.stage)), "highlightedElementIds": [str(visual_action["nodeId"])] if visual_action.get("nodeId") else visual_state.highlighted_element_ids}) if visual_state else LearningVisualState(stage=int(visual_action.get("stage", 0)), highlightedElementIds=[str(visual_action["nodeId"])] if visual_action.get("nodeId") else [])
-        active_scene = active_scene.model_copy(update={"blocks": blocks[-8:], "visualState": visual_state.model_dump(by_alias=True) if visual_state else None})
-        persist_scene_revision(session, active_scene, (session.state or {}).get("currentScenePrivate"), event_id=f"ask-{session.id}", db=db)
+    apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, db=db)
     scene_response = _session_payload(session)
     db.commit()
     return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene, scene=scene_response.scene)

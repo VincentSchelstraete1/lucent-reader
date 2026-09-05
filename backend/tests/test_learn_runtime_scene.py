@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import process_tutor_event
+from app.services.learn_runtime import apply_scene_message, process_tutor_event
 
 
 def _session():
@@ -35,3 +35,12 @@ def test_runtime_ids_and_revisions_remain_bounded_across_replans():
     assert len(session.state["sceneHistory"]) <= 8
     assert len(session.state["currentScene"]["id"]) <= 60
     assert len(session.state["currentScenePrivate"]["decisionId"]) <= 60
+
+
+def test_ask_message_mutates_authoritative_scene_and_visual_state():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene = apply_scene_message(session, message="Show me visually", answer="Watch the conversion at the bottom.", source_section_ids=["s1"], visual_action={"stage": 2, "nodeId": "bottom"})
+    assert scene and scene.visual_state.stage == 2
+    assert any(block.label == "Ask Lucent" for block in scene.blocks)
+    assert session.state["currentScene"]["visualState"]["stage"] == 2
