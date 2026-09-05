@@ -12,6 +12,9 @@ EvaluationResult = Literal["correct", "partially_correct", "incorrect", "insuffi
 RemediationCategory = Literal["none", "simplify", "example", "prerequisite", "change_modality", "revisit"]
 ConceptStateName = Literal["NOT_SEEN", "INTRODUCED", "DEVELOPING", "DEMONSTRATED", "NEEDS_REVIEW", "STRUGGLING"]
 PedagogicalStrategy = Literal["DIRECT_INSTRUCTION", "SOCRATIC_PROBE", "CONCEPTUAL_EXPLANATION", "VISUAL_MODEL", "ANIMATED_MECHANISM", "WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "GUIDED_DISCOVERY", "ANALOGY", "CONTRAST_CASE", "EXAMPLE_NONEXAMPLE", "PREREQUISITE_REPAIR", "ERROR_CORRECTION", "RETRIEVAL_PRACTICE", "TRANSFER_PRACTICE", "DELAYED_RECHECK"]
+ScaffoldLevel = Literal["FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"]
+ReviewDue = Literal["LATER_THIS_SESSION", "NEXT_SESSION", "FUTURE_REVIEW"]
+ContentPolicy = Literal["CONCEPTUAL", "PROCESS", "QUANTITATIVE", "MEMORIZATION", "CS_SYSTEMS"]
 TutorActionType = Literal[
     "teach_concept", "clarify_definition", "give_example", "give_analogy",
     "ask_multiple_choice", "ask_free_response", "ask_prediction", "ask_ordering",
@@ -226,6 +229,8 @@ class LearningObjective(BaseModel):
     bottleneck: str = Field(min_length=1, max_length=300)
     source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds")
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
+    prerequisite_ids: list[str] = Field(default_factory=list, alias="prerequisiteIds", max_length=8)
+    content_policy: ContentPolicy | None = Field(default=None, alias="contentPolicy")
     steps: list[LearnStep] = Field(min_length=1, max_length=8)
 
 
@@ -273,8 +278,9 @@ class ConceptEvidence(BaseModel):
     explanation_evidence: int = Field(default=0, alias="explanationEvidence")
     application_evidence: int = Field(default=0, alias="applicationEvidence")
     transfer_evidence: int = Field(default=0, alias="transferEvidence")
-    scaffolding_level: int = Field(default=0, alias="scaffoldingLevel")
-    review_due: str | None = Field(default=None, alias="reviewDue")
+    scaffolding_level: int = Field(default=0, alias="scaffoldingLevel", ge=0, le=4)
+    scaffold: ScaffoldLevel = "FULL"
+    review_due: ReviewDue | None = Field(default=None, alias="reviewDue")
 
 
 class LearnEvaluation(BaseModel):

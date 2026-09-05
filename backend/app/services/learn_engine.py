@@ -154,6 +154,10 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A related but different idea."}, {"id": "c", "label": "A claim not supported by this material."}], answerId="a", feedbackIncorrect="Look for the defining relationship, not a nearby detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the definition above, then try the idea again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(FillBlankStep(id=f"{section.get('id', 'section')}-fill", type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} is the idea that ____.", acceptedAnswers=[answer], hints=["Recall the definition you just retrieved."], feedbackIncorrect="Recall the defining relationship from the note.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            # Keep a final unaided recall check after the fill-in interaction;
+            # recognition/partial completion must not be treated as durable
+            # recall evidence.
+            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall-final", type="short_answer", title="Recall it without a cue", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="State the defining relationship without the sentence frame.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         else:  # solve
             example = next((c for c in comps if c.get("kind") in {"worked_example", "equation"}), None)
             if example and _clean(example.get("result")):
@@ -230,7 +234,7 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
             correct = False
         return LearnEvaluation(result="correct" if correct else "incorrect", confidence=0.98 if correct else 0.85, evidence="Numeric result is within the accepted tolerance." if correct else "Numeric result is outside the accepted tolerance.", misconception=None if correct else "Check the operation and units before calculating again.", remediationCategory="none" if correct else "example")
     normalized = _words(answer)
-    accepted = any(_words(item) <= normalized or _clean(item).casefold() == answer.casefold() for item in getattr(step, "accepted_answers", []))
+    accepted = any((bool(_words(item)) and _words(item) <= normalized) or _clean(item).casefold() == answer.casefold() for item in getattr(step, "accepted_answers", []))
     required = set(getattr(step, "required_concepts", []))
     if accepted or (bool(required) and required <= normalized):
         result = "correct"

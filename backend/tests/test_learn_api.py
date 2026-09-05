@@ -1,5 +1,7 @@
 import json
 
+from app.services.learn_tutor import set_tutor_provider
+
 
 def _document_with_note(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/learn"}).json()
@@ -44,3 +46,21 @@ def test_learn_session_is_owned_and_resumable(client):
     active = client.get(f"/documents/{document['id']}/learn-sessions/active")
     assert active.status_code == 200
     assert active.json()["id"] == first["id"]
+
+
+def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+
+    def fake_provider(_prompt, tool_name, _schema, **_kwargs):
+        assert tool_name == "ask_lucent"
+        return {"answer": "The saved material identifies the core idea.", "toolCalls": [{"tool": "request_explanation", "arguments": {}}], "sourceSectionIds": ["s1"], "sourceBlockIds": ["b1"]}
+
+    set_tutor_provider(fake_provider)
+    try:
+        response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Why does this idea matter?"})
+        assert response.status_code == 200
+        assert response.json()["answer"].startswith("The saved material")
+        assert response.json()["scope"] != "OUT_OF_SCOPE"
+    finally:
+        set_tutor_provider(None)

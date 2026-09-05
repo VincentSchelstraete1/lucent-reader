@@ -1,8 +1,9 @@
 from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec
-from app.schemas.learn import MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep
+from app.services.learn_tutor import ask_lucent_model, diagnose_response, set_tutor_provider
+from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
-from app.routers.learn import _ask_scope
+from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event
 
 
 def _note():
@@ -112,3 +113,86 @@ def test_ask_lucent_scope_and_tool_validation_are_bounded():
     except ValueError:
         return
     raise AssertionError("unknown Ask Lucent tools must be rejected")
+
+
+class _NestedProbe:
+    """Small fake reproducing a missing telemetry table without PostgreSQL."""
+    def __init__(self, failure):
+        self.failure = failure
+        self.savepoint_rolled_back = False
+
+    class _Context:
+        def __init__(self, owner): self.owner = owner
+        def __enter__(self): return self
+        def __exit__(self, exc_type, exc, tb):
+            if exc_type is not None:
+                self.owner.savepoint_rolled_back = True
+            return False
+
+    def begin_nested(self): return self._Context(self)
+    def execute(self, _statement): raise self.failure
+    def add(self, _record): pass
+    def flush(self): raise self.failure
+
+
+class _RecoveringNestedProbe(_NestedProbe):
+    def __init__(self, failure):
+        super().__init__(failure)
+        self.calls = 0
+
+    class _Result:
+        def scalars(self): return self
+        def all(self): return []
+
+    def execute(self, _statement):
+        self.calls += 1
+        if self.calls == 1:
+            raise self.failure
+        return self._Result()
+
+
+def test_ask_rate_db_failure_isolated_before_note_query():
+    db = _NestedProbe(RuntimeError("relation learn_tutor_events does not exist"))
+    assert _ask_rate_allowed(db, "user-1", "session-1") is True
+    assert db.savepoint_rolled_back is True
+
+
+def test_ask_rate_missing_table_does_not_abort_following_note_query():
+    db = _RecoveringNestedProbe(RuntimeError("relation learn_tutor_events does not exist"))
+    assert _ask_rate_allowed(db, "user-1", "session-1") is True
+    # This stands in for _latest_note's SELECT: after the swallowed telemetry
+    # failure, the same SQLAlchemy Session remains usable.
+    assert db.execute(object()).all() == []
+    assert db.savepoint_rolled_back is True
+
+
+def test_tutor_telemetry_write_failure_does_not_poison_request_transaction():
+    db = _NestedProbe(RuntimeError("relation learn_tutor_events does not exist"))
+    _record_tutor_event(db, user_id="u", session_id="s", document_id=1, event_type="ask_request", metadata={})
+    assert db.savepoint_rolled_back is True
+
+
+def test_model_backed_ask_lucent_fake_provider_is_bounded_and_validated():
+    calls = []
+    def fake_provider(prompt, name, schema, **kwargs):
+        calls.append((prompt, name, schema, kwargs))
+        return {"answer": "Speed is greatest at the bottom.", "toolCalls": [{"tool": "change_visual_stage", "arguments": {"stage": 2}}], "sourceSectionIds": ["s1"], "sourceBlockIds": ["b1"]}
+    set_tutor_provider(fake_provider)
+    try:
+        result = ask_lucent_model(question="Why is speed greatest here?", context={"state": "bounded", "concept": "Pendulum", "source": "source content"})
+        assert result is not None and result.tool_calls[0].tool == "change_visual_stage"
+        assert calls and "source content" in calls[0][0] and len(calls[0][0]) < 9000
+    finally:
+        set_tutor_provider(None)
+
+
+def test_model_backed_diagnosis_fake_provider_returns_specific_evidence():
+    def fake_provider(*_args, **_kwargs):
+        return {"result": "incorrect", "confidence": 0.91, "misconception": "Learner reverses the direction of the gradient.", "evidence": "The response states movement from low to high concentration.", "remediationCategory": "change_modality"}
+    set_tutor_provider(fake_provider)
+    try:
+        fallback = LearnEvaluation(result="incorrect", confidence=0.5, evidence="fallback", remediationCategory="simplify")
+        result = diagnose_response(prompt="Which way?", expected="high to low", response="low to high", source_context="gradient", fallback=fallback)
+        assert result.misconception and result.confidence > 0.9
+    finally:
+        set_tutor_provider(None)
