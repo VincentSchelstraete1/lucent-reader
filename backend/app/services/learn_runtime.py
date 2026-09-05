@@ -253,6 +253,25 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if evaluation.misconception and evaluation.misconception not in concept.setdefault("misconceptions", []): concept["misconceptions"].append(evaluation.misconception)
         else:
             concept["insufficientEvidence"] = int(concept.get("insufficientEvidence", 0)) + 1
+        # Lightweight, interpretable review scheduling.  Immediate supported
+        # success is revisited later; independent/transfer evidence earns a
+        # future review instead of being treated as permanent mastery.
+        if evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
+            concept["reviewDue"] = "LATER_THIS_SESSION"
+            queue = list(state.get("revisitQueue") or [])
+            if concept_id not in queue:
+                queue.append(concept_id)
+            state["revisitQueue"] = queue[:12]
+        elif evaluation.result == "correct":
+            hints_used = int((state.get("hints") or {}).get(current.id, 0))
+            if hints_used:
+                concept["reviewDue"] = "NEXT_SESSION"
+            elif concept.get("state") == "DEMONSTRATED":
+                concept["reviewDue"] = "FUTURE_REVIEW"
+            else:
+                concept["reviewDue"] = "NEXT_SESSION"
+            if concept.get("state") == "DEMONSTRATED":
+                state["revisitQueue"] = [cid for cid in state.get("revisitQueue", []) if cid != concept_id]
         concept["interactionTypes"] = list(dict.fromkeys(list(concept.get("interactionTypes", [])) + [current.type]))
         existing_concepts = list(state.get("concepts", []))
         if any(item.get("conceptId") == concept_id for item in existing_concepts):
@@ -296,5 +315,5 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
     private_next = None if next_step.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=rendered.id, revision=rendered.revision, interaction=next_step.model_dump(by_alias=True), objectiveId=concept_id, targetConceptIds=[concept_id], strategy=decision.pedagogical_strategy, scaffoldLevel=decision.scaffold_level, decisionId=bounded_id("decision", session.id, rendered.id)).model_dump(by_alias=True)
-    persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
+    rendered = persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
     return rendered, private_next
