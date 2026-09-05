@@ -313,6 +313,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     concept_id = str(objective.get("id"))
     concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == concept_id), {"conceptId": concept_id, "title": objective.get("title", "Concept"), "state": "INTRODUCED"})
     if event_type == "RESPONSE" and current is not None:
+        from app.services.adaptive_policy import next_scaffold, prerequisite_ids, review_due
         evaluation = evaluate_step(current, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
         if response_text and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
             expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
@@ -320,6 +321,14 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         now = datetime.now(timezone.utc).isoformat()
         concept = dict(concept)
         concept.update({"attempts": int(concept.get("attempts", 0)) + 1, "lastSeen": now, "lastResult": evaluation.result})
+        hints_used = int((state.get("hints") or {}).get(current.id, 0))
+        independent = hints_used == 0 and concept.get("scaffold", "FULL") in {"INDEPENDENT", "TRANSFER"}
+        transfer = current.type in {"problem", "teach_back", "prediction", "numeric"} and independent and evaluation.result == "correct"
+        concept["scaffold"] = next_scaffold(concept.get("scaffold"), evaluation.result, hints_used, independent=independent)
+        concept["scaffoldingLevel"] = concept["scaffold"]
+        concept["hintDependence"] = int(concept.get("hintDependence", 0)) + (1 if hints_used else 0)
+        concept["scaffoldDependence"] = int(concept.get("scaffoldDependence", 0)) + (1 if not independent else 0)
+        concept["reviewDue"] = review_due(evaluation.result, hints=hints_used, scaffold=concept["scaffold"], transfer=transfer, delayed=bool(state.get("revisitMode")))
         if evaluation.result == "correct":
             concept["correct"] = int(concept.get("correct", 0)) + 1
             concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 else "DEMONSTRATED"
@@ -340,7 +349,6 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 queue.append(concept_id)
             state["revisitQueue"] = queue[:12]
         elif evaluation.result == "correct":
-            hints_used = int((state.get("hints") or {}).get(current.id, 0))
             if hints_used:
                 concept["reviewDue"] = "NEXT_SESSION"
             elif concept.get("state") == "DEMONSTRATED":
@@ -363,6 +371,31 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         state["answeredInteractionIds"] = answered[-32:]
         if db is not None:
             db.add(LearnAttempt(session_id=session.id, objective_id=concept_id, step_id=current.id, step_type=current.type, response=str(response_text or option_id or ",".join(ordered_ids or [])), result=evaluation.result, attempt_number=int(concept.get("attempts", 1)), hints_used=0, evaluation=evaluation.model_dump(by_alias=True)))
+
+    # A bounded prerequisite branch is an agent-proposed transition, validated
+    # against the objective graph before any scene is composed.  The branch is
+    # only taken when the prerequisite is actually weak; demonstrated
+    # prerequisites never interrupt the current concept.
+    if evaluation and evaluation.result in {"incorrect", "partially_correct"} and not (state.get("branchStack") or []):
+        from app.services.adaptive_policy import prerequisite_ids
+        weak_ids = prerequisite_ids(objective, state.get("concepts", []))
+        prerequisite_id = next((cid for cid in weak_ids if cid != concept_id), None)
+        if prerequisite_id:
+            branch = push_prerequisite_branch(session, original_concept_id=concept_id, prerequisite_concept_id=prerequisite_id, reason=evaluation.misconception or "A prerequisite needs a quick check first.", return_scene_id=scene.id)
+            state = _state(session)
+            prerequisite = _objective(session.plan or {}, prerequisite_id)
+            if branch and prerequisite:
+                prereq_steps = list(prerequisite.get("steps") or [])
+                prereq_candidates = [adapter.validate_python(raw) for raw in prereq_steps if isinstance(raw, dict)]
+                prereq_next = next((item for item in prereq_candidates if item.type in {"teach", "walkthrough"}), None) or next((item for item in prereq_candidates if item.id not in set(state.get("answeredInteractionIds") or [])), None)
+                if prereq_next:
+                    prereq_concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == prerequisite_id), {"conceptId": prerequisite_id, "state": "NOT_SEEN", "scaffold": "FULL"})
+                    prereq_action = TutorAction(id=bounded_id("action", prerequisite_id, prereq_next.id, "prerequisite"), type="teach_concept" if prereq_next.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=prerequisite_id, stepId=prereq_next.id, rationale="Repair a prerequisite before returning to the current concept.")
+                    prereq_decision = TutorDecision(targetConcept=prerequisite_id, teachingAction=prereq_action.type, pedagogicalGoal="REPAIR_PREREQUISITE", pedagogicalStrategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_concept.get("scaffold", "FULL"), nextStepId=prereq_next.id, transitionMessage="Let's make sure the supporting idea is clear first.")
+                    session.state = state
+                    rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, step_index=0, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.evidence, feedback_kind="info", evaluation=evaluation)
+                    private_next = None if prereq_next.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=rendered.id, revision=rendered.revision, interaction=prereq_next.model_dump(by_alias=True), objectiveId=prerequisite_id, targetConceptIds=[prerequisite_id], strategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_decision.scaffold_level, decisionId=bounded_id("decision", session.id, rendered.id)).model_dump(by_alias=True)
+                    return persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), private_next
 
     candidates = []
     for raw in steps:
