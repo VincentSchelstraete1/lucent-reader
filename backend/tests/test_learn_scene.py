@@ -1,4 +1,4 @@
-from app.schemas.learn import MultipleChoiceStep, TutorAction, TutorDecision, TutorScenePlan
+from app.schemas.learn import MultipleChoiceStep, TeachStep, TutorAction, TutorDecision, TutorScenePlan
 from app.services.learn_scene import compose_learning_scene
 
 
@@ -63,3 +63,19 @@ def test_scene_plan_keeps_ask_lucent_example_on_same_teaching_surface():
     assert any(block.kind == "example" for block in scene.blocks)
     assert any(block.kind == "practice" for block in scene.blocks)
     assert scene.source_section_ids == ["section-energy"]
+
+
+def test_teaching_scene_reuses_next_grounded_visual_before_practice():
+    visual = {
+        "type": "process_flow", "title": "Energy conversion", "purpose": "See energy move as the pendulum falls",
+        "nodes": [{"id": "high", "label": "High point", "detail": "Potential energy is greatest."}, {"id": "low", "label": "Bottom", "detail": "Kinetic energy is greatest."}],
+        "edges": [{"source": "high", "target": "low", "label": "falls"}],
+        "stages": [{"title": "Fall", "explanation": "Potential energy becomes kinetic energy.", "activeNodeIds": ["high", "low"]}],
+    }
+    teach = {"id": "teach", "type": "teach", "title": "Energy changes", "content": "Potential energy becomes kinetic energy as the pendulum falls.", "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}
+    visual_step = {"id": "visual", "type": "teach", "title": "Energy diagram", "content": "The diagram tracks the conversion.", "visualSpec": visual, "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}
+    objective = {"id": "o", "title": "Pendulum energy", "outcome": "Explain energy conversion", "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}
+    current = TeachStep.model_validate(teach)
+    scene = compose_learning_scene(session_id="s", objective=objective, steps=[teach, visual_step], step_index=0, current_step=current, action=None, decision=None, concept={"scaffold": "FULL"}, state={})
+    assert [block.kind for block in scene.blocks] == ["explanation", "visual"]
+    assert scene.blocks[1].visual_spec is not None

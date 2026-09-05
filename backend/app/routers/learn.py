@@ -99,7 +99,6 @@ def _safe_step(objective: dict, raw: dict):
     source_text = " ".join(str(value) for value in (
         objective.get("title", ""), objective.get("outcome", ""),
         objective.get("bottleneck", ""), getattr(parsed, "content", ""),
-        getattr(parsed, "prompt", ""),
     ) if value)
     if not student_facing_quality_issues(parsed, source_text):
         return parsed
@@ -241,6 +240,9 @@ def _completion_met(session: LearnSession) -> bool:
 
 def _session_payload(session: LearnSession, feedback: str | None = None, feedback_kind: str | None = None, evaluation: LearnEvaluation | None = None) -> LearnSessionResponse:
     plan = session.plan or {}; objectives = plan.get("objectives", []); state = session.state or {}; current = None; objective_title = None; action = None; scene = None
+    if state.get("lastFeedback") and any(phrase in str(state["lastFeedback"]).casefold() for phrase in ("does not itself demonstrate recall", "source-grounded relationship", "teaching point", "mutation_type")):
+        state = dict(state)
+        state["lastFeedback"] = "Let's connect this response to the evidence for the current concept."
     if session.status == "active" and session.objective_index < len(objectives):
         objective = objectives[session.objective_index]; objective_title = objective.get("title"); steps = objective.get("steps", [])
         if session.step_index < len(steps):
@@ -268,9 +270,12 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
                     feedback_kind=feedback_kind or state.get("lastFeedbackKind"),
                     evaluation=evaluation,
                 )
+    persisted_feedback = feedback or state.get("lastFeedback")
+    if persisted_feedback and any(phrase in str(persisted_feedback).casefold() for phrase in ("does not itself demonstrate recall", "source-grounded relationship", "teaching point", "mutation_type")):
+        persisted_feedback = f"Let's connect this response to the evidence for {objective_title or 'the current concept'}."
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
     report = LearnSessionReport.model_validate(session.report) if session.report else None
-    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=feedback or state.get("lastFeedback"), feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
+    return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=persisted_feedback, feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
 
 
 def _persist_scene(session: LearnSession, scene: object | None) -> None:
