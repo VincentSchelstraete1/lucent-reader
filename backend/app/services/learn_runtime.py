@@ -305,6 +305,13 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         return None
     blocks = list(scene.blocks)
     block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+    # Repeated interruptions should refine one teaching block, not stack
+    # visually identical paragraphs in the active scene.
+    duplicate = next((index for index, existing in enumerate(blocks) if existing.kind == block_kind and existing.content == block.content), None)
+    if duplicate is not None:
+        blocks[duplicate] = block
+    else:
+        blocks.append(block)
     visual_state = scene.visual_state
     if visual_action:
         # Ask Lucent may introduce a grounded visual when the active scene has
@@ -322,7 +329,7 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         if visual_action.get("nodeId"):
             updates["highlightedElementIds"] = [str(visual_action["nodeId"])]
         visual_state = visual_state.model_copy(update=updates) if visual_state else LearningVisualState(**updates)
-    scene = scene.model_copy(update={"blocks": (blocks + [block])[-8:], "visual_state": visual_state})
+    scene = scene.model_copy(update={"blocks": blocks[-8:], "visual_state": visual_state})
     return persist_scene_revision(session, scene, _state(session).get("currentScenePrivate"), event_id=bounded_id("ask-event", session.id, message[:80]), db=db)
 
 
