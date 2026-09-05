@@ -54,6 +54,20 @@ def test_runtime_ids_and_revisions_remain_bounded_across_replans():
         assert len(session.state["currentScenePrivate"]["decisionId"]) <= 60
 
 
+def test_candidate_exhaustion_generates_bounded_grounded_followup_without_plan_mutation():
+    session = _session()
+    original_steps = list(session.plan["objectives"][0]["steps"])
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "a"}})
+    process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    # The authored plan remains immutable while an in-memory follow-up is
+    # exposed as the next practice surface.
+    assert session.plan["objectives"][0]["steps"] == original_steps
+    private = session.state["currentScenePrivate"]
+    assert private and private["interaction"]["id"].startswith("followup-")
+    assert len(private["interaction"]["id"]) <= 60
+
+
 def test_ask_message_mutates_authoritative_scene_and_visual_state():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

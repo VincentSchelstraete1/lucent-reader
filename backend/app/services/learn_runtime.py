@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -424,13 +424,44 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         teaching = next((item for item in candidates if item.type in {"teach", "walkthrough"}), None)
         next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in set(state.get("answeredInteractionIds") or [])), current)
     else:
-        next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in set(state.get("answeredInteractionIds") or []) and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"} and item.id not in set(state.get("answeredInteractionIds") or [])), None)
+        answered_ids = set(state.get("answeredInteractionIds") or [])
+        used_teaching = set(state.get("usedTeachingIds") or [])
+        next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in answered_ids and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"} and item.id not in answered_ids and item.id not in used_teaching), None)
     if next_step is None:
         if evaluation is not None and evaluation.result == "correct":
             completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
             completed_scene = persist_scene_revision(session, completed_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
             return completed_scene, None
-        return scene, private
+        # Candidate assets are finite, but the tutor runtime is not.  Compose
+        # one bounded, source-grounded follow-up in memory rather than
+        # appending a repair step to LearnPlan.  Its stable ID is derived from
+        # the concept and attempt count, so repeated replans never create
+        # recursive IDs or mutate the authored plan.
+        attempt_no = int(concept.get("attempts", 0)) + 1
+        if attempt_no > 3:
+            concept["state"] = "NEEDS_REVIEW"
+            concept["reviewDue"] = "NEXT_SESSION"
+            state["revisitQueue"] = list(dict.fromkeys([*state.get("revisitQueue", []), concept_id]))[:12]
+            state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
+            session.state = state
+            review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
+            return persist_scene_revision(session, review_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), None
+        outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+        generated_id = bounded_id("followup", concept_id, attempt_no)
+        generated = ShortAnswerStep(
+            id=generated_id,
+            type="short_answer",
+            title=f"Apply {objective.get('title', 'this idea')}",
+            prompt=f"In your own words, explain the main idea of {objective.get('title', 'this concept')}.",
+            acceptedAnswers=[outcome],
+            requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5],
+            hints=[f"Use this source-supported idea: {outcome[:220]}"],
+            feedbackIncorrect=f"Start with this source-supported idea: {outcome[:260]}",
+            sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+            sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+        )
+        candidates.append(generated)
+        next_step = generated
     fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale="Continue with the next grounded learning move.")
     fallback = TutorDecision(targetConcept=concept_id, teachingAction=fallback_action.type, pedagogicalGoal="BUILD_INTUITION" if not evaluation or evaluation.result != "correct" else "VERIFY_UNDERSTANDING", pedagogicalStrategy="CONCEPTUAL_EXPLANATION" if next_step.type in {"teach", "walkthrough"} else "RETRIEVAL_PRACTICE", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=next_step.id, actions=[])
     observation = build_tutor_observation(session, event=event, source_blocks=source_blocks)
@@ -444,6 +475,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if selected is not None:
         next_step = selected
         fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale=decision.rationale or "Continue with the grounded concept.")
+    if next_step.type in {"teach", "walkthrough"}:
+        state["usedTeachingIds"] = list(dict.fromkeys([*(state.get("usedTeachingIds") or []), next_step.id]))[-16:]
     feedback = None
     if evaluation is not None:
         feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or "Good — that matches the material."
