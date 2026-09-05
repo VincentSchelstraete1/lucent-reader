@@ -23,6 +23,7 @@ from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan
 from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_scene import compose_learning_scene
+from app.services.learn_runtime import ensure_runtime_state, load_current_scene, persist_scene_revision
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
@@ -243,7 +244,13 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
     if state.get("lastFeedback") and any(phrase in str(state["lastFeedback"]).casefold() for phrase in ("does not itself demonstrate recall", "source-grounded relationship", "teaching point", "mutation_type")):
         state = dict(state)
         state["lastFeedback"] = "Let's connect this response to the evidence for the current concept."
-    if session.status == "active" and session.objective_index < len(objectives):
+    persisted_scene = load_current_scene(session) if session.status == "active" else None
+    if persisted_scene is not None:
+        scene = persisted_scene
+        objective_title = scene.objective
+        practice_block = next((block for block in scene.blocks if block.kind == "practice" and block.step), None)
+        current = practice_block.step if practice_block else None
+    elif session.status == "active" and session.objective_index < len(objectives):
         objective = objectives[session.objective_index]; objective_title = objective.get("title"); steps = objective.get("steps", [])
         if session.step_index < len(steps):
             parsed = _safe_step(objective, steps[session.step_index])
@@ -276,6 +283,16 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
     report = LearnSessionReport.model_validate(session.report) if session.report else None
     return LearnSessionResponse(id=str(session.id), documentId=session.document_id, goal=session.goal, familiarity=session.familiarity, status=session.status, objectiveIndex=session.objective_index, stepIndex=session.step_index, objectiveCount=len(objectives), objectiveTitle=objective_title, step=current, feedback=persisted_feedback, feedbackKind=feedback_kind or state.get("lastFeedbackKind"), hintsUsed=int((state.get("hints") or {}).get(current.id, 0)) if current else 0, completedObjectives=sum(1 for c in concepts if c.state == "DEMONSTRATED"), weakObjectives=[c.concept_id for c in concepts if c.state in {"NEEDS_REVIEW", "STRUGGLING"}], action=action, evaluation=evaluation, conceptStates=concepts, report=report, endedReason=session.ended_reason, scene=scene)
+
+
+def _ensure_session_runtime(db, session: LearnSession) -> None:
+    """Normalize legacy state once, then leave GET serialization read-only."""
+    before = json.dumps(session.state or {}, sort_keys=True, default=str)
+    ensure_runtime_state(session, db=db)
+    after = json.dumps(session.state or {}, sort_keys=True, default=str)
+    if after != before:
+        db.commit()
+        db.refresh(session)
 
 
 def _persist_scene(session: LearnSession, scene: object | None) -> None:
@@ -467,17 +484,22 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     plan = build_learn_plan(payload, request.goal, request.familiarity); plan_data = plan.model_dump(by_alias=True)
     session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, step_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
     db.add(session); db.commit(); db.refresh(session)
-    initial = _session_payload(session)
-    _persist_scene(session, initial.scene)
+    _ensure_session_runtime(db, session)
     db.commit()
     return _session_payload(session)
 
 @router.get("/learn-sessions/{session_id}", response_model=LearnSessionResponse)
-def get_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)): return _session_payload(_get_owned_session(db, session_id, user))
+def get_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
+    session = _get_owned_session(db, session_id, user)
+    _ensure_session_runtime(db, session)
+    return _session_payload(session)
 
 @router.get("/documents/{document_id}/learn-sessions/active", response_model=LearnSessionResponse | None)
 def get_active_learn_session(document_id: int, db=Depends(get_db), user: User = Depends(get_current_user)):
-    _owned_document(db, document_id, user); session = db.execute(select(LearnSession).where(LearnSession.document_id == document_id, LearnSession.user_id == user.id, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first(); return _session_payload(session) if session else None
+    _owned_document(db, document_id, user); session = db.execute(select(LearnSession).where(LearnSession.document_id == document_id, LearnSession.user_id == user.id, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
+    if session:
+        _ensure_session_runtime(db, session)
+    return _session_payload(session) if session else None
 
 @router.post("/learn-sessions/{session_id}/hints", response_model=LearnHintResponse, dependencies=[Depends(require_csrf)])
 def get_learn_hint(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
