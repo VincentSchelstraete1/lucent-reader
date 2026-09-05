@@ -112,13 +112,15 @@ def compose_learning_scene(
             support = next((item for item in (_parse(raw) for raw in steps) if item and item.type in {"teach", "walkthrough"} and not student_facing_quality_issues(item, source_text)), None)
 
     if feedback:
-        result_label = "What Lucent noticed" if feedback_kind == "incorrect" else "Feedback"
+        result_label = "Feedback"
         specific = evaluation.misconception if evaluation and evaluation.misconception else feedback
         add(kind="feedback", label=result_label, title=None, content=specific, step=None, visual_spec=None, visual_ref=None)
 
     transition = decision.transition_message if decision else None
+    if transition and any(phrase in transition.casefold() for phrase in ("using your response", "changing the approach", "choose the next", "evidence")):
+        transition = "Let's try this idea from a different angle."
     if transition and feedback and not learner_text_quality_issues(transition, source_text):
-        add(kind="tutor_message", label="Next move", content=transition, step=None, visual_spec=None, visual_ref=None)
+        add(kind="tutor_message", label="Try this", content=transition, step=None, visual_spec=None, visual_ref=None)
 
     planned_practice = False
     if decision and decision.scene_plan:

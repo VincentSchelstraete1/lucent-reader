@@ -1,7 +1,10 @@
 import json
 import re
+from types import SimpleNamespace
 
 from app.services.learn_tutor import set_tutor_provider
+from app.routers.learn import _append_remediation
+from app.schemas.learn import MultipleChoiceStep
 
 
 def _document_with_note(client):
@@ -15,6 +18,18 @@ def _document_with_note(client):
         }]}),
     })
     return document
+
+
+def test_remediation_path_preserves_source_context_without_name_error():
+    failed = MultipleChoiceStep(
+        id="check-energy", type="multiple_choice", title="Energy conversion",
+        prompt="Where is speed greatest?", options=[{"id": "a", "label": "At the bottom"}, {"id": "b", "label": "At the top"}], answerId="a",
+        sourceSectionIds=["s1"], sourceBlockIds=["b1"],
+    )
+    session = SimpleNamespace(plan={"objectives": [{"id": "energy", "title": "Pendulum energy", "outcome": "Potential energy becomes kinetic energy as the pendulum falls.", "bottleneck": "Connect speed to kinetic energy.", "steps": []}]})
+    index = _append_remediation(session, {"id": "energy", "title": "Pendulum energy", "outcome": "Potential energy becomes kinetic energy as the pendulum falls.", "bottleneck": "Connect speed to kinetic energy."}, failed)
+    assert index == 0
+    assert session.plan["objectives"][0]["steps"][0]["sourceBlockIds"] == ["b1"]
 
 
 def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):

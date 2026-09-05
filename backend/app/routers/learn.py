@@ -558,6 +558,13 @@ def _append_remediation(session: LearnSession, objective: dict, failed_step) -> 
             repair = MultipleChoiceStep(id=repair_id, type="multiple_choice", title="Apply the distinction", prompt=f"A new case shows {scenario.lower()}. Which source concept does that case resemble?", options=options, answerId=answer_id, feedbackIncorrect=f"Compare the case with the two source mechanisms: {options[0]['label']} versus {options[1]['label']}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     answer = next((str(item).strip() for item in accepted if str(item).strip()), "")
     title = objective.get("title", "this concept")
+    source_text = " ".join(str(value) for value in (
+        objective.get("title", ""), objective.get("outcome", ""),
+        objective.get("bottleneck", ""), getattr(failed_step, "content", ""),
+        getattr(failed_step, "feedback_correct", ""), getattr(failed_step, "feedback_incorrect", ""),
+        *[getattr(item, "label", "") for item in getattr(failed_step, "options", [])],
+        *[getattr(item, "label", "") for item in getattr(failed_step, "items", [])],
+    ) if value)
     if failed_step.type == "matching" and 'repair' in locals():
         pass
     elif failed_step.type in {"multiple_choice", "prediction", "ordering", "matching", "labeling"} and answer:
