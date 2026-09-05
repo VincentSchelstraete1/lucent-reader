@@ -1,4 +1,5 @@
 import json
+import re
 
 from app.services.learn_tutor import set_tutor_provider
 
@@ -75,7 +76,10 @@ def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
     def fake_provider(_prompt, tool_name, _schema, **_kwargs):
         calls.append(tool_name)
         if tool_name == "learn_tutor_decision":
-            return {"hypothesis": "The learner needs a source-specific recheck.", "diagnosis": "KNOWLEDGE_GAP", "confidence": 0.8, "pedagogicalGoal": "BUILD_INTUITION", "pedagogicalStrategy": "CONCRETE_EXAMPLE", "teachingAction": "give_example", "targetConcept": "objective-s1", "interactionType": "short_answer", "scaffoldLevel": "GUIDED", "visualAction": None, "prerequisiteBranch": None, "actions": [{"tool": "give_example", "arguments": {}}], "expectedEvidence": "The learner states the material's actual idea.", "transitionMessage": "Let’s use a concrete source example.", "nextStepId": "s1-apply-repair-2", "rationale": "A bounded alternate check is the safest next intervention."}
+            concept = re.search(r"objectiveId['\"]?:\s*['\"]([^'\"]+)", _prompt).group(1)
+            candidates = re.findall(r"\{'id': '([^']+)'", _prompt)
+            repair = next(candidate for candidate in candidates if candidate.startswith("repair-"))
+            return {"hypothesis": "The learner needs a source-specific recheck.", "diagnosis": "KNOWLEDGE_GAP", "confidence": 0.8, "pedagogicalGoal": "BUILD_INTUITION", "pedagogicalStrategy": "CONCRETE_EXAMPLE", "teachingAction": "give_example", "targetConcept": concept, "interactionType": "short_answer", "scaffoldLevel": "GUIDED", "visualAction": None, "prerequisiteBranch": None, "actions": [{"tool": "give_example", "arguments": {}}], "expectedEvidence": "The learner states the material's actual idea.", "transitionMessage": "Let’s use a concrete source example.", "nextStepId": repair, "rationale": "A bounded alternate check is the safest next intervention."}
         raise AssertionError(f"unexpected provider call: {tool_name}")
 
     set_tutor_provider(fake_provider)
@@ -84,7 +88,8 @@ def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
         assert response.status_code == 200
         payload = response.json()
         assert "learn_tutor_decision" in calls
-        assert payload["step"]["id"] == "s1-apply-repair-2"
+        assert payload["step"]["id"].startswith("repair-")
+        assert len(payload["step"]["id"]) <= 60
         assert payload["action"]["type"] == "give_example"
     finally:
         set_tutor_provider(None)

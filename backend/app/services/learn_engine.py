@@ -19,6 +19,12 @@ def _words(value: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if len(word) > 2}
 
 
+def _bounded_plan_id(prefix: str, *parts: object) -> str:
+    """Build stable Learn plan IDs without copying arbitrary source IDs."""
+    digest = hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()[:14]
+    return f"{prefix}-{digest}"
+
+
 def _components(section: dict) -> list[dict]:
     return [item for item in section.get("components", []) if isinstance(item, dict)]
 
@@ -83,6 +89,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
     objectives: list[LearningObjective] = []
     for section in sections[:4]:
         section_ids, block_ids = _source_ids(section)
+        section_identity = str(section.get("id", len(objectives)))
         title = _clean(section.get("title")) or "Core concept"
         big_idea = _clean(section.get("bigIdea")) or title
         takeaways = [_clean(item) for item in section.get("keyTakeaways", []) if _clean(item)]
@@ -103,7 +110,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         steps: list[LearnStep] = []
 
         if goal in {"understand", "exam"}:
-            refresher = TeachStep(id=f"{section.get('id', 'section')}-teach", type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
+            refresher = TeachStep(id=_bounded_plan_id("teach", section_identity), type="teach", title="Quick refresher" if familiarity == "reviewing" else "Build the mental model", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
             visual_candidate = next((c for c in comps if c.get("kind") in {"flow", "structure", "relationship_map", "comparison"}), None)
             if visual_candidate:
                 refresher.visual_spec = synthesize_visual_spec(visual_candidate, title, section_ids, block_ids)
@@ -115,23 +122,23 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 matches = {pair["id"]: _clean(next((item.get("values", {}).get(dimension) for item in comparison.get("items", []) if str(item.get("id")) == pair["id"]), "")) for pair in pairs}
                 values = [value for value in dict.fromkeys(matches.values()) if value]
                 if len(pairs) >= 2 and len(values) >= 2:
-                    steps.append(MatchingStep(id=f"{section.get('id', 'section')}-match", type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", f"Look at how {title} changes in each case."], feedbackIncorrect=f"Compare the {dimension} for each {title} pathway."))
+                    steps.append(MatchingStep(id=_bounded_plan_id("match", section_identity), type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", f"Look at how {title} changes in each case."], feedbackIncorrect=f"Compare the {dimension} for each {title} pathway."))
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
-                steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(WalkthroughStep(id=_bounded_plan_id("visual", section_identity), type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             elif any(c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2 for c in comps):
                 flow = next(c for c in comps if c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2)
                 node_ids = [str(node.get("id")) for node in flow.get("nodes", []) if node.get("id")]
                 options = [{"id": node_id, "label": _clean(next((node.get("label") for node in flow.get("nodes", []) if str(node.get("id")) == node_id), node_id))} for node_id in node_ids]
-                steps.append(OrderingStep(id=f"{section.get('id', 'section')}-order", type="ordering", title="Put the process in order", prompt=f"What is the sequence for {title}?", items=options[:8], correctOrder=node_ids[:8], feedbackIncorrect="Follow the transition from one step to the next in the process.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(OrderingStep(id=_bounded_plan_id("order", section_identity), type="ordering", title="Put the process in order", prompt=f"What is the sequence for {title}?", items=options[:8], correctOrder=node_ids[:8], feedbackIncorrect="Follow the transition from one step to the next in the process.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 if goal == "understand" and len(options) >= 3:
-                    steps.append(PredictionStep(id=f"{section.get('id', 'section')}-predict", type="prediction", title="Predict the next transition", prompt=f"What happens immediately after {_clean(options[0]['label'])}?", options=options[1:4], answerId=options[1]["id"], reveal=f"The process continues with {_clean(options[1]['label'])}, which sets up the next transition.", feedbackIncorrect="Trace the direction of the process from the first step.", hints=["Look at the first outgoing transition.", "Ask what state must be established next."], sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                    steps.append(PredictionStep(id=_bounded_plan_id("predict", section_identity), type="prediction", title="Predict the next transition", prompt=f"What happens immediately after {_clean(options[0]['label'])}?", options=options[1:4], answerId=options[1]["id"], reveal=f"The process continues with {_clean(options[1]['label'])}, which sets up the next transition.", feedbackIncorrect="Trace the direction of the process from the first step.", hints=["Look at the first outgoing transition.", "Ask what state must be established next."], sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             elif goal == "understand" and any(c.get("kind") == "key_definition" for c in comps):
                 definition = next(c for c in comps if c.get("kind") == "key_definition")
                 answer = _clean(definition.get("definition")) or big_idea
                 term = _clean(definition.get('term')) or title
-                steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-free", type="short_answer", title="Say it in your own words", prompt=f"What does {term} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"Include what {term} is and what it does.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(TeachBackStep(id=f"{section.get('id', 'section')}-teachback", type="teach_back", title="Teach it back", prompt=f"Explain {term} to a classmate in one or two sentences.", requiredConcepts=list(_words(answer))[:5], hints=[f"Start with what {term} changes.", "Then explain why that change matters."], feedbackIncorrect=f"Connect {term} to its effect.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ShortAnswerStep(id=_bounded_plan_id("free", section_identity), type="short_answer", title="Say it in your own words", prompt=f"What does {term} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"Include what {term} is and what it does.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(TeachBackStep(id=_bounded_plan_id("teachback", section_identity), type="teach_back", title="Teach it back", prompt=f"Explain {term} to a classmate in one or two sentences.", requiredConcepts=list(_words(answer))[:5], hints=[f"Start with what {term} changes.", "Then explain why that change matters."], feedbackIncorrect=f"Connect {term} to its effect.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             elif any(c.get("kind") == "structure" and c.get("root") for c in comps):
                 structure = next(c for c in comps if c.get("kind") == "structure" and c.get("root"))
                 targets = []
@@ -141,46 +148,47 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 collect(structure["root"])
                 targets = targets[:6]; labels = [{"id": item["id"], "label": item["label"]} for item in targets]
                 if len(targets) >= 2:
-                    steps.append(LabelingStep(id=f"{section.get('id', 'section')}-label", type="labeling", title="Label the structure", prompt=f"Name the important parts of {title}.", targets=targets, labels=labels, answerMap={item["id"]: item["id"] for item in targets}, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=["Start with the outermost part.", "Use the labels from the diagram."], feedbackIncorrect="Match each label to the part it names."))
+                    steps.append(LabelingStep(id=_bounded_plan_id("label", section_identity), type="labeling", title="Label the structure", prompt=f"Name the important parts of {title}.", targets=targets, labels=labels, answerMap={item["id"]: item["id"] for item in targets}, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=["Start with the outermost part.", "Use the labels from the diagram."], feedbackIncorrect="Match each label to the part it names."))
             else:
                 answer = takeaways[0] if takeaways else big_idea
-                steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement accurately describes {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{title} has the opposite effect: {answer[:120]}"}, {"id": "c", "label": f"{title} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"Return to this claim about {title}: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(MultipleChoiceStep(id=_bounded_plan_id("check", section_identity), type="multiple_choice", title="Check the central idea", prompt=f"Which statement accurately describes {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{title} has the opposite effect: {answer[:120]}"}, {"id": "c", "label": f"{title} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"Return to this claim about {title}: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 if goal == "exam":
-                    steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-exam-recall", type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State the claim about {title} and its consequence.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                    steps.append(ShortAnswerStep(id=_bounded_plan_id("exam", section_identity), type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State the claim about {title} and its consequence.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         elif goal == "memorize":
             definition = next((c for c in comps if c.get("kind") == "key_definition" and _clean(c.get("term")) and _clean(c.get("definition"))), None)
             term = _clean(definition.get("term")) if definition else title
             answer = _clean(definition.get("definition")) if definition else (takeaways[0] if takeaways else big_idea)
-            steps.append(TeachStep(id=f"{section.get('id', 'section')}-definition", type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{term} produces the opposite effect."}, {"id": "c", "label": f"{term} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"The definition of {term} is: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(FillBlankStep(id=f"{section.get('id', 'section')}-fill", type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} means ____.", acceptedAnswers=[answer], hints=[f"Recall what {term} changes."], feedbackIncorrect=f"Use the definition of {term}: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(TeachStep(id=_bounded_plan_id("definition", section_identity), type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(MultipleChoiceStep(id=_bounded_plan_id("recognize", section_identity), type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{term} produces the opposite effect."}, {"id": "c", "label": f"{term} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"The definition of {term} is: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(ShortAnswerStep(id=_bounded_plan_id("recall", section_identity), type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(FillBlankStep(id=_bounded_plan_id("fill", section_identity), type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} means ____.", acceptedAnswers=[answer], hints=[f"Recall what {term} changes."], feedbackIncorrect=f"Use the definition of {term}: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             # Keep a final unaided recall check after the fill-in interaction;
             # recognition/partial completion must not be treated as durable
             # recall evidence.
-            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall-final", type="short_answer", title="Recall it without a cue", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(ShortAnswerStep(id=_bounded_plan_id("recall-final", section_identity), type="short_answer", title="Recall it without a cue", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         else:  # solve
             example = next((c for c in comps if c.get("kind") in {"worked_example", "equation"}), None)
             if example and _clean(example.get("result")):
                 problem = _clean(example.get("problem") or example.get("equation") or title)
                 result = _clean(example.get("result"))
-                steps.append(TeachStep(id=f"{section.get('id', 'section')}-worked", type="teach", title="See one worked path", content=f"{problem} → {result}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Try the key step", prompt=f"What result should this method produce for: {problem}?", responseType="short_answer", acceptedAnswers=[result], solution=result, hints=[f"Start with the operation used for {problem}.", "Keep the same operation order."], feedbackIncorrect=f"Rework {problem} one operation at a time.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(WorkedStepStep(id=f"{section.get('id', 'section')}-worked-step", type="worked_step", title="Complete the next step", prompt=f"Complete the next step for: {problem}.", acceptedAnswers=[result], solution=result, hints=[f"Reuse the operation shown for {problem}.", "Check each quantity before combining them."], feedbackIncorrect=f"Use the worked operation for {problem}, then try the step again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(TeachStep(id=_bounded_plan_id("worked", section_identity), type="teach", title="See one worked path", content=f"{problem} → {result}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=_bounded_plan_id("apply", section_identity), type="problem", title="Try the key step", prompt=f"What result should this method produce for: {problem}?", responseType="short_answer", acceptedAnswers=[result], solution=result, hints=[f"Start with the operation used for {problem}.", "Keep the same operation order."], feedbackIncorrect=f"Rework {problem} one operation at a time.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(WorkedStepStep(id=_bounded_plan_id("worked-step", section_identity), type="worked_step", title="Complete the next step", prompt=f"Complete the next step for: {problem}.", acceptedAnswers=[result], solution=result, hints=[f"Reuse the operation shown for {problem}.", "Check each quantity before combining them."], feedbackIncorrect=f"Use the worked operation for {problem}, then try the step again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             else:
                 answer = takeaways[0] if takeaways else big_idea
-                steps.append(TeachStep(id=f"{section.get('id', 'section')}-method", type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=[f"Start with the claim about {title}.", f"Use the terms that describe how {title} works."], feedbackIncorrect=f"Use the stated claim about {title} as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(TeachStep(id=_bounded_plan_id("method", section_identity), type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=_bounded_plan_id("apply", section_identity), type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=[f"Start with the claim about {title}.", f"Use the terms that describe how {title} works."], feedbackIncorrect=f"Use the stated claim about {title} as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
         # Never persist a contextless meta interaction.  If a future provider
         # emits one, replace it with a grounded explanation from this section
         # rather than leaking the placeholder to the learner.
         safe_steps = []
         for candidate in steps:
-            safe_steps.append(candidate if not student_facing_quality_issues(candidate) else TeachStep(id=f"{candidate.id}-grounded", type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            grounded_id = f"grounded-{hashlib.sha256(f'{title}|{candidate.id}'.encode()).hexdigest()[:16]}"
+            safe_steps.append(candidate if not student_facing_quality_issues(candidate) else TeachStep(id=grounded_id, type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         steps = safe_steps
         outcome = {"understand": f"Explain how {title} works.", "solve": f"Apply {title} to a new step.", "memorize": f"Recall the essential facts about {title}.", "exam": f"Recognize and use {title} under exam conditions."}[goal]
-        objectives.append(LearningObjective(id=f"objective-{section.get('id', len(objectives))}", title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
+        objectives.append(LearningObjective(id=_bounded_plan_id("objective", section_identity), title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
 
     if not objectives:
         objectives = [LearningObjective(id="objective-overview", title="Material overview", outcome="Recall the main idea.", bottleneck="Identify what matters most.", steps=[TeachStep(id="overview-teach", type="teach", title="Main idea", content=_clean(note_payload.get("title")) or "Review the material.")])]

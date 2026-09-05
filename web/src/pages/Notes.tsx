@@ -94,7 +94,7 @@ export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; 
   return <div className="notes-output">{notes.map((note) => <article className="note-section" id={note.id} key={note.id}><p className="note-kicker">Section</p><h2>{note.title}</h2><p className="note-big-idea">{note.bigIdea}</p>{note.components.filter((component: any) => !(component.kind === "explanation" && component.text === note.bigIdea)).map((component, index) => <section className={`note-component note-component-${component.kind}`} key={`${note.id}-${component.title}-${index}`}><h3>{component.title}</h3><ComponentView component={component} depth={depth} /></section>)}{note.keyTakeaways.length > 0 && <section className="note-takeaways"><h3>Remember</h3><ul>{note.keyTakeaways.slice(0, depth === "concise" ? 2 : note.keyTakeaways.length).map((item) => <li key={item}>{item}</li>)}</ul></section>}</article>)}</div>
 }
 
-function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId: number | null | undefined; onBack: () => void }) {
+export function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId: number | null | undefined; onBack: () => void }) {
   const [goal, setGoal] = useState<LearnGoal>("understand")
   const [familiarity, setFamiliarity] = useState<LearnFamiliarity>("new")
   const [session, setSession] = useState<LearnSession | null>(null)

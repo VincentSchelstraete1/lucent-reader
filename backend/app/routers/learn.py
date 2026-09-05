@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import time
@@ -31,6 +32,32 @@ STEP_ADAPTER = TypeAdapter(LearnStep)
 _ASK_RATE: dict[str, list[float]] = {}
 _ASK_WINDOW_SECONDS = 60
 _ASK_MAX_REQUESTS = 12
+_MAX_DYNAMIC_REMEDIATIONS = 3
+_MAX_PREREQUISITE_BRANCHES = 3
+
+
+def _bounded_id(prefix: str, *parts: object, max_length: int = 60) -> str:
+    """Create a stable readable identifier without embedding unbounded inputs."""
+    canonical = "|".join(str(part) for part in parts)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+    readable = re.sub(r"[^a-zA-Z0-9]+", "-", str(parts[0]) if parts else "item").strip("-").lower()
+    available = max(1, max_length - len(prefix) - len(digest) - 2)
+    return f"{prefix}-{readable[:available]}-{digest}"
+
+
+def _root_step_id(step_id: str) -> str:
+    """Return the originating step identity, stripping generated suffix chains."""
+    return re.split(r"-(?:repair|prerequisite)-\d+(?:-|$)", step_id, maxsplit=1)[0]
+
+
+def _generated_step_id(kind: str, objective_id: str, source_step_id: str, ordinal: int) -> str:
+    # Generated steps must never use another generated step as their identity
+    # seed.  That was the source of IDs such as
+    # ``...-repair-5-repair-6-repair-7``.  The objective and ordinal define the
+    # generated step's scope; the original source step is retained only when
+    # it is an authored/candidate step.
+    source_identity = objective_id if source_step_id.startswith(("repair-", "prerequisite-")) else _root_step_id(source_step_id)
+    return _bounded_id(kind, source_identity, objective_id, ordinal)
 
 def _owned_document(db, document_id: int, user: User) -> Document:
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
@@ -84,7 +111,7 @@ def _action_for(step, objective: dict, concept: dict, revisit: bool = False, rem
         action_type = "ask_free_response"
     rationale = "Revisit with a different validated modality after earlier evidence." if revisit else "A bounded action selected for the learner's current evidence and goal."
     strategy = _strategy_for(step, concept, revisit, remediation)
-    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale, strategy=strategy)
+    return TutorAction(id=_bounded_id("action", objective.get("id", "concept"), step.id, action_type), type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale, strategy=strategy)
 
 
 def _tutor_observation(session: LearnSession, objective: dict, concept: dict, step, state: dict, *, source_context: dict | None = None, candidates: list[dict] | None = None) -> TutorObservation:
@@ -161,7 +188,10 @@ def _completion_met(session: LearnSession) -> bool:
     if len(concepts) < len(objectives) or (session.state or {}).get("revisitQueue"): return False
     for objective in objectives:
         item = next((c for c in concepts if c.get("conceptId") == objective.get("id")), {})
-        if item.get("state") == "NOT_SEEN" or item.get("state") in {"STRUGGLING", "NEEDS_REVIEW"} or not item.get("correct"): return False
+        evidence_count = int(item.get("correct", 0))
+        durable_evidence = bool(item.get("delayedSuccess") or item.get("priorEvidence") or evidence_count >= 2)
+        if item.get("state") == "NOT_SEEN" or item.get("state") in {"STRUGGLING", "NEEDS_REVIEW"} or not durable_evidence:
+            return False
     return True
 
 def _session_payload(session: LearnSession, feedback: str | None = None, feedback_kind: str | None = None, evaluation: LearnEvaluation | None = None) -> LearnSessionResponse:
@@ -175,7 +205,7 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
             # legacy placeholder; render a grounded teaching step instead.
             if parsed and student_facing_quality_issues(parsed):
                 parsed = TeachStep(
-                    id=f"{parsed.id}-grounded",
+                    id=_bounded_id("grounded", objective.get("id", "concept"), parsed.id),
                     type="teach",
                     title=f"Understand {objective_title or 'this concept'}",
                     content=objective.get("outcome") or objective_title or "Review the material.",
@@ -187,7 +217,8 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
                 saved_decision = state.get("lastTutorDecision") or {}
                 if saved_decision.get("nextStepId") == parsed.id or state.get("lastTutorStepId") == parsed.id:
                     try:
-                        action = TutorAction(id=f"action-{parsed.id}", type=saved_decision.get("teachingAction", action.type), conceptId=saved_decision.get("targetConcept", action.concept_id), stepId=parsed.id, rationale=saved_decision.get("rationale", action.rationale), strategy=saved_decision.get("pedagogicalStrategy", action.strategy))
+                        action_type = saved_decision.get("teachingAction", action.type)
+                        action = TutorAction(id=_bounded_id("action", objective.get("id", "concept"), parsed.id, action_type), type=action_type, conceptId=saved_decision.get("targetConcept", action.concept_id), stepId=parsed.id, rationale=saved_decision.get("rationale", action.rationale), strategy=saved_decision.get("pedagogicalStrategy", action.strategy))
                     except Exception:
                         pass
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
@@ -387,12 +418,15 @@ def _choose_next_step(objective: dict, current_index: int, state: dict, concept:
         return candidates[0][0]
     return None
 
-def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int:
+def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int | None:
     """Create a source-specific alternate check instead of a meta-template."""
     plan = deepcopy(session.plan)
     objective = next(item for item in plan["objectives"] if item.get("id") == objective.get("id"))
     steps = objective.setdefault("steps", [])
-    repair_id = f"{failed_step.id}-repair-{len(steps)}"
+    repair_count = sum(1 for raw in steps if str(raw.get("id", "")).startswith("repair-"))
+    if repair_count >= _MAX_DYNAMIC_REMEDIATIONS:
+        return None
+    repair_id = _generated_step_id("repair", str(objective.get("id", "concept")), failed_step.id, repair_count + 1)
     accepted = list(getattr(failed_step, "accepted_answers", []) or [])
     if failed_step.type in {"multiple_choice", "prediction"}:
         answer_id = getattr(failed_step, "answer_id", None)
@@ -431,12 +465,55 @@ def _append_remediation(session: LearnSession, objective: dict, failed_step) -> 
 
 def _append_prerequisite_branch(session: LearnSession, objective: dict, failed_step) -> int:
     plan = deepcopy(session.plan); target = next(item for item in plan["objectives"] if item.get("id") == objective.get("id")); steps = target.setdefault("steps", [])
-    branch_id = f"{failed_step.id}-prerequisite-{len(steps)}"
+    branch_count = sum(1 for raw in steps if str(raw.get("id", "")).startswith("prerequisite-"))
+    branch_id = _generated_step_id("prerequisite", str(objective.get("id", "concept")), failed_step.id, branch_count + 1)
     accepted = list(getattr(failed_step, "accepted_answers", []) or [])
     answer = next((str(item).strip() for item in accepted if str(item).strip()), getattr(failed_step, "feedback_incorrect", None) or objective.get("title", "the concept"))
     branch = ShortAnswerStep(id=branch_id, type="short_answer", title="Repair the prerequisite", prompt=f"Before you can solve {objective.get('title', 'this concept')}, what must be true?", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], hints=[f"Recall the fact that {objective.get('title', 'this concept')} depends on."], feedbackIncorrect=f"This prerequisite matters because it supports {objective.get('title', 'the concept')}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     steps.append(branch.model_dump(by_alias=True)); session.plan = plan
     return len(steps) - 1
+
+
+def _leave_degenerate_repair_loop(session: LearnSession, state: dict, objective: dict, concept: dict) -> None:
+    """Move on safely after bounded remediation has been exhausted.
+
+    A learner can continue struggling without growing the persisted plan
+    forever.  Keep the concept in the revisit queue and prefer a different
+    objective.  For a one-objective session, return to the first grounded
+    teaching representation instead of manufacturing another nested repair.
+    """
+    concept["state"] = "NEEDS_REVIEW"
+    concept["reviewDue"] = "LATER_THIS_SESSION"
+    concept["remediationExhausted"] = True
+    queue = list(state.get("revisitQueue") or [])
+    if objective.get("id") not in queue:
+        queue.append(objective.get("id"))
+    state["revisitQueue"] = queue[:12]
+    objectives = list((session.plan or {}).get("objectives") or [])
+    concepts_by_id = {item.get("conceptId"): item for item in state.get("concepts", [])}
+    next_objective = next(
+        (
+            (index, candidate)
+            for index, candidate in enumerate(objectives)
+            if candidate.get("id") != objective.get("id")
+            and concepts_by_id.get(candidate.get("id"), {}).get("state") != "DEMONSTRATED"
+        ),
+        None,
+    )
+    if next_objective:
+        session.objective_index = next_objective[0]
+        session.step_index = 0
+        state["repairLoopExit"] = "advance_objective"
+        return
+    authored = [
+        index
+        for index, raw in enumerate(objective.get("steps", []))
+        if not str(raw.get("id", "")).startswith(("repair-", "prerequisite-"))
+        and (parsed := _parse_step(raw))
+        and parsed.type in {"teach", "walkthrough"}
+    ]
+    session.step_index = authored[0] if authored else 0
+    state["repairLoopExit"] = "reteach_then_revisit"
 
 @router.post("/learn-sessions/{session_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
@@ -498,14 +575,22 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         # it in the bounded plan.
         next_idx = None if step.type == "matching" else _choose_next_step(objective, session.step_index, state, concept, failed=True)
         prereqs = prerequisite_ids(objective, concepts)
-        if next_idx is None and evaluation.result == "incorrect" and int(concept.get("incorrect", 0)) >= 2 and prereqs and not state.get("prerequisiteBranch"):
+        branch_stack = list(state.get("branchStack") or [])
+        if next_idx is None and evaluation.result == "incorrect" and int(concept.get("incorrect", 0)) >= 2 and prereqs and not state.get("prerequisiteBranch") and len(branch_stack) < _MAX_PREREQUISITE_BRANCHES:
             return_step = session.step_index
             branch_index = _append_prerequisite_branch(session, objective, step)
             state.setdefault("branchStack", []).append({"conceptId": objective["id"], "returnStep": return_step, "branchIndex": branch_index, "prerequisiteIds": prereqs})
             state["prerequisiteBranch"] = state["branchStack"][-1]
             session.step_index = branch_index
         else:
-            session.step_index = next_idx if next_idx is not None else _append_remediation(session, objective, step)
+            if next_idx is not None:
+                session.step_index = next_idx
+            else:
+                remediation_index = _append_remediation(session, objective, step)
+                if remediation_index is not None:
+                    session.step_index = remediation_index
+                else:
+                    _leave_degenerate_repair_loop(session, state, objective, concept)
     else:
         next_idx = _choose_next_step(objective, session.step_index, state, concept)
         session.step_index = next_idx if next_idx is not None else session.step_index + 1
