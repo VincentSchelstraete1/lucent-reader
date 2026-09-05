@@ -105,7 +105,7 @@ function SceneSupportBlocks({ session, note }: { session: LearnSession; note: Se
         <p className="learn-scene-block-label">{block.kind === "tutor_message" ? "Tutor" : block.kind === "feedback" ? "Feedback" : block.label}</p>
         {block.title && !(block.visualSpec || referenced) && <h3>{block.title}</h3>}
         {block.content && <p className="learn-scene-block-content">{block.content}</p>}
-        {block.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={block.visualSpec} initialStage={session.scene?.visualState?.stage as number ?? 0} /></div>}
+        {block.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={block.visualSpec} initialStage={session.scene?.visualState?.stage ?? 0} /></div>}
         {referenced && <div className="learn-teaching-visual"><ComponentView component={referenced as any} /></div>}
       </section>
     })}
@@ -173,7 +173,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   async function askLucent() {
     if (!session || !askMessage.trim()) return
     setAskLoading(true); setError(null)
-    try { const result = await api.askLucent(session.id, askMessage.trim()); setAskAnswer(result); if (result.scenePatch) setSession((current) => current ? { ...current, scene: result.scenePatch } : current); if (result.visualAction?.stage !== undefined) window.dispatchEvent(new CustomEvent("lucent-visual-stage", { detail: { stage: result.visualAction.stage } })); setAskMessage("") }
+    try { const result = await api.askLucent(session.id, askMessage.trim()); setAskAnswer(result); if (result.scene ?? result.scenePatch) setSession((current) => current ? { ...current, scene: result.scene ?? result.scenePatch } : current); setAskMessage("") }
     catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
     finally { setAskLoading(false) }
   }
