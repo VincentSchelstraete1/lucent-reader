@@ -148,6 +148,31 @@ def _next_objective(session: LearnSession, state: dict) -> None:
     session.objective_index = next(i for i, o in enumerate(objectives) if o.get("id") == target); steps = objectives[session.objective_index].get("steps", [])
     session.step_index = next((i for i, raw in enumerate(steps) if _parse_step(raw) and _parse_step(raw).type not in {"teach", "walkthrough"}), 0); state["revisitMode"] = bool(queue and target == queue[0])
 
+def _choose_next_step(objective: dict, current_index: int, state: dict, concept: dict, *, failed: bool = False) -> int | None:
+    """Choose the next validated teaching/checking action from evidence.
+
+    The persisted plan is a bounded vocabulary of candidate actions, not a
+    script. Prefer unseen modalities after failure and avoid repeating a
+    modality that already failed unless there is no safe alternative.
+    """
+    steps = objective.get("steps", [])
+    used = set(concept.get("interactionTypes") or [])
+    attempts = state.get("attempts") or {}
+    candidates: list[tuple[int, object]] = []
+    for index in range(current_index + 1, len(steps)):
+        parsed = _parse_step(steps[index])
+        if not parsed or parsed.type in {"teach", "walkthrough"}:
+            continue
+        if int(attempts.get(parsed.id, 0)) == 0:
+            candidates.append((index, parsed))
+    if failed:
+        fresh = [item for item in candidates if item[1].type not in used]
+        if fresh:
+            return fresh[0][0]
+    if candidates:
+        return candidates[0][0]
+    return None
+
 def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int:
     """Create one alternate, validated check instead of repeating a prompt."""
     plan = deepcopy(session.plan)
@@ -196,11 +221,11 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         state["revisitQueue"] = [cid for cid in state["revisitQueue"] if cid != objective["id"]]; concept["delayedSuccess"] = True; concept["state"] = "DEMONSTRATED"; state["revisitMode"] = False
     session.state = state
     if evaluation.result in {"incorrect", "partially_correct"}:
-        steps = objective.get("steps", [])
-        next_idx = next((i for i in range(session.step_index + 1, len(steps)) if _parse_step(steps[i]) and _parse_step(steps[i]).type not in {"teach", "walkthrough"}), None)
+        next_idx = _choose_next_step(objective, session.step_index, state, concept, failed=True)
         session.step_index = next_idx if next_idx is not None else _append_remediation(session, objective, step)
     else:
-        session.step_index += 1
+        next_idx = _choose_next_step(objective, session.step_index, state, concept)
+        session.step_index = next_idx if next_idx is not None else session.step_index + 1
     current_steps = session.plan.get("objectives", [])[session.objective_index].get("steps", []) if session.objective_index < len(session.plan.get("objectives", [])) else []
     if session.step_index >= len(current_steps): _next_objective(session, state)
     if _completion_met(session): session.status = "completed"; session.ended_reason = "evidence_sufficient"; session.report = _report(session).model_dump(by_alias=True)
