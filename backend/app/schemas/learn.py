@@ -459,9 +459,27 @@ class ConceptEvidence(BaseModel):
     explanation_evidence: int = Field(default=0, alias="explanationEvidence")
     application_evidence: int = Field(default=0, alias="applicationEvidence")
     transfer_evidence: int = Field(default=0, alias="transferEvidence")
-    scaffolding_level: int = Field(default=0, alias="scaffoldingLevel", ge=0, le=4)
+    # Semantic scaffold vocabulary is the canonical public contract.  Older
+    # persisted records used 0–4; normalize those values at the boundary so
+    # they cannot crash response serialization or leak an arbitrary numeric
+    # mastery score to clients.
+    scaffolding_level: ScaffoldLevel = Field(default="FULL", alias="scaffoldingLevel")
     scaffold: ScaffoldLevel = "FULL"
     review_due: ReviewDue | None = Field(default=None, alias="reviewDue")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_scaffold_level(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            raw = value.get("scaffoldingLevel", value.get("scaffolding_level"))
+            if isinstance(raw, int):
+                value["scaffoldingLevel"] = ("FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER")[max(0, min(4, raw))]
+            if "scaffold" in value and "scaffoldingLevel" not in value:
+                value["scaffoldingLevel"] = value["scaffold"]
+            if "scaffoldingLevel" in value and "scaffold" not in value:
+                value["scaffold"] = value["scaffoldingLevel"]
+        return value
 
 
 class LearnEvaluation(BaseModel):

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, completion_met, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
+from app.schemas.learn import ConceptEvidence
 
 
 def _session():
@@ -18,6 +19,10 @@ def _session():
 
 def test_runtime_composes_teaching_and_practice_and_updates_evidence():
     session = _session()
+    session.report = None
+    session.ended_reason = None
+    session.document_id = 1
+    session.familiarity = "new"
     scene, private = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     assert private and scene.response_interaction_id == "check"
     assert [block.kind for block in scene.blocks].count("practice") == 1
@@ -73,6 +78,26 @@ def test_scene_normalizes_legacy_mental_model_heading():
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     titles = [block.title for block in scene.blocks if block.title]
     assert "Build the mental model" not in titles
+
+
+def test_concept_evidence_accepts_semantic_scaffold_and_legacy_numeric_value():
+    base = {"conceptId": "energy", "title": "Energy", "state": "DEVELOPING", "scaffoldingLevel": "FULL", "scaffold": "FULL"}
+    assert ConceptEvidence.model_validate(base).scaffolding_level == "FULL"
+    assert ConceptEvidence.model_validate({**base, "scaffoldingLevel": 3}).scaffolding_level == "INDEPENDENT"
+
+
+def test_session_payload_serializes_runtime_semantic_scaffold():
+    import os
+    os.environ.setdefault("DATABASE_URL", "sqlite:///tmp.db")
+    from app.routers.learn import _session_payload
+    session = _session()
+    session.report = None
+    session.ended_reason = None
+    session.document_id = 1
+    session.familiarity = "new"
+    session.state = {"concepts": [{"conceptId": "energy", "title": "Energy", "state": "DEVELOPING", "scaffoldingLevel": "FULL", "scaffold": "FULL"}]}
+    payload = _session_payload(session)
+    assert payload.concept_states[0].scaffolding_level == "FULL"
 
 
 def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
