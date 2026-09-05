@@ -107,12 +107,30 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const request = () => fetch(`${API_URL}${path}`, {
     method: "POST",
     credentials: "include",
     headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}) },
     body: body ? JSON.stringify(body) : undefined
   })
+  let response = await request()
+  // A Google session can be resumed in another tab with a rotated CSRF
+  // token. Refresh the authoritative token once before surfacing the write
+  // failure; the backend still validates both cookie and header.
+  if (response.status === 403) {
+    try {
+      const auth = await fetch(`${API_URL}/auth/me`, { credentials: "include" })
+      if (auth.ok) {
+        const session = await auth.json() as { csrf_token?: string }
+        if (session.csrf_token) {
+          csrfToken = session.csrf_token
+          response = await request()
+        }
+      }
+    } catch {
+      // Preserve the original server response below.
+    }
+  }
   if (!response.ok) {
     throw await apiError(path, response)
   }
