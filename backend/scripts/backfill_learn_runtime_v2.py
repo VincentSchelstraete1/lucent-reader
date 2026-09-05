@@ -24,16 +24,29 @@ def main() -> int:
         parser.error("choose --check or --apply")
     with SessionLocal() as db:
         sessions = db.execute(select(LearnSession).where(LearnSession.status.in_(["active", "stopped"]))).scalars().all()
+        scanned = len(sessions)
         pending = 0
+        migrated = 0
+        already = 0
+        failed = []
         for session in sessions:
             if int((session.state or {}).get("runtimeVersion", 0) or 0) < 2:
                 pending += 1
                 if args.apply:
-                    ensure_runtime_state(session, db=db)
+                    try:
+                        ensure_runtime_state(session, db=db)
+                        migrated += 1
+                    except Exception as exc:
+                        db.rollback()
+                        failed.append({"session": str(session.id), "reason": type(exc).__name__})
+            else:
+                already += 1
         if args.apply:
             db.commit()
-        print(f"pending={pending}")
-        return 1 if args.check and pending else 0
+        print(f"scanned={scanned} pending={pending} backfilled={migrated} already_migrated={already} failed={len(failed)}")
+        for item in failed:
+            print(f"failed_session={item['session']} reason={item['reason']}")
+        return 1 if (args.check and pending) or failed else 0
 
 
 if __name__ == "__main__":

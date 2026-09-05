@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import apply_scene_message, apply_visual_event, completion_met, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
 from app.schemas.learn import ConceptEvidence
 
 
@@ -30,6 +30,17 @@ def test_runtime_composes_teaching_and_practice_and_updates_evidence():
     assert session.state["concepts"][0]["incorrect"] == 1
     assert session.state["concepts"][0]["reviewDue"] == "LATER_THIS_SESSION"
     assert scene.revision > 1
+
+
+def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
+    session = _session()
+    scene, private = ensure_runtime_state(session)
+    assert session.state["runtimeVersion"] == 2
+    assert session.state["currentScene"]["id"] == scene.id
+    assert private is not None
+    again, again_private = ensure_runtime_state(session)
+    assert again.revision == scene.revision
+    assert again_private == private
 
 
 def test_correct_response_does_not_represent_same_unanswered_interaction():
