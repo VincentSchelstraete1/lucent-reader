@@ -67,6 +67,14 @@ def test_visual_event_persists_canonical_stage_and_highlight():
     assert session.state["currentScene"]["visualState"]["stage"] == 1
 
 
+def test_scene_normalizes_legacy_mental_model_heading():
+    session = _session()
+    session.plan["objectives"][0]["steps"][0]["title"] = "Build the mental model"
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    titles = [block.title for block in scene.blocks if block.title]
+    assert "Build the mental model" not in titles
+
+
 def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
     session = _session()
     session.plan["objectives"].append({"id": "prereq", "title": "Prerequisite", "outcome": "Know the prerequisite", "steps": [{"id": "p", "type": "teach", "title": "Prerequisite", "content": "A prerequisite idea."}]})

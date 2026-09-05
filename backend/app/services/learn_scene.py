@@ -73,6 +73,15 @@ def _source_text(objective: dict, steps: list[dict]) -> str:
     return " ".join(values)
 
 
+def _learner_title(title: str | None) -> str | None:
+    """Remove legacy authoring labels from the public scene."""
+    if not title:
+        return title
+    if title.strip().casefold() in {"build the mental model", "the mental model", "understand the concept"}:
+        return "Understand the core idea"
+    return title
+
+
 def _block(
     *, scene_seed: str, ordinal: int, kind: str, label: str,
     title: str | None = None, content: str | None = None, step=None,
@@ -84,6 +93,7 @@ def _block(
         return None
     if step is not None and student_facing_quality_issues(step, source_text):
         return None
+    title = _learner_title(title)
     return LearningSceneBlock(
         id=_id("block", scene_seed, ordinal, kind), kind=kind, label=label,
         title=title, content=content, step=public_step(step) if step is not None else None,
@@ -216,7 +226,7 @@ def compose_learning_scene(
         signature = (block.kind, block.title, block.content)
         if signature in seen_signatures and block.kind != "practice":
             continue
-        if normalized and normalized[-1].title and block.title and normalized[-1].title == block.title and normalized[-1].content == block.content:
+        if normalized and normalized[-1].title and block.title and normalized[-1].title == block.title and block.kind != "practice":
             continue
         seen_signatures.add(signature)
         normalized.append(block)
