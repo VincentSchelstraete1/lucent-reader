@@ -115,7 +115,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                 matches = {pair["id"]: _clean(next((item.get("values", {}).get(dimension) for item in comparison.get("items", []) if str(item.get("id")) == pair["id"]), "")) for pair in pairs}
                 values = [value for value in dict.fromkeys(matches.values()) if value]
                 if len(pairs) >= 2 and len(values) >= 2:
-                    steps.append(MatchingStep(id=f"{section.get('id', 'section')}-match", type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", "Look for the mechanism that differs between the two concepts."], feedbackIncorrect="Use the defining difference, not a nearby detail."))
+                    steps.append(MatchingStep(id=f"{section.get('id', 'section')}-match", type="matching", title="Match the distinction", prompt=f"Match each concept to its {dimension}.", pairs=pairs, matches=matches, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=[f"Compare the {dimension} column in the note.", f"Look at how {title} changes in each case."], feedbackIncorrect=f"Compare the {dimension} for each {title} pathway."))
             walkthrough_index = next((i for i, c in enumerate(comps) if c.get("kind") == "walkthrough" and c.get("mechanism")), None)
             if walkthrough_index is not None and goal == "understand":
                 steps.append(WalkthroughStep(id=f"{section.get('id', 'section')}-visual", type="walkthrough", title="See the mechanism change", sectionId=str(section.get("id")), componentIndex=walkthrough_index, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -129,8 +129,9 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             elif goal == "understand" and any(c.get("kind") == "key_definition" for c in comps):
                 definition = next(c for c in comps if c.get("kind") == "key_definition")
                 answer = _clean(definition.get("definition")) or big_idea
-                steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-free", type="short_answer", title="Say it in your own words", prompt=f"What does {_clean(definition.get('term')) or title} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Focus on the defining relationship, not a supporting detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(TeachBackStep(id=f"{section.get('id', 'section')}-teachback", type="teach_back", title="Teach it back", prompt=f"Explain {_clean(definition.get('term')) or title} to a classmate in one or two sentences.", requiredConcepts=list(_words(answer))[:5], hints=["Name the defining relationship first.", "Add why the relationship matters."], feedbackIncorrect="Include the defining relationship and why it matters.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                term = _clean(definition.get('term')) or title
+                steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-free", type="short_answer", title="Say it in your own words", prompt=f"What does {term} mean?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"Include what {term} is and what it does.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(TeachBackStep(id=f"{section.get('id', 'section')}-teachback", type="teach_back", title="Teach it back", prompt=f"Explain {term} to a classmate in one or two sentences.", requiredConcepts=list(_words(answer))[:5], hints=[f"Start with what {term} changes.", "Then explain why that change matters."], feedbackIncorrect=f"Connect {term} to its effect.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             elif any(c.get("kind") == "structure" and c.get("root") for c in comps):
                 structure = next(c for c in comps if c.get("kind") == "structure" and c.get("root"))
                 targets = []
@@ -143,34 +144,41 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                     steps.append(LabelingStep(id=f"{section.get('id', 'section')}-label", type="labeling", title="Label the structure", prompt=f"Name the important parts of {title}.", targets=targets, labels=labels, answerMap={item["id"]: item["id"] for item in targets}, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=["Start with the outermost part.", "Use the labels from the diagram."], feedbackIncorrect="Match each label to the part it names."))
             else:
                 answer = takeaways[0] if takeaways else big_idea
-                steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement best captures {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A detail not established by this material."}, {"id": "c", "label": "A reversed version of the relationship."}], answerId="a", feedbackIncorrect=f"Return to the central idea: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-check", type="multiple_choice", title="Check the central idea", prompt=f"Which statement accurately describes {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{title} has the opposite effect: {answer[:120]}"}, {"id": "c", "label": f"{title} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"Return to this claim about {title}: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 if goal == "exam":
-                    steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-exam-recall", type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the central idea, not a peripheral detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                    steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-exam-recall", type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State the claim about {title} and its consequence.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         elif goal == "memorize":
             definition = next((c for c in comps if c.get("kind") == "key_definition" and _clean(c.get("term")) and _clean(c.get("definition"))), None)
             term = _clean(definition.get("term")) if definition else title
             answer = _clean(definition.get("definition")) if definition else (takeaways[0] if takeaways else big_idea)
             steps.append(TeachStep(id=f"{section.get('id', 'section')}-definition", type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": "A related but different idea."}, {"id": "c", "label": "A claim not supported by this material."}], answerId="a", feedbackIncorrect="Look for the defining relationship, not a nearby detail.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="Use the definition above, then try the idea again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(FillBlankStep(id=f"{section.get('id', 'section')}-fill", type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} is the idea that ____.", acceptedAnswers=[answer], hints=["Recall the definition you just retrieved."], feedbackIncorrect="Recall the defining relationship from the note.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(MultipleChoiceStep(id=f"{section.get('id', 'section')}-recognize", type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{term} produces the opposite effect."}, {"id": "c", "label": f"{term} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"The definition of {term} is: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall", type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(FillBlankStep(id=f"{section.get('id', 'section')}-fill", type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} means ____.", acceptedAnswers=[answer], hints=[f"Recall what {term} changes."], feedbackIncorrect=f"Use the definition of {term}: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             # Keep a final unaided recall check after the fill-in interaction;
             # recognition/partial completion must not be treated as durable
             # recall evidence.
-            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall-final", type="short_answer", title="Recall it without a cue", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect="State the defining relationship without the sentence frame.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(ShortAnswerStep(id=f"{section.get('id', 'section')}-recall-final", type="short_answer", title="Recall it without a cue", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         else:  # solve
             example = next((c for c in comps if c.get("kind") in {"worked_example", "equation"}), None)
             if example and _clean(example.get("result")):
                 problem = _clean(example.get("problem") or example.get("equation") or title)
                 result = _clean(example.get("result"))
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-worked", type="teach", title="See one worked path", content=f"{problem} → {result}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Try the key step", prompt=f"What result should this method produce for: {problem}?", responseType="short_answer", acceptedAnswers=[result], solution=result, hints=["Start from the worked relationship.", "Keep the same operation order."], feedbackIncorrect="Compare your result with the worked path, then try once more.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(WorkedStepStep(id=f"{section.get('id', 'section')}-worked-step", type="worked_step", title="Complete the next step", prompt=f"Complete the next step for: {problem}.", acceptedAnswers=[result], solution=result, hints=["Reuse the operation shown in the worked path.", "Check each quantity before combining them."], feedbackIncorrect="Use the worked example as a scaffold, then try the step again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Try the key step", prompt=f"What result should this method produce for: {problem}?", responseType="short_answer", acceptedAnswers=[result], solution=result, hints=[f"Start with the operation used for {problem}.", "Keep the same operation order."], feedbackIncorrect=f"Rework {problem} one operation at a time.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(WorkedStepStep(id=f"{section.get('id', 'section')}-worked-step", type="worked_step", title="Complete the next step", prompt=f"Complete the next step for: {problem}.", acceptedAnswers=[result], solution=result, hints=[f"Reuse the operation shown for {problem}.", "Check each quantity before combining them."], feedbackIncorrect=f"Use the worked operation for {problem}, then try the step again.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(TeachStep(id=f"{section.get('id', 'section')}-method", type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=["Start with the central relationship.", "Use the wording from the teaching point."], feedbackIncorrect="Use the stated relationship as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=f"{section.get('id', 'section')}-apply", type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=[f"Start with the claim about {title}.", f"Use the terms that describe how {title} works."], feedbackIncorrect=f"Use the stated claim about {title} as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
+        # Never persist a contextless meta interaction.  If a future provider
+        # emits one, replace it with a grounded explanation from this section
+        # rather than leaking the placeholder to the learner.
+        safe_steps = []
+        for candidate in steps:
+            safe_steps.append(candidate if not student_facing_quality_issues(candidate) else TeachStep(id=f"{candidate.id}-grounded", type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+        steps = safe_steps
         outcome = {"understand": f"Explain how {title} works.", "solve": f"Apply {title} to a new step.", "memorize": f"Recall the essential facts about {title}.", "exam": f"Recognize and use {title} under exam conditions."}[goal]
         objectives.append(LearningObjective(id=f"objective-{section.get('id', len(objectives))}", title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
 
@@ -242,7 +250,17 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
         result = "partially_correct"
     else:
         result = "incorrect"
-    return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "Try the defining relationship rather than a supporting detail."), remediationCategory="none" if result == "correct" else "simplify")
+    return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "State what changes and what effect it produces."), remediationCategory="none" if result == "correct" else "simplify")
+
+
+_BANNED_META_PHRASES = ("the teaching point", "source-grounded relationship", "relationship described above", "relevant detail", "unrelated detail", "defining relationship", "supporting detail", "the concept above", "a related but different idea", "a claim not supported by this material", "which response best matches", "the key relationship here")
+
+def student_facing_quality_issues(step: LearnStep) -> list[str]:
+    """Reject contextless fallback language before a step reaches the UI."""
+    data = step.model_dump()
+    text = " ".join(str(value) for value in data.values() if isinstance(value, (str, list, dict)))
+    lowered = text.casefold()
+    return [phrase for phrase in _BANNED_META_PHRASES if phrase in lowered]
 
 
 def grade_step(step: LearnStep, *, response: str | None, option_id: str | None) -> tuple[bool | None, str]:

@@ -1,9 +1,10 @@
-from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec
+from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues
 from app.services.learn_tutor import ask_lucent_model, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
-from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event
+from app.routers.learn import _append_remediation, _ask_rate_allowed, _ask_scope, _record_tutor_event
+from app.models.learn import LearnSession
 
 
 def _note():
@@ -196,3 +197,34 @@ def test_model_backed_diagnosis_fake_provider_returns_specific_evidence():
         assert result.misconception and result.confidence > 0.9
     finally:
         set_tutor_provider(None)
+
+
+def test_generated_interactions_are_subject_specific_and_not_meta_templates():
+    note = {"title": "Oncogenes vs Tumor Suppressors", "sectionNotes": [{"id": "onc", "title": "Opposing mutation mechanisms", "bigIdea": "Proto-oncogenes gain activating mutations that increase growth signaling, while tumor suppressors lose function and remove growth restraints.", "sourceBlockIds": ["block-onc"], "keyTakeaways": ["Gain of function increases growth signaling.", "Loss of function removes a brake on growth."], "components": [{"kind": "comparison", "dimensions": ["mutation mechanism"], "items": [{"id": "onco", "name": "Proto-oncogene", "values": {"mutation mechanism": "activating mutation causes excessive growth signaling"}}, {"id": "suppressor", "name": "Tumor suppressor", "values": {"mutation mechanism": "loss-of-function mutation removes growth restraint"}}]}]}]}
+    plan = build_learn_plan(note, "understand", "new")
+    text = " ".join(str(step.model_dump()) for objective in plan.objectives for step in objective.steps).lower()
+    assert "proto-oncogene" in text and "tumor suppressor" in text
+    assert "gain" in text or "loss" in text
+    assert not any(phrase in text for phrase in ("source-grounded relationship", "unrelated detail", "teaching point", "defining relationship"))
+    for objective in plan.objectives:
+        for step in objective.steps:
+            assert step.source_section_ids and step.source_block_ids
+            assert not student_facing_quality_issues(step)
+
+def test_matching_failure_remediation_is_a_source_specific_contrast_case():
+    step = MatchingStep(
+        id="mechanisms-match", type="matching", title="Match the mechanisms",
+        prompt="Match each pathway to its mutation type.",
+        pairs=[{"id": "oncogene", "label": "Proto-oncogene"}, {"id": "suppressor", "label": "Tumor suppressor"}],
+        matches={"oncogene": "Gain-of-function", "suppressor": "Loss-of-function"},
+        sourceSectionIds=["genetics"], sourceBlockIds=["block-1"],
+    )
+    session = LearnSession(plan={"objectives": [{"id": "genetics", "title": "Opposing mutation mechanisms", "steps": [step.model_dump(by_alias=True)]}]}, state={})
+    index = _append_remediation(session, session.plan["objectives"][0], step)
+    repair = session.plan["objectives"][0]["steps"][index]
+    text = str(repair).casefold()
+    assert repair["type"] == "multiple_choice"
+    assert "gain-of-function" in text and "loss-of-function" in text
+    assert "proto-oncogene" in text and "tumor suppressor" in text
+    assert not student_facing_quality_issues(MultipleChoiceStep.model_validate(repair))
+    assert repair["sourceSectionIds"] == ["genetics"]

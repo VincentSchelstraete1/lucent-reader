@@ -4,11 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 CONTENT_POLICIES = {
-    "CONCEPTUAL": {"strategies": ["CONCEPTUAL_EXPLANATION", "EXAMPLE_NONEXAMPLE", "SOCRATIC_PROBE", "TRANSFER_PRACTICE"], "evidence": ["explanation", "transfer"], "escalation": ["ANALOGY", "CONTRAST_CASE", "PREREQUISITE_REPAIR"]},
-    "PROCESS": {"strategies": ["ANIMATED_MECHANISM", "GUIDED_DISCOVERY", "RETRIEVAL_PRACTICE", "TRANSFER_PRACTICE"], "evidence": ["recognition", "application", "transfer"], "escalation": ["VISUAL_MODEL", "ERROR_CORRECTION", "PREREQUISITE_REPAIR"]},
-    "QUANTITATIVE": {"strategies": ["WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "TRANSFER_PRACTICE"], "evidence": ["application", "transfer"], "escalation": ["DECREASE_DIFFICULTY", "PREREQUISITE_REPAIR"]},
-    "MEMORIZATION": {"strategies": ["DIRECT_INSTRUCTION", "RETRIEVAL_PRACTICE", "DELAYED_RECHECK"], "evidence": ["recall", "recognition"], "escalation": ["SIMPLIFY", "DELAYED_RECHECK"]},
-    "CS_SYSTEMS": {"strategies": ["VISUAL_MODEL", "GUIDED_DISCOVERY", "TRANSFER_PRACTICE"], "evidence": ["recognition", "explanation", "application"], "escalation": ["ERROR_CORRECTION", "PREREQUISITE_REPAIR"]},
+    "CONCEPTUAL": {"initial": "CONCEPTUAL_EXPLANATION", "strategies": ["CONCEPTUAL_EXPLANATION", "EXAMPLE_NONEXAMPLE", "SOCRATIC_PROBE", "TRANSFER_PRACTICE"], "evidence": ["explanation", "application", "transfer"], "escalation": ["ANALOGY", "CONTRAST_CASE", "PREREQUISITE_REPAIR"], "scaffold": ["FULL", "GUIDED", "INDEPENDENT", "TRANSFER"], "visual": "comparison_or_relationship", "transfer": True, "completion": 2, "review": "NEXT_SESSION"},
+    "PROCESS": {"initial": "ANIMATED_MECHANISM", "strategies": ["ANIMATED_MECHANISM", "GUIDED_DISCOVERY", "RETRIEVAL_PRACTICE", "TRANSFER_PRACTICE"], "evidence": ["recognition", "application", "explanation", "transfer"], "escalation": ["VISUAL_MODEL", "ERROR_CORRECTION", "PREREQUISITE_REPAIR"], "scaffold": ["FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"], "visual": "mechanism", "transfer": True, "completion": 2, "review": "FUTURE_REVIEW"},
+    "QUANTITATIVE": {"initial": "WORKED_EXAMPLE", "strategies": ["WORKED_EXAMPLE", "SCAFFOLDED_PRACTICE", "TRANSFER_PRACTICE"], "evidence": ["application", "transfer"], "escalation": ["DECREASE_DIFFICULTY", "PREREQUISITE_REPAIR"], "scaffold": list(SCAFFOLD_LEVELS) if "SCAFFOLD_LEVELS" in globals() else ["FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"], "visual": "quantitative", "transfer": True, "completion": 2, "review": "FUTURE_REVIEW"},
+    "MEMORIZATION": {"initial": "DIRECT_INSTRUCTION", "strategies": ["DIRECT_INSTRUCTION", "RETRIEVAL_PRACTICE", "DELAYED_RECHECK"], "evidence": ["recall", "recognition"], "escalation": ["SIMPLIFY", "DELAYED_RECHECK"], "scaffold": ["FULL", "INDEPENDENT", "TRANSFER"], "visual": "none", "transfer": False, "completion": 2, "review": "NEXT_SESSION"},
+    "CS_SYSTEMS": {"initial": "VISUAL_MODEL", "strategies": ["VISUAL_MODEL", "GUIDED_DISCOVERY", "TRANSFER_PRACTICE"], "evidence": ["recognition", "explanation", "application", "transfer"], "escalation": ["ERROR_CORRECTION", "PREREQUISITE_REPAIR"], "scaffold": ["FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"], "visual": "state_execution", "transfer": True, "completion": 2, "review": "FUTURE_REVIEW"},
 }
 
 SCAFFOLD_LEVELS = ("FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER")
@@ -73,4 +73,3 @@ def diagnose_fallback(result: str, step_type: str, response: str | None = None) 
     if step_type in {"problem", "worked_step", "numeric", "ordering"}:
         return "PROCEDURAL_ERROR", None
     return "KNOWLEDGE_GAP", None
-

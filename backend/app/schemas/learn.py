@@ -249,6 +249,18 @@ class TutorAction(BaseModel):
     strategy: PedagogicalStrategy = "DIRECT_INSTRUCTION"
 
 
+class TutorDecision(BaseModel):
+    """Bounded model output for one next-action decision."""
+    pedagogical_strategy: PedagogicalStrategy = Field(alias="pedagogicalStrategy")
+    teaching_action: TutorActionType = Field(alias="teachingAction")
+    target_concept: str = Field(alias="targetConcept", min_length=1, max_length=60)
+    interaction_type: str | None = Field(default=None, alias="interactionType", max_length=32)
+    scaffold_level: ScaffoldLevel = Field(default="FULL", alias="scaffoldLevel")
+    visual_action: str | None = Field(default=None, alias="visualAction", max_length=40)
+    prerequisite_branch: str | None = Field(default=None, alias="prerequisiteBranch", max_length=60)
+    rationale: str = Field(min_length=1, max_length=300)
+
+
 class ConceptEvidence(BaseModel):
     concept_id: str = Field(alias="conceptId")
     title: str

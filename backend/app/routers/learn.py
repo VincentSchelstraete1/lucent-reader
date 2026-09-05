@@ -19,9 +19,9 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction
-from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step
-from app.services.learn_tutor import ask_lucent_model, diagnose_response
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TutorAction, TutorDecision
+from app.services.learn_engine import build_learn_plan, evaluate_step, plan_fingerprint, public_step, student_facing_quality_issues
+from app.services.learn_tutor import ask_lucent_model, choose_tutor_action, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy, next_scaffold, prerequisite_ids, review_due
 
@@ -83,7 +83,10 @@ def _action_for(step, objective: dict, concept: dict, revisit: bool = False, rem
     if step.type == "multiple_choice" and "multiple_choice" in used and not revisit:
         action_type = "ask_free_response"
     rationale = "Revisit with a different validated modality after earlier evidence." if revisit else "A bounded action selected for the learner's current evidence and goal."
-    return TutorAction(id=f"action-{step.id}", type=action_type, conceptId=objective.get("id", "concept"), stepId=step.id, rationale=rationale, strategy=_strategy_for(step, concept, revisit, remediation))
+    strategy = _strategy_for(step, concept, revisit, remediation)
+    fallback = TutorDecision(pedagogicalStrategy=strategy, teachingAction=action_type, targetConcept=objective.get("id", "concept"), interactionType=step.type, scaffoldLevel=concept.get("scaffold", "FULL"), visualAction="show" if getattr(step, "visual_spec", None) else None, prerequisiteBranch=None, rationale=rationale)
+    decision = choose_tutor_action(context={"conceptId": objective.get("id", "concept"), "allowedConceptIds": [objective.get("id", "concept")], "policy": "Select only a grounded, allowlisted action for this concept.", "learner": json.dumps({"state": concept.get("state"), "attempts": concept.get("attempts", 0), "misconceptions": concept.get("misconceptions", []), "failedStrategies": concept.get("failedStrategies", []), "failedModalities": concept.get("failedModalities", []), "scaffold": concept.get("scaffold", "FULL"), "reviewDue": concept.get("reviewDue")}), "source": ""}, fallback=fallback)
+    return TutorAction(id=f"action-{step.id}", type=decision.teaching_action, conceptId=decision.target_concept, stepId=step.id, rationale=decision.rationale, strategy=decision.pedagogical_strategy)
 
 def _report(session: LearnSession) -> LearnSessionReport:
     objectives = session.plan.get("objectives", []); by_id = {item.get("conceptId"): item for item in _concepts(session)}
@@ -115,6 +118,18 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
         objective = objectives[session.objective_index]; objective_title = objective.get("title"); steps = objective.get("steps", [])
         if session.step_index < len(steps):
             parsed = _parse_step(steps[session.step_index])
+            # Older active sessions may contain a step persisted before the
+            # student-facing quality gate was added.  Never expose that
+            # legacy placeholder; render a grounded teaching step instead.
+            if parsed and student_facing_quality_issues(parsed):
+                parsed = TeachStep(
+                    id=f"{parsed.id}-grounded",
+                    type="teach",
+                    title=f"Understand {objective_title or 'this concept'}",
+                    content=objective.get("outcome") or objective_title or "Review the material.",
+                    sourceSectionIds=objective.get("sourceSectionIds", []),
+                    sourceBlockIds=objective.get("sourceBlockIds", []),
+                )
             if parsed:
                 hints_used = int((state.get("hints") or {}).get(parsed.id, 0)); current = public_step(parsed, hints_used); action = _action_for(parsed, objective, _concept_for(session, objective), bool(state.get("revisitMode")), state.get("lastRemediation"))
     concepts = [ConceptEvidence.model_validate(item) for item in _concepts(session)]
@@ -294,15 +309,43 @@ def _choose_next_step(objective: dict, current_index: int, state: dict, concept:
     return None
 
 def _append_remediation(session: LearnSession, objective: dict, failed_step) -> int:
-    """Create one alternate, validated check instead of repeating a prompt."""
+    """Create a source-specific alternate check instead of a meta-template."""
     plan = deepcopy(session.plan)
     objective = next(item for item in plan["objectives"] if item.get("id") == objective.get("id"))
     steps = objective.setdefault("steps", [])
     repair_id = f"{failed_step.id}-repair-{len(steps)}"
-    if failed_step.type in {"multiple_choice", "prediction", "ordering"}:
-        repair = ShortAnswerStep(id=repair_id, type="short_answer", title="Try the idea another way", prompt="In one short phrase, what is the key relationship here?", acceptedAnswers=[failed_step.feedback_incorrect or "the source-grounded relationship"], requiredConcepts=[], feedbackIncorrect="Use the explanation above to name the relationship.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    accepted = list(getattr(failed_step, "accepted_answers", []) or [])
+    if failed_step.type in {"multiple_choice", "prediction"}:
+        answer_id = getattr(failed_step, "answer_id", None)
+        answer = next((option.label for option in getattr(failed_step, "options", []) if option.id == answer_id), None)
+        accepted = [answer] if answer else accepted
+    elif failed_step.type == "matching":
+        matches = getattr(failed_step, "matches", {})
+        accepted = [str(next(iter(matches.values()), ""))]
+        pairs = getattr(failed_step, "pairs", [])
+        if len(pairs) >= 2:
+            options = []
+            answer_id = "a"
+            for index, pair in enumerate(pairs[:2]):
+                value = str(matches.get(pair.id, ""))
+                # Keep the fallback generic: the source comparison value is
+                # the teaching content.  Never infer a topic-specific effect
+                # (for example, a cancer-growth consequence) here.
+                label = f"{pair.label}: {value}"
+                option_id = chr(97 + index)
+                options.append({"id": option_id, "label": label})
+            scenario = str(matches.get(pairs[0].id, "the first mechanism"))
+            repair = MultipleChoiceStep(id=repair_id, type="multiple_choice", title="Apply the distinction", prompt=f"A new case shows {scenario.lower()}. Which source concept does that case resemble?", options=options, answerId=answer_id, feedbackIncorrect=f"Compare the case with the two source mechanisms: {options[0]['label']} versus {options[1]['label']}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    answer = next((str(item).strip() for item in accepted if str(item).strip()), "")
+    title = objective.get("title", "this concept")
+    if failed_step.type == "matching" and 'repair' in locals():
+        pass
+    elif failed_step.type in {"multiple_choice", "prediction", "ordering", "matching", "labeling"} and answer:
+        repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Explain {title}", prompt=f"In one sentence, explain the key change in {title}.", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], feedbackIncorrect=f"Connect {title} to this source-supported idea: {answer[:240]}", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     else:
-        repair = MultipleChoiceStep(id=repair_id, type="multiple_choice", title="Check the key distinction", prompt="Which response best matches the teaching point?", options=[{"id": "a", "label": "The source-grounded relationship described above."}, {"id": "b", "label": "An unrelated detail."}], answerId="a", feedbackIncorrect="Look for the relationship that explains why the concept works.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+        repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Apply {title}", prompt=f"What outcome should occur when {title} is applied here?", acceptedAnswers=[answer or title], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer or title)[:5]], feedbackIncorrect=f"Use the source explanation of {title} to state the outcome.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    if student_facing_quality_issues(repair):
+        raise ValueError("generated remediation contained generic meta language")
     steps.append(repair.model_dump(by_alias=True))
     session.plan = plan
     return len(steps) - 1
@@ -310,7 +353,9 @@ def _append_remediation(session: LearnSession, objective: dict, failed_step) -> 
 def _append_prerequisite_branch(session: LearnSession, objective: dict, failed_step) -> int:
     plan = deepcopy(session.plan); target = next(item for item in plan["objectives"] if item.get("id") == objective.get("id")); steps = target.setdefault("steps", [])
     branch_id = f"{failed_step.id}-prerequisite-{len(steps)}"
-    branch = ShortAnswerStep(id=branch_id, type="short_answer", title="Repair the prerequisite", prompt="What basic relationship must be true before this step can work?", acceptedAnswers=[failed_step.feedback_incorrect or "the defining relationship"], requiredConcepts=[], hints=["Name the relationship the current step depends on."], feedbackIncorrect="We will revisit this prerequisite before returning to the main idea.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    accepted = list(getattr(failed_step, "accepted_answers", []) or [])
+    answer = next((str(item).strip() for item in accepted if str(item).strip()), getattr(failed_step, "feedback_incorrect", None) or objective.get("title", "the concept"))
+    branch = ShortAnswerStep(id=branch_id, type="short_answer", title="Repair the prerequisite", prompt=f"Before you can solve {objective.get('title', 'this concept')}, what must be true?", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], hints=[f"Recall the fact that {objective.get('title', 'this concept')} depends on."], feedbackIncorrect=f"This prerequisite matters because it supports {objective.get('title', 'the concept')}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     steps.append(branch.model_dump(by_alias=True)); session.plan = plan
     return len(steps) - 1
 
@@ -366,7 +411,10 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
         state["revisitQueue"] = [cid for cid in state["revisitQueue"] if cid != objective["id"]]; concept["delayedSuccess"] = True; concept["state"] = "DEMONSTRATED"; state["revisitMode"] = False
     session.state = state
     if evaluation.result in {"incorrect", "partially_correct"}:
-        next_idx = _choose_next_step(objective, session.step_index, state, concept, failed=True)
+        # A failed comparison must receive a source-specific contrast case,
+        # not jump into an unrelated definition check that happens to follow
+        # it in the bounded plan.
+        next_idx = None if step.type == "matching" else _choose_next_step(objective, session.step_index, state, concept, failed=True)
         prereqs = prerequisite_ids(objective, concepts)
         if next_idx is None and evaluation.result == "incorrect" and int(concept.get("incorrect", 0)) >= 2 and prereqs and not state.get("prerequisiteBranch"):
             return_step = session.step_index

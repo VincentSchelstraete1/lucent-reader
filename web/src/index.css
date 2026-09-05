@@ -152,6 +152,8 @@
 .learn-teaching-visual { margin: 1rem 0 1.25rem; }
 .learn-focus-mode { position: fixed; inset: 0; z-index: 80; max-width: none !important; margin: 0; padding: clamp(1rem, 4vw, 3rem); overflow: auto; background: #f8f6f0; }
 .learn-focus-mode .learn-session-top, .learn-focus-mode > .note-kicker, .learn-focus-mode > h2, .learn-focus-mode > .learn-progress, .learn-focus-mode > .learn-step, .learn-focus-mode > .error { position: relative; z-index: 1; max-width: 980px; margin-left: auto; margin-right: auto; }
+.learn-focus-mode > .learn-ask-lucent { position: relative; z-index: 2; width: min(980px, 100%); max-width: 980px; margin: 1rem auto 0; }
+.learn-focus-mode .learn-ask-panel { max-height: min(30vh, 260px); overflow: auto; }
 .learn-focus-mode .learn-step { border: 1px solid #d8d2c5; border-radius: 18px; background: #fffdf8; padding: clamp(1.2rem, 3vw, 2.5rem); box-shadow: 0 18px 50px rgba(45, 52, 43, .08); }
 .learn-focus-mode .learn-teaching-visual .structured-visual { max-width: 900px; margin: 0 auto; }
 .learn-focus-mode .learn-focus-toggle { background: #eaf1e8; }
