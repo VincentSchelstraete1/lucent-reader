@@ -106,8 +106,8 @@ def test_tutor_event_rejects_missing_payload_and_unknown_fields():
         TutorEvent.model_validate({"id": "e", "type": "ASK_LUCENT", "message": "Explain", "unsafe": True})
 
 
-def test_ask_response_accepts_typed_scene_on_compatibility_alias():
+def test_ask_response_returns_only_the_authoritative_scene():
     scene = LearningScene(id="scene-1", revision=2, objectiveId="o", objective="Energy", targetConcepts=["Energy"], blocks=[{"id": "b", "kind": "explanation", "label": "Understand", "content": "Energy changes."}])
-    response = AskLucentResponse(answer="Watch this.", scope="IN_SCOPE_SOURCE", scene=scene, scenePatch=scene)
-    assert response.scene and response.scene_patch
-    assert response.scene_patch.revision == 2
+    response = AskLucentResponse(answer="Watch this.", scope="IN_SCOPE_SOURCE", scene=scene)
+    assert response.scene and response.scene.revision == 2
+    assert "scenePatch" not in response.model_dump(by_alias=True)

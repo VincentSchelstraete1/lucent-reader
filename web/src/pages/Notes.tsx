@@ -192,7 +192,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   async function askLucent() {
     if (!session || !askMessage.trim()) return
     setAskLoading(true); setError(null)
-    try { const result = await api.askLucent(session.id, askMessage.trim()); setAskAnswer(result); if (result.scene ?? result.scenePatch) setSession((current) => current ? { ...current, scene: result.scene ?? result.scenePatch } : current); setAskMessage("") }
+    try { const result = await api.askLucent(session.id, askMessage.trim()); setAskAnswer(result); if (result.scene) setSession((current) => current ? { ...current, scene: result.scene } : current); setAskMessage("") }
     catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
     finally { setAskLoading(false) }
   }
