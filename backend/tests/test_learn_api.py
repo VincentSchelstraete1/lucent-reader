@@ -3,7 +3,7 @@ import re
 from types import SimpleNamespace
 
 from app.services.learn_tutor import set_tutor_provider
-from app.routers.learn import _append_remediation
+from app.services.learn_engine import build_remediation_step
 from app.schemas.learn import MultipleChoiceStep
 
 
@@ -20,16 +20,17 @@ def _document_with_note(client):
     return document
 
 
-def test_remediation_path_preserves_source_context_without_name_error():
+def test_remediation_step_preserves_source_context_without_mutating_plan():
     failed = MultipleChoiceStep(
         id="check-energy", type="multiple_choice", title="Energy conversion",
         prompt="Where is speed greatest?", options=[{"id": "a", "label": "At the bottom"}, {"id": "b", "label": "At the top"}], answerId="a",
         sourceSectionIds=["s1"], sourceBlockIds=["b1"],
     )
-    session = SimpleNamespace(plan={"objectives": [{"id": "energy", "title": "Pendulum energy", "outcome": "Potential energy becomes kinetic energy as the pendulum falls.", "bottleneck": "Connect speed to kinetic energy.", "steps": []}]})
-    index = _append_remediation(session, {"id": "energy", "title": "Pendulum energy", "outcome": "Potential energy becomes kinetic energy as the pendulum falls.", "bottleneck": "Connect speed to kinetic energy."}, failed)
-    assert index == 0
-    assert session.plan["objectives"][0]["steps"][0]["sourceBlockIds"] == ["b1"]
+    objective = {"id": "energy", "title": "Pendulum energy", "outcome": "Potential energy becomes kinetic energy as the pendulum falls.", "bottleneck": "Connect speed to kinetic energy.", "steps": []}
+    repair = build_remediation_step(objective, failed, "repair-1")
+    assert repair.source_block_ids == ["b1"]
+    # Pure content generation: the objective/plan is never mutated.
+    assert objective["steps"] == []
 
 
 def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
@@ -126,3 +127,91 @@ def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
         assert payload["scene"]["revision"] >= 1
     finally:
         set_tutor_provider(None)
+
+
+def _document_with_two_sections(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/two-sections"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Two-section material", "content": "Grounded material."}).json()
+    client.post("/notes", json={
+        "title": "Two-section note", "content_type": "section_note", "document_id": document["id"],
+        "content": json.dumps({"title": "Two-section material", "sectionNotes": [
+            {"id": "s1", "title": "First idea", "bigIdea": "The first source-grounded idea.", "sourceBlockIds": ["b1"], "keyTakeaways": ["The first idea matters."], "components": []},
+            {"id": "s2", "title": "Second idea", "bigIdea": "The second source-grounded idea.", "sourceBlockIds": ["b2"], "keyTakeaways": ["The second idea matters."], "components": []},
+        ]}),
+    })
+    return document
+
+
+def test_ask_lucent_uses_the_active_scenes_objective_not_the_stale_index(client):
+    # Regression: ask_lucent() resolved its "current objective" from
+    # session.objective_index, a legacy column the authoritative runtime
+    # never advances. Once the learner moved on to a later objective, Ask
+    # Lucent kept answering questions about the *first* objective forever.
+    document = _document_with_two_sections(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    first_objective_id = session["scene"]["objectiveId"]
+
+    from sqlalchemy.orm import Session as SASession
+    from app.database import engine
+    from app.models.learn import LearnSession as LearnSessionModel
+
+    with SASession(engine) as db:
+        row = db.get(LearnSessionModel, session["id"])
+        objective_ids = [o["id"] for o in row.plan["objectives"]]
+        second_objective_id = next(oid for oid in objective_ids if oid != first_objective_id)
+        state = dict(row.state or {})
+        state["currentObjectiveId"] = second_objective_id
+        current_scene = dict(state["currentScene"])
+        current_scene["objectiveId"] = second_objective_id
+        current_scene["objective"] = "Second idea"
+        state["currentScene"] = current_scene
+        row.state = state
+        assert row.objective_index == 0  # the stale column is untouched, as the runtime leaves it
+        db.commit()
+
+    seen_prompts = []
+
+    def fake_provider(prompt, tool_name, _schema, **_kwargs):
+        seen_prompts.append(prompt)
+        return {"answer": "Grounded answer.", "toolCalls": [], "sourceSectionIds": [], "sourceBlockIds": []}
+
+    set_tutor_provider(fake_provider)
+    try:
+        response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Why does this matter?"})
+        assert response.status_code == 200
+    finally:
+        set_tutor_provider(None)
+    assert seen_prompts, "the ask model should have been called"
+    combined = " ".join(seen_prompts)
+    assert "Second idea" in combined
+    assert "First idea" not in combined
+
+
+def test_objective_progress_reflects_the_active_scene_not_the_stale_index(client):
+    # Regression: `objectiveIndex` in the session payload was read straight
+    # from the DB column, which the runtime never advances. The "Objective X
+    # of Y" progress shown in the UI stayed frozen at 1 even after the
+    # learner had genuinely moved on to a later objective.
+    document = _document_with_two_sections(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    assert session["objectiveIndex"] == 0
+    first_objective_id = session["scene"]["objectiveId"]
+
+    from sqlalchemy.orm import Session as SASession
+    from app.database import engine
+    from app.models.learn import LearnSession as LearnSessionModel
+
+    with SASession(engine) as db:
+        row = db.get(LearnSessionModel, session["id"])
+        objective_ids = [o["id"] for o in row.plan["objectives"]]
+        second_objective_id = next(oid for oid in objective_ids if oid != first_objective_id)
+        state = dict(row.state or {})
+        state["currentObjectiveId"] = second_objective_id
+        current_scene = dict(state["currentScene"])
+        current_scene["objectiveId"] = second_objective_id
+        state["currentScene"] = current_scene
+        row.state = state
+        db.commit()
+
+    refreshed = client.get(f"/learn-sessions/{session['id']}").json()
+    assert refreshed["objectiveIndex"] == 1

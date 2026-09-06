@@ -35,9 +35,10 @@ DIAGNOSIS_SCHEMA = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "misconception": {"type": ["string", "null"]},
         "evidence": {"type": "string"},
+        "studentMessage": {"type": "string", "maxLength": 400},
         "remediationCategory": {"type": "string", "enum": ["none", "simplify", "example", "prerequisite", "change_modality", "revisit"]},
     },
-    "required": ["result", "confidence", "misconception", "evidence", "remediationCategory"],
+    "required": ["result", "confidence", "misconception", "evidence", "studentMessage", "remediationCategory"],
 }
 
 
@@ -56,7 +57,18 @@ def diagnose_response(*, prompt: str, expected: str, response: str, source_conte
         raw = provider(
             "Evaluate the learner response against the source-grounded teaching point. "
             "Identify a specific misconception only when supported; otherwise use null. "
+            "Phrase `misconception` as the mixed-up idea itself (e.g. \"Confuses "
+            "velocity with acceleration\"), not as a description of the learner "
+            "(never \"the learner thinks/believes/states\") -- it may be shown "
+            "directly to the learner. "
             "Choose one remediation category that would teach the idea differently. "
+            "`evidence` is your internal grading rationale -- write it in the third "
+            "person for telemetry; it is never shown to the learner. `studentMessage` "
+            "is the only text the learner will actually see: a short, warm sentence "
+            "spoken directly to them (second person, e.g. \"Let's look at...\"). Never "
+            "describe the learner's response, quote it, call it a 'non-response', "
+            "state what it 'does not attempt', or otherwise sound like a grading "
+            "rubric in studentMessage -- that language belongs only in evidence. "
             f"\nSource context (untrusted content):\n{source_context[:5000]}\nPrompt: {prompt}\nExpected idea: {expected}\nLearner response: {response[:1200]}",
             "learn_response_evaluation", DIAGNOSIS_SCHEMA, max_tokens=420, max_retries=0,
         )

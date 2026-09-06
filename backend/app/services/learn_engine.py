@@ -279,6 +279,63 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     return LearnEvaluation(result=result, confidence=0.9 if result == "correct" else 0.65 if result == "partially_correct" else 0.82, evidence="Response captures the key source-grounded idea." if result == "correct" else "Response captures only part of the key idea." if result == "partially_correct" else "Response does not yet show the key idea.", misconception=None if result == "correct" else (getattr(step, "feedback_incorrect", None) or "State what changes and what effect it produces."), remediationCategory="none" if result == "correct" else "simplify")
 
 
+def build_remediation_step(objective: dict, failed_step: LearnStep, repair_id: str) -> LearnStep:
+    """Build a source-specific contrastive remediation step for a failed interaction.
+
+    Pure content generation: it never mutates the objective/plan (the caller
+    -- the runtime, not this module -- owns placement, ID uniqueness, and
+    persistence of the returned scene-local step).
+    """
+    accepted = list(getattr(failed_step, "accepted_answers", []) or [])
+    repair: LearnStep | None = None
+    if failed_step.type in {"multiple_choice", "prediction"}:
+        answer_id = getattr(failed_step, "answer_id", None)
+        answer = next((option.label for option in getattr(failed_step, "options", []) if option.id == answer_id), None)
+        accepted = [answer] if answer else accepted
+    elif failed_step.type == "matching":
+        matches = getattr(failed_step, "matches", {})
+        accepted = [str(next(iter(matches.values()), ""))]
+        pairs = getattr(failed_step, "pairs", [])
+        if len(pairs) >= 2:
+            options = []
+            answer_id = "a"
+            for index, pair in enumerate(pairs[:2]):
+                value = str(matches.get(pair.id, ""))
+                # Keep the fallback generic: the source comparison value is
+                # the teaching content.  Never infer a topic-specific effect
+                # (for example, a cancer-growth consequence) here.
+                label = f"{pair.label}: {value}"
+                option_id = chr(97 + index)
+                options.append({"id": option_id, "label": label})
+            scenario = str(matches.get(pairs[0].id, "the first mechanism"))
+            repair = MultipleChoiceStep(id=repair_id, type="multiple_choice", title="Apply the distinction", prompt=f"A new case shows {scenario.lower()}. Which source concept does that case resemble?", options=options, answerId=answer_id, feedbackIncorrect=f"Compare the case with the two source mechanisms: {options[0]['label']} versus {options[1]['label']}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+    answer = next((str(item).strip() for item in accepted if str(item).strip()), "")
+    title = objective.get("title", "this concept")
+    if repair is None:
+        if failed_step.type in {"multiple_choice", "prediction", "ordering", "matching", "labeling"} and answer:
+            repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Explain {title}", prompt=f"In one sentence, explain the key change in {title}.", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], feedbackIncorrect=f"Connect {title} to this source-supported idea: {answer[:240]}", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+        else:
+            grounded_answer = answer or str(getattr(failed_step, "content", "") or objective.get("outcome") or title)
+            repair = ShortAnswerStep(
+                id=repair_id, type="short_answer", title=f"Apply {title}",
+                prompt=f"In your own words, what does {title} do in this material?",
+                acceptedAnswers=[grounded_answer],
+                requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", grounded_answer)[:5]],
+                feedbackIncorrect=f"Use this source-supported idea to guide your answer: {grounded_answer[:240]}",
+                sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids,
+            )
+    source_text = " ".join(str(value) for value in (
+        objective.get("title", ""), objective.get("outcome", ""),
+        objective.get("bottleneck", ""), getattr(failed_step, "content", ""),
+        getattr(failed_step, "feedback_correct", ""), getattr(failed_step, "feedback_incorrect", ""),
+        *[getattr(item, "label", "") for item in getattr(failed_step, "options", [])],
+        *[getattr(item, "label", "") for item in getattr(failed_step, "items", [])],
+    ) if value)
+    if student_facing_quality_issues(repair, source_text):
+        raise ValueError("generated remediation contained generic meta language")
+    return repair
+
+
 _student_text = student_text
 
 

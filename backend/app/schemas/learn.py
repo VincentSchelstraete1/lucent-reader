@@ -486,7 +486,15 @@ class LearnEvaluation(BaseModel):
     result: EvaluationResult
     confidence: float = Field(ge=0, le=1)
     misconception: str | None = None
+    # Internal grading rationale (third-person, analytical) -- never rendered
+    # directly to the learner. Telemetry and misconception detection may use
+    # it; public feedback must use `student_message` instead.
     evidence: str = Field(min_length=1, max_length=500)
+    # Natural, second-person message actually addressed to the learner. The
+    # deterministic evaluator leaves this unset and callers fall back to a
+    # short generic message; the model-backed diagnosis is required to set it
+    # so its analytical `evidence` text never leaks into the public scene.
+    student_message: str | None = Field(default=None, alias="studentMessage", max_length=400)
     remediation_category: RemediationCategory = Field(alias="remediationCategory")
 
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -150,16 +150,32 @@ def build_tutor_observation(session, *, event: dict[str, Any] | None = None, sou
     return TutorObservation(sessionId=str(session.id), objectiveId=scene.objective_id, currentConcept=scene.objective, learnerGoal=session.goal, evidence={key: concept.get(key) for key in ("state", "attempts", "correct", "incorrect", "hintsUsed", "scaffold", "lastResult")}, recentAttempts=list(state.get("recentAttempts", []))[-8:], misconceptions=list(concept.get("misconceptions", []))[-6:], successfulStrategies=list(concept.get("successfulStrategies", []))[-8:], failedStrategies=list(concept.get("failedStrategies", []))[-8:], successfulModalities=list(concept.get("successfulModalities", []))[-8:], failedModalities=list(concept.get("failedModalities", []))[-8:], previousTutorActions=list(state.get("previousTutorActions", []))[-8:], currentTeachingSurface=next((block.kind for block in scene.blocks if block.kind == "practice"), None), currentVisual=scene.visual_state.model_dump(by_alias=True) if scene.visual_state else None, currentVisualStage=scene.visual_state.stage if scene.visual_state else 0, reviewState=concept.get("reviewDue"), sourceBlocks=(source_blocks or [])[:8], sourceSectionIds=scene.source_section_ids[:8], sourceBlockIds=scene.source_block_ids[:12], candidateSteps=[])
 
 
-def select_target_objective(session) -> str | None:
+def select_target_objective(session, *, exclude_concept_id: str | None = None) -> str | None:
+    """Choose the next objective the runtime should transition to.
+
+    The revisit queue is checked first so a concept flagged for review gets
+    priority over objectives that haven't been touched yet. An objective is
+    only selectable while it still has an unanswered/unused candidate --
+    otherwise two exhausted objectives would bounce the learner back and
+    forth between them forever instead of ever completing.
+    """
     state = _state(session)
-    concepts = {item.get("conceptId"): item for item in state.get("concepts", [])}
+    concepts = {str(item.get("conceptId")): item for item in state.get("concepts", [])}
+    objectives_by_id = {str(item.get("id")): item for item in (session.plan or {}).get("objectives", [])}
     for concept_id in state.get("revisitQueue", []):
-        if concept_id in concepts:
-            return str(concept_id)
+        concept_id = str(concept_id)
+        if concept_id == str(exclude_concept_id):
+            continue
+        objective = objectives_by_id.get(concept_id)
+        if objective is not None and _objective_has_remaining_candidates(objective, state):
+            return concept_id
     for objective in (session.plan or {}).get("objectives", []):
-        concept = concepts.get(objective.get("id"), {})
-        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED":
-            return str(objective.get("id"))
+        objective_id = str(objective.get("id"))
+        if objective_id == str(exclude_concept_id):
+            continue
+        concept = concepts.get(objective_id, {})
+        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state):
+            return objective_id
     return None
 
 
@@ -172,19 +188,28 @@ def _private_for_rendered_scene(scene: LearningScene, *, objective_id: str, deci
     interaction_id = scene.response_interaction_id
     if not interaction_id:
         return None
-    step = next((block.step for block in scene.blocks if block.kind == "practice" and block.step and block.step.id == interaction_id), None)
-    if step is None and fallback_step is not None and getattr(fallback_step, "id", None) == interaction_id:
-        step = fallback_step
-    if step is None and fallback_step is not None and interaction_id:
-        # compose_learning_scene may expose a public LearnStepView while the
-        # private model is a richer normalized step; trust the executor's
-        # selected target when identities are otherwise consistent.
+    # The rendered scene block only ever carries the public LearnStepView,
+    # which omits answer-bearing fields (answerId, acceptedAnswers,
+    # correctOrder, matches, answerMap, ...). Grading state must be built from
+    # the real private step object, never from that public view. Prefer the
+    # executor's own selected step, then the objective's authored candidate by
+    # ID; only fall back to coercing the public view for step types that
+    # genuinely carry no private-only fields (e.g. teach/walkthrough).
+    step = None
+    if fallback_step is not None and getattr(fallback_step, "id", None) == interaction_id:
         step = fallback_step
     if step is None and objective:
         raw = next((item for item in objective.get("steps", []) if str(item.get("id")) == str(interaction_id)), None)
         if raw:
             try:
                 step = _coerce_step(raw, objective)
+            except Exception:
+                step = None
+    if step is None:
+        block_step = next((block.step for block in scene.blocks if block.kind == "practice" and block.step and block.step.id == interaction_id), None)
+        if block_step is not None:
+            try:
+                step = _coerce_step(block_step.model_dump(by_alias=True), objective)
             except Exception:
                 step = None
     if step is None:
@@ -251,21 +276,6 @@ def return_from_prerequisite(session) -> dict[str, Any] | None:
     state["currentObjectiveId"] = branch.get("returnObjectiveId")
     session.state = state
     return branch
-
-
-def apply_review_schedule(concept: dict[str, Any], *, result: str, hints_used: int = 0, transfer: bool = False) -> str:
-    if result != "correct":
-        return "LATER_THIS_SESSION"
-    if transfer:
-        return "FUTURE_REVIEW"
-    return "NEXT_SESSION" if hints_used else "NEXT_SESSION"
-
-
-def select_due_review(session) -> str | None:
-    for concept in _state(session).get("concepts", []):
-        if concept.get("reviewDue") in {"LATER_THIS_SESSION", "NEXT_SESSION", "FUTURE_REVIEW"} and concept.get("state") in {"NEEDS_REVIEW", "STRUGGLING", "DEVELOPING"}:
-            return str(concept.get("conceptId"))
-    return None
 
 
 def completion_met(session) -> bool:
@@ -353,6 +363,63 @@ def build_student_feedback(evaluation: Any, *, interaction_id: str, source_block
     return {"result": getattr(evaluation, "result", "insufficient_evidence"), "message": getattr(evaluation, "evidence", "Let's look at this together."), "respondsToInteractionId": interaction_id, "sourceSectionIds": [str(item) for block in (source_blocks or []) for item in block.get("sectionIds", [])][:8], "sourceBlockIds": [str(item) for block in (source_blocks or []) for item in block.get("blockIds", [])][:12]}
 
 
+def _objective_has_remaining_candidates(objective: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Whether an objective still has an unanswered/unused authored candidate.
+
+    Selecting an objective by "not DEMONSTRATED" alone is not enough: a
+    struggling objective that has already exhausted its own candidate pool is
+    also "not DEMONSTRATED", so two such objectives would bounce the learner
+    back and forth between them forever instead of ever completing.
+    """
+    answered = set(state.get("answeredInteractionIds") or [])
+    used_teaching = set(state.get("usedTeachingIds") or [])
+    for raw in objective.get("steps") or []:
+        if not isinstance(raw, dict):
+            continue
+        step_id = str(raw.get("id"))
+        if raw.get("type") in {"teach", "walkthrough"}:
+            if step_id not in used_teaching:
+                return True
+        elif step_id not in answered:
+            return True
+    return False
+
+
+def _advance_objective_or_complete(session, state: dict[str, Any], inert_scene: LearningScene, *, exclude_concept_id: str, event_id: str | None, db=None) -> tuple[LearningScene, dict[str, Any] | None]:
+    """Move on once an objective's candidate pool is exhausted.
+
+    Without this, a scene with no remaining practice/teaching candidates is
+    re-persisted unchanged (only the revision bumps), so Continue never
+    reaches the next objective or a completed session -- it just dead-ends on
+    the same inert scene forever.
+    """
+    # persist_scene_revision() (and _legacy_scene()'s own composition) re-read
+    # session.state from scratch, so the caller's in-memory evidence mutations
+    # must be committed onto the session before any persistence call below --
+    # otherwise a response that happens to exhaust the last candidate has its
+    # graded evidence silently discarded.
+    # Feedback/hints are scoped to the objective that produced them; carrying
+    # them across a transition shows the learner a message about a concept
+    # that is no longer on screen.
+    state.pop("lastFeedback", None)
+    state.pop("lastFeedbackKind", None)
+    session.state = state
+    next_objective_id = select_target_objective(session, exclude_concept_id=exclude_concept_id)
+    next_objective = _objective(session.plan or {}, next_objective_id) if next_objective_id is not None else None
+    if next_objective is not None:
+        scene, private = _legacy_scene(session, next_objective)
+        state["currentObjectiveId"] = str(next_objective.get("id"))
+        session.state = state
+        scene = persist_scene_revision(session, scene, private, event_id=event_id, db=db)
+        return scene, private
+    scene = persist_scene_revision(session, inert_scene, None, event_id=event_id, db=db)
+    session.status = "completed"
+    session.ended_reason = "evidence_sufficient" if completion_met(session) else "objectives_exhausted"
+    if db is not None:
+        db.flush()
+    return scene, None
+
+
 def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dict[str, Any]] | None = None):
     """Process one bounded event and return the authoritative scene/private pair.
 
@@ -362,7 +429,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     """
     from pydantic import TypeAdapter
     from app.models.learn import LearnAttempt
-    from app.services.learn_engine import evaluate_step, public_step
+    from app.services.learn_engine import build_remediation_step, evaluate_step, public_step
     from app.services.learn_scene import compose_learning_scene
     from app.services.learn_tutor import choose_tutor_decision, diagnose_response
 
@@ -542,11 +609,11 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         answered_ids = set(state.get("answeredInteractionIds") or [])
         used_teaching = set(state.get("usedTeachingIds") or [])
         next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in answered_ids and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"} and item.id not in answered_ids and item.id not in used_teaching), None)
+    event_id_value = getattr(event, "id", None) if not isinstance(event, dict) else event.get("id")
     if next_step is None:
         if evaluation is not None and evaluation.result == "correct":
             completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
-            completed_scene = persist_scene_revision(session, completed_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
-            return completed_scene, None
+            return _advance_objective_or_complete(session, state, completed_scene, exclude_concept_id=concept_id, event_id=event_id_value, db=db)
         # Candidate assets are finite, but the tutor runtime is not.  Compose
         # one bounded, source-grounded follow-up in memory rather than
         # appending a repair step to LearnPlan.  Its stable ID is derived from
@@ -560,23 +627,55 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
             session.state = state
             review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
-            return persist_scene_revision(session, review_scene, None, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), None
+            return _advance_objective_or_complete(session, state, review_scene, exclude_concept_id=concept_id, event_id=event_id_value, db=db)
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
         generated_id = bounded_id("repair", concept_id, attempt_no, int(scene.revision or 0) + 1)
         if current is not None and generated_id == current.id:
             generated_id = bounded_id("repair", concept_id, attempt_no + 1)
-        generated = ShortAnswerStep(
-            id=generated_id,
-            type="short_answer",
-            title=f"Apply {objective.get('title', 'this idea')}",
-            prompt=f"In your own words, explain the main idea of {objective.get('title', 'this concept')}.",
-            acceptedAnswers=[outcome],
-            requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5],
-            hints=[f"Use this source-supported idea: {outcome[:220]}"],
-            feedbackIncorrect=f"Start with this source-supported idea: {outcome[:260]}",
-            sourceSectionIds=list(objective.get("sourceSectionIds", [])),
-            sourceBlockIds=list(objective.get("sourceBlockIds", [])),
-        )
+        title = str(objective.get("title", "this concept"))
+        required_concepts = [word for word in outcome.split() if len(word) > 4][:5]
+        # Repeated remediation for the same objective must read as a genuinely
+        # different follow-up, not the same canned prompt with a new ID --
+        # vary both the interaction type and the phrasing by attempt. The
+        # first remediation lands here at attempt_no == 2 (the original
+        # response was attempt 1); attempt_no > 3 exits to needs_review
+        # above, so 3 is the only other value this branch ever sees.
+        generated = None
+        if attempt_no < 3 and current is not None and getattr(current, "type", None) in {"multiple_choice", "prediction", "matching", "ordering", "labeling"}:
+            # A wrong structured answer deserves a targeted contrast built
+            # from what the learner actually got wrong, not the generic
+            # "explain the main idea" prompt every objective falls back to.
+            try:
+                generated = build_remediation_step(objective, current, generated_id)
+            except Exception:
+                generated = None
+        if generated is not None:
+            pass
+        elif attempt_no >= 3:
+            generated = TeachBackStep(
+                id=generated_id,
+                type="teach_back",
+                title=f"Teach {title} back",
+                prompt=f"Explain {title} to a classmate in one or two sentences, in your own words.",
+                requiredConcepts=required_concepts,
+                hints=[f"Use this source-supported idea: {outcome[:220]}"],
+                feedbackIncorrect=f"Start with this source-supported idea: {outcome[:260]}",
+                sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+            )
+        else:
+            generated = ShortAnswerStep(
+                id=generated_id,
+                type="short_answer",
+                title=f"Apply {title}",
+                prompt=f"In your own words, explain the main idea of {title}.",
+                acceptedAnswers=[outcome],
+                requiredConcepts=required_concepts,
+                hints=[f"Use this source-supported idea: {outcome[:220]}"],
+                feedbackIncorrect=f"Start with this source-supported idea: {outcome[:260]}",
+                sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+            )
         candidates.append(generated)
         next_step = generated
     fallback_action = TutorAction(id=bounded_id("action", concept_id, next_step.id), type="teach_concept" if next_step.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=concept_id, stepId=next_step.id, rationale="Continue with the next grounded learning move.")
@@ -597,7 +696,15 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         state["usedTeachingIds"] = list(dict.fromkeys([*(state.get("usedTeachingIds") or []), next_step.id]))[-16:]
     feedback = None
     if evaluation is not None:
-        feedback = evaluation.evidence if evaluation.result != "correct" else getattr(current, "feedback_correct", None) or "Good — that matches the material."
+        # `evaluation.evidence` is internal grading rationale (third-person,
+        # analytical) and must never render directly; `student_message` is the
+        # model's natural, second-person text meant for the learner. The
+        # deterministic evaluator never sets student_message, so its evidence
+        # text (already written to be learner-appropriate) is the fallback.
+        if evaluation.result == "correct":
+            feedback = getattr(current, "feedback_correct", None) or "Good — that matches the material."
+        else:
+            feedback = evaluation.student_message or evaluation.evidence
         state["lastFeedback"] = feedback
     state["lastTutorDecision"] = decision.model_dump(by_alias=True)
     state["previousTutorActions"] = (list(state.get("previousTutorActions", [])) + [decision.teaching_action])[-8:]

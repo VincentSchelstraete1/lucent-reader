@@ -20,6 +20,11 @@ os.environ["DATABASE_URL"] = _dev_url
 os.environ["APP_ENV"] = "test"
 os.environ["ALLOWED_ORIGINS"] = "http://testserver"
 os.environ["API_ORIGIN"] = "http://testserver"
+# Force this off regardless of backend/.env: tests that want the tutor model
+# inject a fake via learn_tutor.set_tutor_provider() (see
+# learn_agent_scenarios/harness.py), which bypasses this flag entirely. Tests
+# relying on the deterministic fallback must never make a live Anthropic call.
+os.environ["LEARN_TUTOR_MODEL_ENABLED"] = "0"
 
 
 def _ensure_database_exists(url: str) -> None:

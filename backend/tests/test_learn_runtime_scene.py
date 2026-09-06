@@ -127,6 +127,127 @@ def test_session_payload_serializes_runtime_semantic_scaffold():
     assert payload.concept_states[0].scaffolding_level == "FULL"
 
 
+def test_generated_followup_can_be_answered_and_graded_correctly():
+    # Regression: _private_for_rendered_scene used to persist the public
+    # LearnStepView (which has no answer fields) as the graded interaction
+    # whenever a practice block already existed in the rendered scene -- which
+    # is always. A generated repair question could therefore never be graded
+    # correctly, so it kept regenerating instead of ever advancing evidence.
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "a"}})
+    scene, private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    assert private and private["interaction"]["id"].startswith("repair-")
+    assert private["interaction"].get("acceptedAnswers"), "private interaction lost its answer-bearing fields"
+    followup_id = private["interaction"]["id"]
+    accepted_answer = private["interaction"]["acceptedAnswers"][0]
+    process_tutor_event(session, {"id": "answer-followup", "type": "RESPONSE", "interactionId": followup_id, "response": {"response": accepted_answer}})
+    concept = session.state["concepts"][0]
+    assert concept["correct"] >= 1
+    assert followup_id in session.state["answeredInteractionIds"]
+
+
+def test_exhausted_objective_advances_to_next_unmastered_objective():
+    # Regression: once an objective's candidates were exhausted, the runtime
+    # persisted the same inert (no-practice) scene forever -- Continue bumped
+    # the revision but never reached the next objective. Exhaustion is
+    # reached the way a real learner would: keep answering incorrectly,
+    # never by mashing Continue on an already-active, unanswered practice.
+    session = _session()
+    session.plan["objectives"].append({
+        "id": "second", "title": "Second objective", "outcome": "Explain the second idea.",
+        "steps": [{"id": "second-teach", "type": "teach", "title": "Second", "content": "Second idea content."}],
+    })
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    for index in range(8):
+        if scene.objective_id != "energy":
+            break
+        interaction_id = scene.response_interaction_id
+        scene, _ = process_tutor_event(session, {"id": f"wrong-{index}", "type": "RESPONSE", "interactionId": interaction_id, "response": {"response": "definitely not the source-supported idea", "optionId": "a"}})
+    assert scene.objective_id == "second"
+    assert session.state["currentObjectiveId"] == "second"
+
+
+def test_exhausted_single_objective_session_completes_instead_of_dead_ending():
+    session = _session()
+    session.report = None
+    session.ended_reason = None
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    for index in range(8):
+        if session.status == "completed":
+            break
+        interaction_id = scene.response_interaction_id
+        scene, _ = process_tutor_event(session, {"id": f"wrong-{index}", "type": "RESPONSE", "interactionId": interaction_id, "response": {"response": "definitely not the source-supported idea", "optionId": "a"}})
+    assert session.status == "completed"
+    # Every attempt in this test was wrong, so nothing was ever demonstrated;
+    # the session ends because there is nothing left to try, not because
+    # evidence was sufficient.
+    assert session.ended_reason == "objectives_exhausted"
+
+
+def test_two_exhausted_objectives_complete_instead_of_oscillating():
+    # Regression: selecting "any objective that is not DEMONSTRATED" as the
+    # transition target ignored whether that objective itself still had any
+    # candidates left. Two exhausted objectives bounced the learner back and
+    # forth between them forever (observed live: 10+ consecutive alternations
+    # with no progress) instead of ever completing the session.
+    session = _session()
+    session.report = None
+    session.ended_reason = None
+    session.plan["objectives"].append({
+        "id": "second", "title": "Second objective", "outcome": "Explain the second idea.",
+        "steps": [{"id": "second-teach", "type": "teach", "title": "Second", "content": "Second idea content."}],
+    })
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    seen_objectives = []
+    for index in range(16):
+        if session.status == "completed":
+            break
+        seen_objectives.append(scene.objective_id)
+        interaction_id = scene.response_interaction_id
+        if interaction_id:
+            scene, _ = process_tutor_event(session, {"id": f"wrong-{index}", "type": "RESPONSE", "interactionId": interaction_id, "response": {"response": "definitely not the source-supported idea", "optionId": "a"}})
+        else:
+            scene, _ = process_tutor_event(session, {"id": f"continue-{index}", "type": "CONTINUE"})
+    assert session.status == "completed", f"session never completed; objective sequence was {seen_objectives}"
+    # No A -> B -> A oscillation: once an objective is left behind for
+    # another, it must never be revisited before completion (repeating the
+    # *same* objective across consecutive turns while still working on it is
+    # normal and expected).
+    distinct_runs = [key for key, _ in __import__("itertools").groupby(seen_objectives)]
+    assert len(distinct_runs) == len(set(distinct_runs)), f"objective sequence oscillated: {seen_objectives}"
+
+
+def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
+    # A wrong structured (matching/multiple_choice/prediction/ordering/
+    # labeling) answer should get a targeted contrast built from what the
+    # learner actually got wrong, not the generic "explain the main idea"
+    # short-answer prompt every objective otherwise falls back to.
+    objective = {
+        "id": "genetics", "title": "Opposing mutation mechanisms",
+        "outcome": "Explain how proto-oncogenes and tumor suppressors differ.",
+        "steps": [
+            {
+                "id": "match", "type": "matching", "title": "Match the mechanisms",
+                "prompt": "Match each pathway to its mutation type.",
+                "pairs": [{"id": "oncogene", "label": "Proto-oncogene"}, {"id": "suppressor", "label": "Tumor suppressor"}],
+                "matches": {"oncogene": "Gain-of-function", "suppressor": "Loss-of-function"},
+                "sourceSectionIds": ["genetics"], "sourceBlockIds": ["block-1"],
+            },
+        ],
+    }
+    session = SimpleNamespace(id="session-2", plan={"objectives": [objective]}, state={}, objective_index=0, step_index=0, status="active", goal="understand")
+    scene, private = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    assert scene.response_interaction_id == "match"
+    scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "match", "response": {"response": "{}"}})
+    assert private is not None
+    interaction = private["interaction"]
+    assert interaction["type"] == "multiple_choice"
+    text = str(interaction).casefold()
+    assert "gain-of-function" in text and "loss-of-function" in text
+    assert "proto-oncogene" in text and "tumor suppressor" in text
+
+
 def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
     session = _session()
     session.plan["objectives"].append({"id": "prereq", "title": "Prerequisite", "outcome": "Know the prerequisite", "steps": [{"id": "p", "type": "teach", "title": "Prerequisite", "content": "A prerequisite idea."}]})

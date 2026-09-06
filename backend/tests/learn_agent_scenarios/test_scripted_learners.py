@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from copy import deepcopy
 from uuid import UUID
 
@@ -9,7 +8,6 @@ import pytest
 
 from app.database import SessionLocal
 from app.models.learn import LearnSession
-from app.routers.learn import _action_for, _append_remediation, _parse_step
 from app.schemas.learn import ShortAnswerStep
 from app.services.adaptive_policy import next_scaffold
 from app.services.learn_engine import build_learn_plan, student_facing_quality_issues
@@ -109,34 +107,6 @@ def test_fifty_replans_keep_runtime_and_persistence_bounded(client):
     fetched = client.get(f"/learn-sessions/{session['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["id"] == session["id"]
-
-
-def test_generated_action_id_is_stable_bounded_and_keeps_step_identity():
-    step = ShortAnswerStep(id="source-step-" + "x" * 48, type="short_answer", title="Explain energy", prompt="Why does speed increase?", acceptedAnswers=["potential energy becomes kinetic energy"], sourceSectionIds=["s1"], sourceBlockIds=["b1"])
-    objective = {"id": "objective-" + "y" * 45, "title": "Energy"}
-    concept = {"state": "DEVELOPING", "interactionTypes": []}
-    first = _action_for(step, objective, concept)
-    second = _action_for(step, objective, concept)
-    assert first.id == second.id
-    assert len(first.id) <= 60
-    assert first.step_id == step.id
-    assert step.id not in first.id
-
-
-def test_remediation_identity_does_not_derive_from_previous_repair():
-    step = ShortAnswerStep(id="original-check", type="short_answer", title="Explain energy", prompt="Why does speed increase?", acceptedAnswers=["potential becomes kinetic"], sourceSectionIds=["s1"], sourceBlockIds=["b1"])
-    session = LearnSession(plan={"objectives": [{"id": "energy", "title": "Energy", "steps": [step.model_dump(by_alias=True)]}]}, state={})
-    current = step
-    generated = []
-    for _ in range(3):
-        index = _append_remediation(session, session.plan["objectives"][0], current)
-        assert index is not None
-        current = _parse_step(session.plan["objectives"][0]["steps"][index])
-        generated.append(current.id)
-    assert _append_remediation(session, session.plan["objectives"][0], current) is None
-    assert len(set(generated)) == 3
-    assert all(len(step_id) <= 60 for step_id in generated)
-    assert all(not re.search(r"repair-.+repair-", step_id) for step_id in generated)
 
 
 def test_scaffold_evidence_distinguishes_assisted_independent_and_transfer_success():

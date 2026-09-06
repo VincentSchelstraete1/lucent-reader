@@ -26,6 +26,7 @@ class TutorTraceTurn:
     evidence_update: list[dict[str, Any]]
     session_state: dict[str, Any]
     status_code: int
+    feedback: str | None = None
 
 
 @dataclass
@@ -48,12 +49,12 @@ class FakeTutorProvider:
         if tool_name == "learn_response_evaluation":
             response = prompt.rsplit("Learner response:", 1)[-1].strip().casefold()
             if "independent correct" in response or "transfer success" in response:
-                return {"result": "correct", "confidence": 0.94, "misconception": None, "evidence": "The response independently explains the source-supported relationship.", "remediationCategory": "none"}
+                return {"result": "correct", "confidence": 0.94, "misconception": None, "evidence": "The response independently explains the source-supported relationship.", "studentMessage": "Nice work -- that's exactly the relationship.", "remediationCategory": "none"}
             if "partially" in response or "not sure" in response:
-                return {"result": "partially_correct", "confidence": 0.72, "misconception": None, "evidence": "The response contains one source-supported element but omits the consequence.", "remediationCategory": "simplify"}
+                return {"result": "partially_correct", "confidence": 0.72, "misconception": None, "evidence": "The response contains one source-supported element but omits the consequence.", "studentMessage": "You're partway there -- now connect that to what it causes.", "remediationCategory": "simplify"}
             if "i don't know" in response or "i do not know" in response:
-                return {"result": "insufficient_evidence", "confidence": 0.92, "misconception": None, "evidence": "The learner explicitly reported uncertainty.", "remediationCategory": "example"}
-            return {"result": "incorrect", "confidence": 0.91, "misconception": "The learner reverses the source-supported cause and effect.", "evidence": "The response states the opposite direction from the source evidence.", "remediationCategory": "change_modality"}
+                return {"result": "insufficient_evidence", "confidence": 0.92, "misconception": None, "evidence": "The learner explicitly reported uncertainty.", "studentMessage": "No problem -- let's build the idea together first.", "remediationCategory": "example"}
+            return {"result": "incorrect", "confidence": 0.91, "misconception": "Reverses the source-supported cause and effect", "evidence": "The response states the opposite direction from the source evidence.", "studentMessage": "Not quite -- the direction is reversed from what the material describes.", "remediationCategory": "change_modality"}
         if tool_name == "learn_tutor_decision":
             concept_match = re.search(r"objectiveId['\"]?:\s*['\"]([^'\"]+)", prompt)
             concept_id = concept_match.group(1) if concept_match else "concept"
@@ -183,6 +184,7 @@ def run_turn(client, trace: TutorScenarioTrace, session_payload: dict[str, Any],
         evidence_update=list(payload.get("conceptStates") or []),
         session_state=state_after,
         status_code=response.status_code,
+        feedback=payload.get("feedback"),
     ))
     return payload
 
@@ -214,6 +216,14 @@ def assert_trace_invariants(trace: TutorScenarioTrace) -> None:
         assert len(turn.session_state.get("branchStack", [])) <= 4
         assert len(turn.session_state.get("recentAttempts", [])) <= 8
         assert len(turn.session_state.get("previousTutorActions", [])) <= 8
+        if turn.feedback:
+            # Internal grading rationale (analytical, third-person) must never
+            # reach the public feedback text -- only a natural, second-person
+            # student_message (or the deterministic evaluator's own
+            # learner-appropriate evidence text) may.
+            lowered = turn.feedback.casefold()
+            assert "the learner" not in lowered, f"internal grading language leaked into public feedback: {turn.feedback!r}"
+            assert "non-response" not in lowered, f"internal grading language leaked into public feedback: {turn.feedback!r}"
     # A stress run may legitimately compose fresh bounded retries; persisted
     # history is capped separately while IDs remain bounded and non-recursive.
     assert len(seen_step_ids) <= 64

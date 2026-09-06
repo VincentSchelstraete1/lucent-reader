@@ -1,10 +1,9 @@
-from app.services.learn_engine import build_learn_plan, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues
+from app.services.learn_engine import build_learn_plan, build_remediation_step, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
-from app.routers.learn import _append_remediation, _ask_rate_allowed, _ask_scope, _record_tutor_event
-from app.models.learn import LearnSession
+from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event
 
 
 def _note():
@@ -219,15 +218,16 @@ def test_matching_failure_remediation_is_a_source_specific_contrast_case():
         matches={"oncogene": "Gain-of-function", "suppressor": "Loss-of-function"},
         sourceSectionIds=["genetics"], sourceBlockIds=["block-1"],
     )
-    session = LearnSession(plan={"objectives": [{"id": "genetics", "title": "Opposing mutation mechanisms", "steps": [step.model_dump(by_alias=True)]}]}, state={})
-    index = _append_remediation(session, session.plan["objectives"][0], step)
-    repair = session.plan["objectives"][0]["steps"][index]
-    text = str(repair).casefold()
-    assert repair["type"] == "multiple_choice"
+    objective = {"id": "genetics", "title": "Opposing mutation mechanisms", "steps": [step.model_dump(by_alias=True)]}
+    repair = build_remediation_step(objective, step, "repair-1")
+    text = str(repair.model_dump(by_alias=True)).casefold()
+    assert repair.type == "multiple_choice"
     assert "gain-of-function" in text and "loss-of-function" in text
     assert "proto-oncogene" in text and "tumor suppressor" in text
-    assert not student_facing_quality_issues(MultipleChoiceStep.model_validate(repair))
-    assert repair["sourceSectionIds"] == ["genetics"]
+    assert not student_facing_quality_issues(repair)
+    assert repair.source_section_ids == ["genetics"]
+    # Pure content generation: the objective/plan is never mutated.
+    assert objective["steps"] == [step.model_dump(by_alias=True)]
 
 def test_tutor_agent_fake_provider_selects_a_bounded_next_intervention():
     observation = TutorObservation(
