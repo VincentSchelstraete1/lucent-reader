@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, build_tutor_observation, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite, select_target_objective, _legacy_scene
 from app.schemas.learn import ConceptEvidence
+from app.routers.learn import _initial_state
 
 
 def _session():
@@ -15,6 +16,12 @@ def _session():
         ],
     }
     return SimpleNamespace(id="session-1", plan={"objectives": [objective]}, state={}, objective_index=0, step_index=0, status="active", goal="understand")
+
+
+def test_new_session_state_does_not_inherit_prior_evidence():
+    state = _initial_state(None, None, 1, {"objectives": [{"id": "energy", "title": "Energy"}]})
+    assert state["concepts"][0]["attempts"] == 0
+    assert state["concepts"][0]["state"] == "NOT_SEEN"
 
 
 def test_runtime_composes_teaching_and_practice_and_updates_evidence():

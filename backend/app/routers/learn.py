@@ -488,10 +488,14 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scene=scene_response.scene)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
-    prior = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document_id).order_by(LearnSession.updated_at.desc())).scalars().first()
-    prior_map = {c.get("conceptId"): c for c in ((prior.state or {}).get("concepts") if prior else [])}; concepts = []
+    # A newly-created session (including an explicit restart) must begin with
+    # fresh evidence.  Reusing the most recent session's concept counters made
+    # a fresh learner journey appear mastered and could advance after a wrong
+    # response.  Resume uses the existing session path above, so no evidence
+    # carry-over is needed here.
+    concepts = []
     for objective in plan.get("objectives", []):
-        previous = dict(prior_map.get(objective.get("id"), {}))
+        previous = {}
         concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": previous.get("attempts", 0), "correct": previous.get("correct", 0), "partiallyCorrect": previous.get("partiallyCorrect", 0), "incorrect": previous.get("incorrect", 0), "insufficientEvidence": previous.get("insufficientEvidence", 0), "hintsUsed": previous.get("hintsUsed", 0), "interactionTypes": previous.get("interactionTypes", []), "misconceptions": previous.get("misconceptions", []), "failedStrategies": previous.get("failedStrategies", []), "successfulStrategies": previous.get("successfulStrategies", []), "failedModalities": previous.get("failedModalities", []), "successfulModalities": previous.get("successfulModalities", []), "recognitionEvidence": previous.get("recognitionEvidence", 0), "recallEvidence": previous.get("recallEvidence", 0), "explanationEvidence": previous.get("explanationEvidence", 0), "applicationEvidence": previous.get("applicationEvidence", 0), "transferEvidence": previous.get("transferEvidence", 0), "scaffoldingLevel": previous.get("scaffoldingLevel", 0), "scaffold": previous.get("scaffold", "FULL"), "hintDependence": previous.get("hintDependence", 0), "scaffoldDependence": previous.get("scaffoldDependence", 0), "reviewDue": previous.get("reviewDue"), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None, "contentPolicy": content_policy(objective)})
     queue = [c["conceptId"] for c in concepts if c["state"] in {"NEEDS_REVIEW", "STRUGGLING"} or c.get("reviewDue") in {"NEXT_SESSION", "FUTURE_REVIEW"}]
     return {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": []}
