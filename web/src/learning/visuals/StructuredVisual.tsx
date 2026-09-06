@@ -7,7 +7,15 @@ function wrap(value: string, max: number) { const lines: string[] = []; let line
 function rankNodes(nodes: StructuredVisualSpec["nodes"], edges: StructuredVisualSpec["edges"]) { const rank = new Map(nodes.map((n) => [n.id, 0])); const incoming = new Map(nodes.map((n) => [n.id, 0])); edges.forEach((e) => incoming.has(e.target) && incoming.set(e.target, (incoming.get(e.target) || 0) + 1)); const queue = nodes.filter((n) => !(incoming.get(n.id) || 0)).map((n) => n.id); for (let i = 0; i < nodes.length * 2 && queue.length; i++) { const id = queue.shift()!; edges.filter((e) => e.source === id).forEach((e) => { rank.set(e.target, Math.max(rank.get(e.target) || 0, (rank.get(id) || 0) + 1)); const left = (incoming.get(e.target) || 1) - 1; incoming.set(e.target, left); if (left <= 0) queue.push(e.target) }) } return rank }
 function edgePath(a: Metric, b: Metric) {
   const same = Math.abs(a.y - b.y) < 8
-  if (same) return `M ${a.x + a.width} ${a.y + a.height / 2} L ${b.x} ${b.y + b.height / 2}`
+  if (same) {
+    // Keep same-row relationships orthogonal even when node heights differ;
+    // a direct center-to-center line would appear as an unintended diagonal
+    // through the connector label.
+    const ay = a.y + a.height / 2
+    const by = b.y + b.height / 2
+    const midX = (a.x + a.width + b.x) / 2
+    return `M ${a.x + a.width} ${ay} L ${midX} ${ay} L ${midX} ${by} L ${b.x} ${by}`
+  }
   const midY = (a.y + a.height + b.y) / 2
   return `M ${a.x + a.width / 2} ${a.y + a.height} L ${a.x + a.width / 2} ${midY} L ${b.x + b.width / 2} ${midY} L ${b.x + b.width / 2} ${b.y}`
 }
@@ -28,7 +36,10 @@ export function StructuredVisual({ spec, initialStage = 0, onStageChange }: { sp
       {spec.edges.slice(0, 24).map((edge) => {
         const a = byId.get(edge.source); const b = byId.get(edge.target); if (!a || !b) return null
         const d = edgePath(a, b)
-        return <g key={`${edge.source}-${edge.target}`} className="structured-visual-edge"><path d={d} fill="none" markerEnd="url(#lucent-semantic-arrow)" /><text x={(a.x + b.x + a.width) / 2} y={(a.y + b.y + a.height) / 2 - 5}>{edge.label}</text></g>
+        const edgeLabelLines = wrap(edge.label || "", 18).slice(0, 2)
+        const labelX = (a.x + a.width + b.x) / 2
+        const labelY = (a.y + a.height / 2 + b.y + b.height / 2) / 2 - (edgeLabelLines.length - 1) * 5
+        return <g key={`${edge.source}-${edge.target}`} className="structured-visual-edge"><path d={d} fill="none" markerEnd="url(#lucent-semantic-arrow)" /><text x={labelX} y={labelY}>{edgeLabelLines.map((line, index) => <tspan key={index} x={labelX} dy={index ? 10 : 0}>{line}</tspan>)}</text></g>
       })}
       {motionPath && <><path d={motionPath} className="structured-visual-motion-path" aria-hidden="true" /><circle className="structured-visual-flow-dot" r="5" aria-label="Animated flow showing the transition"><animateMotion dur={`${Math.max(.7, (motion?.durationMs || 1200) / 1000)}s`} repeatCount="indefinite" path={motionPath} /></circle></>}
       {metrics.map((m) => <g key={m.node.id} className={`structured-visual-node ${active.has(m.node.id) ? "active" : ""}`} tabIndex={0} role="button" aria-label={`Learn about ${m.node.label}`} onClick={() => setSelected(m.node.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m.node.id) } }}><rect x={m.x} y={m.y} width={m.width} height={m.height} rx="7" /><text x={m.x + m.width / 2} y={m.y + 20} textAnchor="middle">{m.labels.map((line, i) => <tspan key={i} x={m.x + m.width / 2} dy={i ? 15 : 0}>{line}</tspan>)}</text>{m.details.map((line, i) => <text key={i} className="structured-visual-node-detail" x={m.x + m.width / 2} y={m.y + 34 + m.labels.length * 15 + i * 11} textAnchor="middle">{line}</text>)}</g>)}
