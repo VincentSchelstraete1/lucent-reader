@@ -341,6 +341,27 @@ def test_due_exhausted_concept_is_revisited_with_new_retrieval_interaction():
     assert scene.response_interaction_id != "check"
 
 
+def test_revisit_waits_for_intervening_objective_before_returning():
+    """A queued weak concept is reviewed after another objective gets a turn."""
+    session = _session()
+    session.plan["objectives"].append({
+        "id": "second", "title": "Second objective", "outcome": "Explain the second idea.",
+        "steps": [{"id": "second-check", "type": "multiple_choice", "title": "Second check", "prompt": "Which statement is supported?", "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "answerId": "b"}],
+    })
+    ensure_runtime_state(session)
+    state = session.state
+    state["revisitQueue"] = ["energy"]
+    state["concepts"] = [
+        {"conceptId": "energy", "state": "NEEDS_REVIEW", "reviewVisits": 0},
+        {"conceptId": "second", "state": "NOT_SEEN", "reviewVisits": 0},
+    ]
+    # New material is the intervening turn; only after it is exhausted does
+    # the queued concept become the next target.
+    assert select_target_objective(session) == "second"
+    state["answeredInteractionIds"] = ["second-check"]
+    assert select_target_objective(session) == "energy"
+
+
 def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
     # A wrong structured (matching/multiple_choice/prediction/ordering/
     # labeling) answer should get a targeted contrast built from what the

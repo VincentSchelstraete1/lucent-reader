@@ -190,15 +190,26 @@ def build_tutor_observation(session, *, event: dict[str, Any] | None = None, sou
 def select_target_objective(session, *, exclude_concept_id: str | None = None) -> str | None:
     """Choose the next objective the runtime should transition to.
 
-    The revisit queue is checked first so a concept flagged for review gets
-    priority over objectives that haven't been touched yet. An objective is
-    only selectable while it still has an unanswered/unused candidate --
-    otherwise two exhausted objectives would bounce the learner back and
-    forth between them forever instead of ever completing.
+    A revisit is deliberately deferred when another objective still has
+    untouched candidate material. This gives the learner intervening work
+    before retrieval while retaining the bounded queue fallback when no
+    other objective can make progress. An objective is only selectable while
+    it still has an unanswered/unused candidate; exhausted objectives must
+    not bounce the learner back and forth forever.
     """
     state = _state(session)
     concepts = {str(item.get("conceptId")): item for item in state.get("concepts", [])}
     objectives_by_id = {str(item.get("id")): item for item in (session.plan or {}).get("objectives", [])}
+    queued_ids = {str(item) for item in state.get("revisitQueue", [])}
+    # Prefer genuinely new objective material before a queued revisit. This
+    # is the minimum delay required for within-session spaced retrieval.
+    for objective in (session.plan or {}).get("objectives", []):
+        objective_id = str(objective.get("id"))
+        if objective_id == str(exclude_concept_id) or objective_id in queued_ids:
+            continue
+        concept = concepts.get(objective_id, {})
+        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state):
+            return objective_id
     for concept_id in state.get("revisitQueue", []):
         concept_id = str(concept_id)
         if concept_id == str(exclude_concept_id):
