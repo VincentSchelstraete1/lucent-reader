@@ -5,8 +5,11 @@ type Metric = { node: StructuredVisualSpec["nodes"][number]; width: number; heig
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
 function wrap(value: string, max: number) { const lines: string[] = []; let line = ""; for (const word of value.trim().split(/\s+/).filter(Boolean)) { if (line && `${line} ${word}`.length > max) { lines.push(line); line = word } else line = line ? `${line} ${word}` : word } if (line) lines.push(line); return lines.length ? lines : [""] }
 function rankNodes(nodes: StructuredVisualSpec["nodes"], edges: StructuredVisualSpec["edges"]) { const rank = new Map(nodes.map((n) => [n.id, 0])); const incoming = new Map(nodes.map((n) => [n.id, 0])); edges.forEach((e) => incoming.has(e.target) && incoming.set(e.target, (incoming.get(e.target) || 0) + 1)); const queue = nodes.filter((n) => !(incoming.get(n.id) || 0)).map((n) => n.id); for (let i = 0; i < nodes.length * 2 && queue.length; i++) { const id = queue.shift()!; edges.filter((e) => e.source === id).forEach((e) => { rank.set(e.target, Math.max(rank.get(e.target) || 0, (rank.get(id) || 0) + 1)); const left = (incoming.get(e.target) || 1) - 1; incoming.set(e.target, left); if (left <= 0) queue.push(e.target) }) } return rank }
-function edgePath(a: Metric, b: Metric) {
-  const same = Math.abs(a.y - b.y) < 8
+function edgePath(a: Metric, b: Metric, preferHorizontal = false) {
+  // Flow nodes share a logical row even when wrapping gives them different
+  // heights. Classifying rows by top-edge alignment otherwise creates
+  // diagonal connectors that run through labels.
+  const same = preferHorizontal ? b.x >= a.x + a.width - 8 : Math.abs(a.y - b.y) < 8
   if (same) {
     // Keep same-row relationships orthogonal even when node heights differ;
     // a direct center-to-center line would appear as an unintended diagonal
@@ -28,14 +31,14 @@ export function StructuredVisual({ spec, initialStage = 0, onStageChange }: { sp
   const comparison = spec.type === "comparison"; const cycle = spec.type === "cycle"; const hierarchy = spec.type === "hierarchy" || spec.type === "spatial_structure"; const flow = ["process_flow", "causal_chain", "sequence", "state_transition", "timeline"].includes(spec.type)
   const metrics = useMemo(() => { const rank = rankNodes(nodes, spec.edges); const vertical = flow && (nodes.length > 5 || Math.max(0, ...rank.values()) > 3); const list = nodes.map((node) => { const labels = wrap(node.label, comparison ? 27 : 20); const details = (node.detail || "").split(/;\s*/).flatMap((part) => wrap(part, comparison ? 30 : 22)).slice(0, 4); return { node, width: comparison ? 250 : clamp(Math.max(148, Math.max(...labels.map((x) => x.length)) * 7.2 + 28), 148, 248), height: 30 + labels.length * 15 + (details.length ? 8 + details.length * 11 : 0), labels, details, x: 0, y: 0 } }) as Metric[]; if (comparison) { ["left", "right"].forEach((side) => { const group = list.filter((e) => (e.node.group === "right" ? "right" : "left") === side); group.forEach((e, i) => { e.x = side === "right" ? 410 : 30; e.y = 58 + group.slice(0, i).reduce((sum, item) => sum + item.height + 18, 0) }) }) } else if (cycle) list.forEach((e, i) => { const a = i / Math.max(1, list.length) * Math.PI * 2 - Math.PI / 2; e.x = 350 + Math.cos(a) * 190 - e.width / 2; e.y = 210 + Math.sin(a) * 140 - e.height / 2 })
     else if (hierarchy || flow) { const groups = new Map<number, Metric[]>(); list.forEach((e) => { const key = rank.get(e.node.id) || 0; if (!groups.has(key)) groups.set(key, []); groups.get(key)!.push(e) }); groups.forEach((group, key) => group.forEach((e, i) => { if (vertical) { e.x = 35 + i * 235; e.y = 55 + key * 125 } else { e.x = 35 + key * 225; e.y = 55 + i * 115 } })) } else list.forEach((e, i) => { e.x = 35 + (i % 3) * 225; e.y = 55 + Math.floor(i / 3) * 115 }); return list }, [nodes, spec.edges, comparison, cycle, hierarchy, flow])
-  const byId = new Map(metrics.map((m) => [m.node.id, m])); const selectedNode = nodes.find((n) => n.id === selected); const maxX = Math.max(760, ...metrics.map((m) => m.x + m.width + 35)); const maxY = Math.max(240, ...metrics.map((m) => m.y + m.height + 45)); const motion = spec.animations?.find((a) => a.operation === "flow"); const from = motion && byId.get(motion.targetIds[0]); const to = motion && byId.get(motion.targetIds[1]); const motionPath = from && to ? edgePath(from, to) : null
+  const byId = new Map(metrics.map((m) => [m.node.id, m])); const selectedNode = nodes.find((n) => n.id === selected); const maxX = Math.max(760, ...metrics.map((m) => m.x + m.width + 35)); const maxY = Math.max(240, ...metrics.map((m) => m.y + m.height + 45)); const motion = spec.animations?.find((a) => a.operation === "flow"); const from = motion && byId.get(motion.targetIds[0]); const to = motion && byId.get(motion.targetIds[1]); const motionPath = from && to ? edgePath(from, to, flow) : null
   const visual = <>
     <svg viewBox={`0 0 ${maxX} ${maxY}`} role="img" aria-label={spec.purpose}>
       <defs><marker id="lucent-semantic-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="currentColor" /></marker></defs>
       {comparison && <><line className="structured-visual-divider" x1="380" y1="25" x2="380" y2={maxY - 25} /><text className="structured-visual-column-label" x="155" y="25">First mechanism</text><text className="structured-visual-column-label" x="535" y="25">Contrasting mechanism</text></>}
       {spec.edges.slice(0, 24).map((edge) => {
         const a = byId.get(edge.source); const b = byId.get(edge.target); if (!a || !b) return null
-        const d = edgePath(a, b)
+        const d = edgePath(a, b, flow)
         const edgeLabelLines = wrap(edge.label || "", 18).slice(0, 2)
         const labelX = (a.x + a.width + b.x) / 2
         const labelY = (a.y + a.height / 2 + b.y + b.height / 2) / 2 - (edgeLabelLines.length - 1) * 5
