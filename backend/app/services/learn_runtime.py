@@ -565,7 +565,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if event_type := event_type:
         # Continue is a no-op only while a real active practice target is
         # already present. Teaching-only scenes must advance/recompose.
-        if event_type == "CONTINUE" and private is not None and current is not None and scene.response_interaction_id:
+        has_rendered_practice = any(block.kind == "practice" and block.step and str(block.step.id) == str(scene.response_interaction_id) for block in scene.blocks)
+        if event_type == "CONTINUE" and private is not None and current is not None and scene.response_interaction_id and has_rendered_practice:
             return scene, private
         if event_type == "CONTINUE" and private is None:
             # A persisted teaching-only scene from an older runtime may not
