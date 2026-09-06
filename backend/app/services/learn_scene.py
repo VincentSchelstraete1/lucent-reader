@@ -172,7 +172,10 @@ def compose_learning_scene(
         # grounded representation for the objective. Reuse the next authored
         # walkthrough/visual rather than leaving the learner with prose alone.
         if visual_spec is None and visual_ref is None:
-            for raw in steps[step_index + 1:]:
+            # Visual assets are source-grounded scene material, not ordered
+            # cursor steps.  A visual authored before the active practice is
+            # still the right teaching surface to reuse here.
+            for raw in steps[step_index + 1:] + steps[:step_index]:
                 candidate = _parse(raw)
                 if not candidate or candidate.id in set(state.get("answeredInteractionIds") or []) or student_facing_quality_issues(candidate, source_text):
                     continue
