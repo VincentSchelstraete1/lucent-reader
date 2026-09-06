@@ -22,6 +22,19 @@ function edgePath(a: Metric, b: Metric, preferHorizontal = false) {
   const midY = (a.y + a.height + b.y) / 2
   return `M ${a.x + a.width / 2} ${a.y + a.height} L ${a.x + a.width / 2} ${midY} L ${b.x + b.width / 2} ${midY} L ${b.x + b.width / 2} ${b.y}`
 }
+function edgeLabelPosition(a: Metric, b: Metric, lines: string[], preferHorizontal = false) {
+  const same = preferHorizontal ? b.x >= a.x + a.width - 8 : Math.abs(a.y - b.y) < 8
+  if (same) {
+    const ay = a.y + a.height / 2
+    const midX = (a.x + a.width + b.x) / 2
+    // Place labels above the first horizontal segment, away from both node
+    // rectangles and the vertical elbow. This keeps long labels readable.
+    return { x: midX, y: ay - 9 - (lines.length - 1) * 5 }
+  }
+  const x = (a.x + a.width / 2 + b.x + b.width / 2) / 2
+  const y = (a.y + a.height + b.y) / 2 - (lines.length - 1) * 5
+  return { x, y }
+}
 
 /** Deterministic semantic renderer: content is wrapped/measured, layout varies by visual family, and motion follows real relationships. */
 export function StructuredVisual({ spec, initialStage = 0, onStageChange }: { spec: StructuredVisualSpec; initialStage?: number; onStageChange?: (stage: number) => void }) {
@@ -49,10 +62,9 @@ export function StructuredVisual({ spec, initialStage = 0, onStageChange }: { sp
         const a = byId.get(edge.source); const b = byId.get(edge.target); if (!a || !b) return null
         const d = edgePath(a, b, flow)
         const edgeLabelLines = wrap(edge.label || "", 18).slice(0, 2)
-        const labelX = (a.x + a.width + b.x) / 2
-        const labelY = (a.y + a.height / 2 + b.y + b.height / 2) / 2 - (edgeLabelLines.length - 1) * 5
+        const label = edgeLabelPosition(a, b, edgeLabelLines, flow)
         const edgeKey = `${edge.source}-${edge.target}`
-        return <g key={edgeKey} className={`structured-visual-edge${edgeKey === motionEdgeKey ? " motion" : ""}`}><path d={d} fill="none" markerEnd="url(#lucent-semantic-arrow)" /><text x={labelX} y={labelY}>{edgeLabelLines.map((line, index) => <tspan key={index} x={labelX} dy={index ? 10 : 0}>{line}</tspan>)}</text></g>
+        return <g key={edgeKey} className={`structured-visual-edge${edgeKey === motionEdgeKey ? " motion" : ""}`}><path d={d} fill="none" markerEnd="url(#lucent-semantic-arrow)" /><text x={label.x} y={label.y}>{edgeLabelLines.map((line, index) => <tspan key={index} x={label.x} dy={index ? 10 : 0}>{line}</tspan>)}</text></g>
       })}
       {metrics.map((m) => <g key={m.node.id} className={`structured-visual-node ${active.has(m.node.id) ? "active" : ""}`} tabIndex={0} role="button" aria-label={`Learn about ${m.node.label}`} onClick={() => setSelected(m.node.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m.node.id) } }}><rect x={m.x} y={m.y} width={m.width} height={m.height} rx="7" /><text x={m.x + m.width / 2} y={m.y + 20} textAnchor="middle">{m.labels.map((line, i) => <tspan key={i} x={m.x + m.width / 2} dy={i ? 15 : 0}>{line}</tspan>)}</text>{m.details.map((line, i) => <text key={i} className="structured-visual-node-detail" x={m.x + m.width / 2} y={m.y + 34 + m.labels.length * 15 + i * 11} textAnchor="middle">{line}</text>)}</g>)}
     </svg>

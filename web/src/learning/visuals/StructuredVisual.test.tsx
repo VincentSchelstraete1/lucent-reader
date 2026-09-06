@@ -21,4 +21,14 @@ describe("StructuredVisual semantic connectors", () => {
     expect(html).not.toContain("structured-visual-flow-dot")
     expect(html).not.toContain("animateMotion")
   })
+
+  it("places connector labels in the gap between same-row nodes", () => {
+    const html = renderToStaticMarkup(createElement(StructuredVisual, { spec }))
+    const label = html.match(/<text x="([0-9.]+)" y="[0-9.]+"><tspan[^>]*>leads to/)
+    expect(label).not.toBeNull()
+    // Source node ends at x=183; target starts at x=260. The label belongs
+    // in that gap, never inside either node rectangle.
+    expect(Number(label?.[1])).toBeGreaterThan(183)
+    expect(Number(label?.[1])).toBeLessThan(260)
+  })
 })
