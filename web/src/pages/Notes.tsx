@@ -161,7 +161,21 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     setStructuredAnswers({})
     setHint(null)
     let cancelled = false
-    api.getActiveLearnSession(documentId).then((active) => { if (!cancelled && active && !sessionRef.current) { sessionRef.current = active; setSession(active); setFocusMode(true) } }).catch(() => undefined)
+    api.getActiveLearnSession(documentId).then((active) => {
+      if (!cancelled && active && !sessionRef.current) {
+        sessionRef.current = active
+        setSession(active)
+        setFocusMode(true)
+        // Rehydrate interaction-local controls from the authoritative scene on
+        // resume.  Previously an ordering/matching interaction loaded after a
+        // refresh with an empty local selection, making the visible practice
+        // surface appear blank and impossible to submit.
+        const activeId = active.scene?.responseInteractionId
+        const practice = active.scene?.blocks.find((block) => block.kind === "practice" && block.step?.id === activeId)?.step
+        setOrderedIds(practice?.items?.map((item) => item.id) ?? [])
+        setStructuredAnswers({})
+      }
+    }).catch(() => undefined)
     return () => { cancelled = true }
   }, [documentId])
 
