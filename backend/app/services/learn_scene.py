@@ -167,7 +167,7 @@ def compose_learning_scene(
         if visual_ref is None and getattr(teaching, "type", None) == "walkthrough":
             visual_ref = {"sectionId": teaching.section_id, "componentIndex": teaching.component_index}
         if visual_spec is not None or visual_ref is not None:
-            add(kind="animation" if getattr(teaching, "type", None) == "walkthrough" else "visual", label="Watch", title=teaching.title, step=None, visual_spec=visual_spec, visual_ref=visual_ref)
+            add(kind="animation" if getattr(teaching, "type", None) == "walkthrough" else "visual", label="Watch", title=getattr(visual_spec, "title", None) or teaching.title, step=None, visual_spec=visual_spec, visual_ref=visual_ref)
         # A teaching-only candidate should still open with the best available
         # grounded representation for the objective. Reuse the next authored
         # walkthrough/visual rather than leaving the learner with prose alone.
@@ -207,7 +207,7 @@ def compose_learning_scene(
             if candidate_ref is None and candidate is not None and getattr(candidate, "type", None) == "walkthrough":
                 candidate_ref = {"sectionId": candidate.section_id, "componentIndex": candidate.component_index}
             if candidate_spec is not None or candidate_ref is not None:
-                add(kind="animation" if getattr(candidate, "type", None) == "walkthrough" else "visual", label="Watch", title=getattr(candidate, "title", None), content=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
+                add(kind="animation" if getattr(candidate, "type", None) == "walkthrough" else "visual", label="Watch", title=getattr(candidate_spec, "title", None) or getattr(candidate, "title", None), content=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
                 break
 
     if decision:
