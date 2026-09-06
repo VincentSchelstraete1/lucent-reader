@@ -332,6 +332,17 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_model", metadata={"scope": scope, "tool": tool, "sourceSectionIds": model.source_section_ids, "sourceBlockIds": model.source_block_ids, "toolCalls": [call.tool for call in model.tool_calls]})
     else:
         answer = context.get("text") or "I can explain the current concept, but the saved notes do not contain enough detail to support a grounded answer yet."
+    # Provider responses are untrusted generated content.  Reject a fluent
+    # answer that has no lexical connection to the active objective/source;
+    # otherwise retrieval/model drift can show a learner a confident answer
+    # about an unrelated topic.  Fall back to the grounded objective context.
+    grounding_terms = {
+        token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z-]{3,}", f"{objective.get('title', '')} {objective.get('outcome', '')} {objective.get('bottleneck', '')}")
+    }
+    answer_terms = set(re.findall(r"[A-Za-z][A-Za-z-]{3,}", str(answer).casefold()))
+    if grounding_terms and not (grounding_terms & answer_terms):
+        answer = context.get("text") or str(objective.get("outcome") or objective.get("bottleneck") or "Let's work from the key relationship in this concept.")
+        _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_grounding_fallback", metadata={"reason": "no_objective_term_overlap"})
     if scope == "IN_SCOPE_PREREQUISITE": answer = "This is a related prerequisite. The saved material does not fully explain it, so treat this as supporting context rather than a claim from the source.\n\n" + answer
     # Ask Lucent is another observation entering the same bounded tutor loop.
     # It records a structured replan, but never mutates learner evidence
