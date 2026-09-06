@@ -384,6 +384,10 @@ def persist_scene_revision(session, scene: LearningScene, private: dict[str, Any
     scene = scene.model_copy(update={"revision": next_revision})
     history = list(state.get("sceneHistory") or [])
     history.append({"sceneId": scene.id, "revision": scene.revision, "objectiveId": scene.objective_id, "eventId": event_id, "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
+    # Visual state is owned by the persisted scene. Any transient composer
+    # handoff under state.visualState must not survive this boundary as a
+    # competing source of truth.
+    state.pop("visualState", None)
     state.update({"runtimeVersion": RUNTIME_VERSION, "planSemanticsVersion": PLAN_SEMANTICS_VERSION, "currentScene": scene.model_dump(by_alias=True), "currentScenePrivate": private, "sceneHistory": history[-8:], "currentObjectiveId": scene.objective_id})
     session.state = state
     if db is not None:

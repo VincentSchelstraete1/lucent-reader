@@ -66,6 +66,7 @@ def test_failed_response_advances_grounded_visual_for_followup():
     assert scene.visual_state.stage == 1
     assert scene.visual_state.highlighted_element_ids == ["bottom"]
     assert any("highlighted" in (block.content or "") for block in scene.blocks if block.kind == "explanation")
+    assert "visualState" not in session.state
 
 
 def test_explicit_uncertainty_is_not_graded_as_correct_or_advanced():
