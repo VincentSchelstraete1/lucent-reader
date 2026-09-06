@@ -386,6 +386,19 @@ def test_exhausted_authored_assets_never_resurrect_first_interaction():
     assert private["interaction"]["id"].startswith("autonomous-")
 
 
+def test_attempt_history_prevents_reselecting_interaction_when_state_list_is_stale():
+    session = _session()
+    ensure_runtime_state(session)
+    session.state["answeredInteractionIds"] = ["teach"]
+    session.state["usedTeachingIds"] = ["teach"]
+    # This mirrors the old write ordering bug: the attempt row is durable,
+    # while the JSON compatibility list has not yet caught up.
+    session.attempts = [SimpleNamespace(step_id="check")]
+    scene, private = _legacy_scene(session, session.plan["objectives"][0])
+    assert private is not None
+    assert private["interaction"]["id"] != "check"
+
+
 def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
     # A wrong structured (matching/multiple_choice/prediction/ordering/
     # labeling) answer should get a targeted contrast built from what the

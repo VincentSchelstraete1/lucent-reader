@@ -42,6 +42,22 @@ def _state(session) -> dict[str, Any]:
     return dict(session.state or {})
 
 
+def _answered_interaction_ids(session, state: dict[str, Any] | None = None) -> set[str]:
+    """Return the durable answered-interaction set.
+
+    A legacy response path could persist ``LearnAttempt`` before updating the
+    JSON compatibility list. Selection therefore consults both durable
+    sources, preventing an answered interaction from becoming active again.
+    """
+    state = state if state is not None else _state(session)
+    answered = {str(item) for item in (state.get("answeredInteractionIds") or [])}
+    for attempt in getattr(session, "attempts", None) or []:
+        step_id = getattr(attempt, "step_id", None)
+        if step_id:
+            answered.add(str(step_id))
+    return answered
+
+
 def load_current_scene(session) -> LearningScene | None:
     raw = _state(session).get("currentScene")
     if not raw:
@@ -103,7 +119,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         except Exception:
             continue
         parsed_candidates.append(candidate)
-    answered = set(state.get("answeredInteractionIds") or [])
+    answered = _answered_interaction_ids(session, state)
     used_teaching = set(state.get("usedTeachingIds") or [])
     revisit = str(objective.get("id")) in {str(item) for item in state.get("revisitQueue", [])}
     if revisit:
@@ -490,7 +506,7 @@ def _objective_has_remaining_candidates(objective: dict[str, Any], state: dict[s
     also "not DEMONSTRATED", so two such objectives would bounce the learner
     back and forth between them forever instead of ever completing.
     """
-    answered = set(state.get("answeredInteractionIds") or [])
+    answered = _answered_interaction_ids(session, state)
     used_teaching = set(state.get("usedTeachingIds") or [])
     for raw in objective.get("steps") or []:
         if not isinstance(raw, dict):
@@ -828,7 +844,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             continue
         candidates.append(candidate)
     if evaluation and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
-        answered_ids = set(state.get("answeredInteractionIds") or [])
+        answered_ids = _answered_interaction_ids(session, state)
         used_teaching = set(state.get("usedTeachingIds") or [])
         # Do not replay the same explanation after a failed intervention.
         # Prefer an unused grounded teaching asset, then a different unanswered
@@ -839,7 +855,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # generated teaching turn below will run instead.
         next_step = teaching
     else:
-        answered_ids = set(state.get("answeredInteractionIds") or [])
+        answered_ids = _answered_interaction_ids(session, state)
         used_teaching = set(state.get("usedTeachingIds") or [])
         next_step = next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in answered_ids and item.type not in {"teach", "walkthrough"}), None) or next((item for item in candidates if item.type in {"teach", "walkthrough"} and item.id not in answered_ids and item.id not in used_teaching), None)
     event_id_value = getattr(event, "id", None) if not isinstance(event, dict) else event.get("id")
@@ -1043,7 +1059,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         decision = fallback
     # The decision selects the next candidate; the fallback is only used when
     # the provider is unavailable or fails validation.
-    answered_ids = set(state.get("answeredInteractionIds") or [])
+    answered_ids = _answered_interaction_ids(session, state)
     selected = next((item for item in candidates if item.id == decision.next_step_id and item.id not in answered_ids), None)
     if selected is not None:
         next_step = selected
