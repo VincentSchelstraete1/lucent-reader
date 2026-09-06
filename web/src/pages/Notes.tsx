@@ -18,14 +18,22 @@ function SupportingText({ text, depth = "balanced" }: { text: string; depth?: De
 }
 
 function recordFromIngestion(result: DocumentIngestionResult): LearningNoteRecord {
-  return { filename: result.filename, section_notes: result.section_notes ?? [], document_id: result.document_id, note_id: result.note_id, source_type: result.source_type, teaching_depth: result.teaching_depth }
+  return { filename: result.filename, section_notes: usableSections(result.section_notes ?? []), document_id: result.document_id, note_id: result.note_id, source_type: result.source_type, teaching_depth: result.teaching_depth }
+}
+
+// Extraction diagnostics are operational metadata, never learner-facing note
+// sections. Keep this boundary in the client as defense in depth for older
+// persisted notes that predate backend source filtering.
+function usableSections(sections: SectionNote[]): SectionNote[] {
+  const diagnostic = /insufficient source|unable to design|extraction error|no substantive content|bibliographic references alone|source material unavailable/i
+  return sections.filter((section) => !diagnostic.test(`${section.title} ${section.bigIdea}`))
 }
 
 function recordFromSavedNote(note: { id: number; title: string; document_id: number | null; content: string }): LearningNoteRecord | null {
   try {
     const payload = JSON.parse(note.content) as { filename?: string; sourceType?: string; teachingDepth?: DepthMode; sectionNotes?: SectionNote[] }
     if (!Array.isArray(payload.sectionNotes)) return null
-    return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: payload.sectionNotes, document_id: note.document_id, note_id: note.id }
+    return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: usableSections(payload.sectionNotes), document_id: note.document_id, note_id: note.id }
   } catch { return null }
 }
 
