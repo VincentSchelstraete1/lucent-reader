@@ -375,6 +375,17 @@ def test_revisit_waits_for_intervening_objective_before_returning():
     assert select_target_objective(session) == "energy"
 
 
+def test_exhausted_authored_assets_never_resurrect_first_interaction():
+    session = _session()
+    ensure_runtime_state(session)
+    session.state["answeredInteractionIds"] = ["teach", "check"]
+    session.state["usedTeachingIds"] = ["teach"]
+    scene, private = _legacy_scene(session, session.plan["objectives"][0])
+    assert private is not None
+    assert private["interaction"]["id"] != "check"
+    assert private["interaction"]["id"].startswith("autonomous-")
+
+
 def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
     # A wrong structured (matching/multiple_choice/prediction/ordering/
     # labeling) answer should get a targeted contrast built from what the

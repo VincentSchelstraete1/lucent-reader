@@ -113,7 +113,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         parsed = next((candidate for candidate in parsed_candidates if candidate.id not in answered and candidate.type not in {"teach", "walkthrough"}), None)
     else:
         parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"} and candidate.id not in used_teaching), None)
-    parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered), None)
+    parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered and not (candidate.type in {"teach", "walkthrough"} and candidate.id in used_teaching)), None)
     if parsed is None and revisit:
         # Once authored assets have all been answered, a due revisit still
         # needs a real retrieval opportunity. Compose it in scene-private
@@ -123,13 +123,31 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
         review_id = bounded_id("review", session.id, objective.get("id"), len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
         parsed = TeachBackStep(id=review_id, type="teach_back", title="Recall it without the original prompt", prompt=f"Without looking back at the earlier question, explain how {objective.get('title', 'this concept')} works and what result it predicts.", requiredConcepts=_required_concepts(outcome), hints=[f"Use this source-supported idea: {outcome[:220]}"], feedbackIncorrect=f"Start with the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
-    parsed = parsed or (parsed_candidates[0] if parsed_candidates else None)
+    if parsed is None and parsed_candidates:
+        # Never resurrect an answered authored interaction when a scene is
+        # rebuilt after candidate exhaustion.  Compose a bounded, grounded
+        # retrieval target instead; the authored plan remains an asset catalog,
+        # not a finite cursor that can replay the first question forever.
+        from app.schemas.learn import TeachBackStep
+        outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+        generated_id = bounded_id("autonomous", session.id, objective.get("id"), len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
+        parsed = TeachBackStep(
+            id=generated_id,
+            type="teach_back",
+            title=f"Apply {objective.get('title', 'this idea')} in your own words",
+            prompt=f"Explain how {objective.get('title', 'this idea')} works in a new situation, using the source-supported relationship.",
+            requiredConcepts=_required_concepts(outcome),
+            hints=[f"Start from this source-supported idea: {outcome[:220]}"],
+            feedbackIncorrect=f"Use the central relationship described in the material: {outcome[:260]}",
+            sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+            sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+        )
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
     scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
     scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     scene_data = scene.model_dump(by_alias=True)
-    private = None if parsed.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=parsed.model_dump(by_alias=True), objectiveId=str(objective.get("id")), targetConceptIds=[str(objective.get("id"))]).model_dump(by_alias=True)
+    private = None if parsed.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=parsed.model_dump(by_alias=True), objectiveId=str(objective.get("id")), targetConceptIds=[str(objective.get("id"))], decisionId=bounded_id("decision", objective.get("id"), scene.id)).model_dump(by_alias=True)
     return scene, private
 
 
