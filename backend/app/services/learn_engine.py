@@ -45,6 +45,7 @@ _SOURCE_DIAGNOSTIC_PATTERNS = (
     "insufficient source", "no substantive content", "extraction error",
     "unable to extract", "could not extract", "metadata header",
     "source material unavailable", "document contains no text",
+    "unable to design a learning experience", "learning experience requirements",
 )
 
 
@@ -69,22 +70,27 @@ def validate_substantive_source(note_payload: dict) -> list[str]:
     if not sections:
         return ["No extracted sections are available for this material."]
     substantive: list[str] = []
+    valid_section_count = 0
     for section in sections:
         values = [section.get("bigIdea"), *(section.get("keyTakeaways") or [])]
         for component in _components(section):
             values.extend([component.get("title"), component.get("content"), component.get("description"), component.get("definition")])
             values.extend(item.get("label") or item.get("name") for item in (component.get("nodes") or component.get("items") or []) if isinstance(item, dict))
+        section_substantive: list[str] = []
         for value in values:
             text = _clean(value)
             lowered = text.casefold()
             if text and not any(pattern in lowered for pattern in _SOURCE_DIAGNOSTIC_PATTERNS):
                 substantive.append(text)
+                section_substantive.append(text)
+        if len(_words(" ".join(section_substantive))) >= 3:
+            valid_section_count += 1
     joined = " ".join(substantive)
     words = _words(joined)
     issues: list[str] = []
     # Short notes can still be valid (for example a concise definition), but
     # a title/metadata header alone is not enough to teach from.
-    if len(joined) < 20 or len(words) < 3:
+    if valid_section_count == 0 or len(joined) < 20 or len(words) < 3:
         issues.append("The extracted material does not contain enough substantive content to build a lesson.")
     if substantive and all(any(pattern in value.casefold() for pattern in _SOURCE_DIAGNOSTIC_PATTERNS) for value in substantive):
         issues.append("The extracted material contains only an extraction diagnostic, not teachable content.")
@@ -167,6 +173,15 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
     if source_issues:
         raise ValueError(source_issues[0])
     sections = [s for s in note_payload.get("sectionNotes", []) if isinstance(s, dict)]
+    # Drop individual extraction-diagnostic sections while retaining valid
+    # sections from the same document. A single bad page must not become an
+    # objective or poison an otherwise teachable note.
+    def section_text(section: dict) -> str:
+        values = [section.get("bigIdea"), *(section.get("keyTakeaways") or [])]
+        for component in _components(section):
+            values.extend([component.get("title"), component.get("content"), component.get("description"), component.get("definition"), component.get("term")])
+        return " ".join(_clean(value) for value in values if value and not any(pattern in _clean(value).casefold() for pattern in _SOURCE_DIAGNOSTIC_PATTERNS))
+    sections = [section for section in sections if len(_words(section_text(section))) >= 3]
     objectives: list[LearningObjective] = []
     for section in sections[:4]:
         section_ids, block_ids = _source_ids(section)

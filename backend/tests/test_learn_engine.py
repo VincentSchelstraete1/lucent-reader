@@ -25,6 +25,15 @@ def test_metadata_only_or_extraction_diagnostic_source_cannot_build_lesson():
         raise AssertionError("diagnostic-only source must not produce a LearnPlan")
 
 
+def test_invalid_section_is_skipped_when_document_has_other_teachable_sections():
+    payload = {"sectionNotes": [
+        {"id": "bad", "title": "Insufficient Source Material", "bigIdea": "Unable to design a learning experience", "keyTakeaways": ["The supplied material contains only a metadata header with no substantive content"]},
+        {"id": "good", "title": "Enlightenment satire", "bigIdea": "Satirists used exaggeration to expose institutional hypocrisy.", "keyTakeaways": ["Exaggeration can reveal social contradictions."], "components": []},
+    ]}
+    plan = build_learn_plan(payload, "understand", "new")
+    assert [objective.title for objective in plan.objectives] == ["Enlightenment satire"]
+
+
 def test_persisted_plan_diagnostic_is_detected_recursively():
     assert contains_source_diagnostic({"steps": [{"prompt": "Insufficient Source Material"}]})
     assert not contains_source_diagnostic({"steps": [{"prompt": "Proto-oncogenes gain function."}]})
