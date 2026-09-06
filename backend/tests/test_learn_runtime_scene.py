@@ -377,6 +377,14 @@ def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
     assert return_from_prerequisite(session)["returnObjectiveId"] == "energy"
 
 
+def test_prerequisite_branch_cycle_guard_uses_canonical_key():
+    session = _session()
+    session.plan["objectives"].append({"id": "prereq", "title": "Prerequisite", "outcome": "Know the prerequisite", "steps": []})
+    session.state = {"branchStack": [{"prerequisiteConceptId": "prereq"}]}
+    from app.services.learn_runtime import validate_branch_proposal
+    assert not validate_branch_proposal(session, original_concept_id="energy", prerequisite_concept_id="prereq", depth=2)
+
+
 def test_tutor_observation_carries_evidence_history_and_visual_state():
     session = _session()
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

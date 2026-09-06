@@ -297,7 +297,13 @@ def validate_branch_proposal(session, *, original_concept_id: str, prerequisite_
     objective_ids = {str(item.get("id")) for item in (session.plan or {}).get("objectives", [])}
     if original_concept_id not in objective_ids or prerequisite_concept_id not in objective_ids:
         return False
-    return all(str(item.get("targetConceptId")) != prerequisite_concept_id for item in (_state(session).get("branchStack") or []))
+    # Branch records use ``prerequisiteConceptId``; older runtime snapshots
+    # used ``targetConceptId``.  Check both keys so a nested branch cannot
+    # cycle back into a prerequisite that is already on the stack.
+    return all(
+        str(item.get("prerequisiteConceptId", item.get("targetConceptId"))) != prerequisite_concept_id
+        for item in (_state(session).get("branchStack") or [])
+    )
 
 
 def push_prerequisite_branch(session, *, original_concept_id: str, prerequisite_concept_id: str, reason: str, return_scene_id: str) -> dict[str, Any] | None:
