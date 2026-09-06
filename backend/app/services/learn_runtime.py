@@ -445,6 +445,24 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
 
     scene, private = ensure_runtime_state(session, db=db)
     state = _state(session)
+    event_type = getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")
+    if event_type == "ASK_LUCENT":
+        # Ask Lucent is an interruption in the same tutor runtime. The route
+        # performs auth, retrieval, and provider validation, then supplies the
+        # bounded learner-facing result here for authoritative scene execution.
+        payload = event if isinstance(event, dict) else {}
+        updated = apply_scene_message(
+            session,
+            message=str(payload.get("message") or "Explain this another way"),
+            answer=str(payload.get("answer") or "Let's look at this together."),
+            source_section_ids=list(payload.get("sourceSectionIds") or []),
+            source_block_ids=list(payload.get("sourceBlockIds") or []),
+            visual_action=payload.get("visualAction"),
+            block_kind=str(payload.get("blockKind") or "tutor_message"),
+            block_label=str(payload.get("blockLabel") or "Ask Lucent"),
+            db=db,
+        )
+        return updated or scene, _state(session).get("currentScenePrivate")
     objective = _objective(session.plan or {}, scene.objective_id)
     if objective is None:
         return scene, private
@@ -475,7 +493,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     # A continue event acknowledges the currently composed scene; it must not
     # manufacture a second step or rewind to a teaching asset.  Replanning is
     # triggered by a learner response (or an explicit Ask/visual event).
-    if event_type := (getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")):
+    if event_type := event_type:
         # Continue is a no-op only while a real active practice target is
         # already present. Teaching-only scenes must advance/recompose.
         if event_type == "CONTINUE" and private is not None and current is not None and scene.response_interaction_id:

@@ -455,7 +455,16 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
                 visual_action = None
                 scene_kind, ask_label = "tutor_message", "Try"
     scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
-    apply_scene_message(session, message=request.message, answer=answer, source_section_ids=context.get("sourceSectionIds", []), source_block_ids=context.get("sourceBlockIds", []), visual_action=visual_action, block_kind=scene_kind, block_label=ask_label, db=db)
+    process_tutor_event(session, {
+        "type": "ASK_LUCENT",
+        "message": request.message,
+        "answer": answer,
+        "sourceSectionIds": context.get("sourceSectionIds", []),
+        "sourceBlockIds": context.get("sourceBlockIds", []),
+        "visualAction": visual_action,
+        "blockKind": scene_kind,
+        "blockLabel": ask_label,
+    }, db=db)
     if replacement_step is not None:
         # Re-assert the practice target after appending the conversational
         # block; this keeps the active interaction authoritative even when

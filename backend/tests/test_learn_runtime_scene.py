@@ -103,6 +103,21 @@ def test_ask_message_mutates_authoritative_scene_and_visual_state():
     assert session.state["currentScene"]["visualState"]["stage"] == 2
 
 
+def test_ask_event_uses_authoritative_runtime_scene_executor():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    before = session.state["currentScene"]["revision"]
+    scene, private = process_tutor_event(session, {
+        "id": "ask-1", "type": "ASK_LUCENT", "message": "Explain this another way",
+        "answer": "Potential energy can become kinetic energy as the pendulum falls.",
+        "sourceSectionIds": ["s1"], "sourceBlockIds": ["b1"],
+        "blockKind": "explanation", "blockLabel": "Another way",
+    })
+    assert scene.revision > before
+    assert any(block.kind == "explanation" and block.content for block in scene.blocks)
+    assert private is not None
+
+
 def test_ask_message_can_add_grounded_visual_reference_to_teaching_only_scene():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
