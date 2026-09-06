@@ -300,7 +300,7 @@
 .structured-visual-modal-panel .structured-visual { border: 0; margin: 0; padding: 0; background: transparent; }
 .structured-visual svg { width: 100%; height: auto; display: block; }
 .structured-visual-edge path { stroke: #879184; stroke-width: 1.5; color: #879184; }
-.structured-visual-edge text { fill: #74796f; font-size: 10px; text-anchor: middle; }
+.structured-visual-edge text { fill: #74796f; font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: #fbfaf6; stroke-width: 4px; stroke-linejoin: round; }
 .structured-visual-divider { stroke: #d9d2c6; stroke-dasharray: 3 4; }
 .structured-visual-column-label { fill: #687067; font-size: 11px; text-anchor: middle; }
 .structured-visual-node { cursor: pointer; outline: none; }
