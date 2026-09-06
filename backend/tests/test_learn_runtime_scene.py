@@ -377,6 +377,32 @@ def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
     assert return_from_prerequisite(session)["returnObjectiveId"] == "energy"
 
 
+def test_prerequisite_branch_runtime_teaches_repairs_and_returns():
+    session = _session()
+    session.plan["objectives"][0]["prerequisiteIds"] = ["prereq"]
+    session.plan["objectives"].append({
+        "id": "prereq",
+        "title": "Height and potential energy",
+        "outcome": "Height determines gravitational potential energy.",
+        "steps": [
+            {"id": "p-teach", "type": "teach", "title": "Build the prerequisite", "content": "Greater height means greater gravitational potential energy."},
+            {"id": "p-check", "type": "short_answer", "title": "Check the prerequisite", "prompt": "What does greater height change?", "acceptedAnswers": ["potential energy"], "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]},
+        ],
+    })
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene, private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    assert private and scene.response_interaction_id == "check"
+    scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "a"}})
+    assert private and session.state["currentObjectiveId"] == "prereq"
+    scene, private = process_tutor_event(session, {"id": "continue-prereq", "type": "CONTINUE"})
+    assert private and private["interaction"]["id"] == "p-check"
+    scene, private = process_tutor_event(session, {"id": "prereq-answer", "type": "RESPONSE", "interactionId": "p-check", "response": {"response": "potential energy"}})
+    assert session.state["currentObjectiveId"] == "energy"
+    assert not session.state.get("branchStack")
+    assert private and private["objectiveId"] == "energy"
+    assert scene.objective_id == "energy"
+
+
 def test_prerequisite_branch_cycle_guard_uses_canonical_key():
     session = _session()
     session.plan["objectives"].append({"id": "prereq", "title": "Prerequisite", "outcome": "Know the prerequisite", "steps": []})
