@@ -321,3 +321,19 @@ def test_tutor_observation_carries_evidence_history_and_visual_state():
     assert observation.evidence["scaffoldingLevel"] == "GUIDED"
     assert observation.evidence["answeredInteractionIds"] == ["old-check"]
     assert observation.evidence["sceneRevision"] == scene.revision
+
+
+def test_application_success_composes_transfer_before_objective_completion():
+    objective = {
+        "id": "motion", "title": "Force and motion",
+        "outcome": "Force equals mass times acceleration.",
+        "steps": [{"id": "solve", "type": "problem", "title": "Solve", "prompt": "What is force?", "acceptedAnswers": ["10"], "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}],
+    }
+    session = SimpleNamespace(id="transfer-session", plan={"objectives": [objective]}, state={}, objective_index=0, step_index=0, status="active", goal="understand")
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene, private = process_tutor_event(session, {"id": "answer", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "10"}})
+    assert session.status == "active"
+    assert private and private["interaction"]["type"] == "teach_back"
+    assert private["interaction"]["id"].startswith("transfer-")
+    assert scene.response_interaction_id != "solve"
+    assert "new situation" in private["interaction"]["prompt"]
