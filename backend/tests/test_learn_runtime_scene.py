@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import apply_scene_message, apply_visual_event, build_tutor_observation, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, build_tutor_observation, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite, select_target_objective, _legacy_scene
 from app.schemas.learn import ConceptEvidence
 
 
@@ -299,12 +299,32 @@ def test_two_exhausted_objectives_complete_instead_of_oscillating():
         else:
             scene, _ = process_tutor_event(session, {"id": f"continue-{index}", "type": "CONTINUE"})
     assert session.status == "completed", f"session never completed; objective sequence was {seen_objectives}"
-    # No A -> B -> A oscillation: once an objective is left behind for
-    # another, it must never be revisited before completion (repeating the
-    # *same* objective across consecutive turns while still working on it is
-    # normal and expected).
-    distinct_runs = [key for key, _ in __import__("itertools").groupby(seen_objectives)]
-    assert len(distinct_runs) == len(set(distinct_runs)), f"objective sequence oscillated: {seen_objectives}"
+    # Revisit is allowed once for delayed review, but it must be bounded and
+    # never bounce indefinitely between exhausted objectives.
+    from collections import Counter
+    runs = [key for key, _ in __import__("itertools").groupby(seen_objectives)]
+    counts = Counter(runs)
+    assert all(count <= 2 for count in counts.values()), f"unbounded objective revisit: {seen_objectives}"
+
+
+def test_due_exhausted_concept_is_revisited_with_new_retrieval_interaction():
+    session = _session()
+    session.plan["objectives"].append({
+        "id": "second", "title": "Second objective", "outcome": "Explain the second idea.",
+        "steps": [{"id": "second-check", "type": "multiple_choice", "title": "Second check", "prompt": "Which statement is supported?", "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "answerId": "b"}],
+    })
+    ensure_runtime_state(session)
+    state = session.state
+    state["revisitQueue"] = ["energy"]
+    state["answeredInteractionIds"] = ["teach", "check"]
+    state["revisitMode"] = True
+    state["concepts"] = [{"conceptId": "energy", "state": "DEVELOPING", "reviewVisits": 0}]
+    assert select_target_objective(session, exclude_concept_id="second") == "energy"
+    session.state["revisitQueue"] = ["energy"]
+    session.state["concepts"][0]["reviewVisits"] = 0
+    scene, private = _legacy_scene(session, session.plan["objectives"][0])
+    assert private and private["interaction"]["id"].startswith("review-")
+    assert scene.response_interaction_id != "check"
 
 
 def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():

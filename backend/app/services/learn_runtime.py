@@ -204,7 +204,7 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
             continue
         objective = objectives_by_id.get(concept_id)
         concept = concepts.get(concept_id, {})
-        if objective is not None and _objective_has_remaining_candidates(objective, state):
+        if objective is not None and (_objective_has_remaining_candidates(objective, state) or int(concepts.get(concept_id, {}).get("reviewVisits", 0) or 0) < 1):
             # Consume the queue entry when selecting the revisit. A later
             # response may schedule it again, but only while a real candidate
             # remains; exhausted objectives cannot oscillate indefinitely.
