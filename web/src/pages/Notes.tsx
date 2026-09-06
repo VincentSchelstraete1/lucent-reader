@@ -168,7 +168,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   async function start() {
     if (!documentId) return
     setLoading(true); setError(null)
-    try { const created = await api.createLearnSession(documentId, { goal, familiarity, restart: restartRequested }); sessionRef.current = created; setSession(created); setRestartRequested(false); setFocusMode(true); setAnswer(""); setSelectedOption(null); const active = created.scene?.responseInteractionId; setOrderedIds(created.scene?.blocks.find((block) => block.kind === "practice" && block.step?.id === active)?.step?.items?.map((item) => item.id) ?? []); setStructuredAnswers({}); setHint(null) }
+    try { const created = await api.createLearnSession(documentId, { goal, familiarity, restart: restartRequested }); sessionRef.current = created; setSession(created); setRestartRequested(false); setFocusMode(true); setAskOpen(false); setAskAnswer(null); setAskMessage(""); setAnswer(""); setSelectedOption(null); const active = created.scene?.responseInteractionId; setOrderedIds(created.scene?.blocks.find((block) => block.kind === "practice" && block.step?.id === active)?.step?.items?.map((item) => item.id) ?? []); setStructuredAnswers({}); setHint(null) }
     catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start this learning session.") }
     finally { setLoading(false) }
   }
