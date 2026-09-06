@@ -55,6 +55,9 @@ def review_due(result: str, *, hints: int = 0, scaffold: str = "FULL", transfer:
 def prerequisite_ids(objective: dict, concepts: list[dict]) -> list[str]:
     declared = objective.get("prerequisiteIds") or objective.get("prerequisite_ids") or []
     if declared:
+        # Declared prerequisite objectives are valid branch targets even when
+        # the learner has not encountered them yet; the runtime initializes
+        # their evidence on branch entry.
         return [str(item) for item in declared]
     required: set[str] = set()
     for step in objective.get("steps", []):

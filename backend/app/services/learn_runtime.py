@@ -635,6 +635,28 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         if db is not None:
             db.add(LearnAttempt(session_id=session.id, objective_id=concept_id, step_id=current.id, step_type=current.type, response=str(response_text or option_id or ",".join(ordered_ids or [])), result=evaluation.result, attempt_number=int(concept.get("attempts", 1)), hints_used=0, evaluation=evaluation.model_dump(by_alias=True)))
 
+        # A successful prerequisite repair returns to the paused parent
+        # concept through the same scene runtime.  The branch stack is popped
+        # only after evidence is recorded, so the parent replan can observe
+        # the repaired prerequisite.
+        if evaluation.result == "correct" and state.get("branchStack"):
+            branch = return_from_prerequisite(session)
+            if branch:
+                state = _state(session)
+                parent = _objective(session.plan or {}, branch.get("returnObjectiveId"))
+                if parent is not None:
+                    parent_steps = list(parent.get("steps") or [])
+                    parent_candidates = [adapter.validate_python(raw) for raw in parent_steps if isinstance(raw, dict)]
+                    answered_parent = set(state.get("answeredInteractionIds") or [])
+                    parent_next = next((item for item in parent_candidates if item.id not in answered_parent and item.type not in {"teach", "walkthrough"}), None) or next((item for item in parent_candidates if item.id not in answered_parent), None)
+                    if parent_next is not None:
+                        parent_concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == branch.get("returnObjectiveId")), {"conceptId": branch.get("returnObjectiveId"), "state": "DEVELOPING", "scaffold": "GUIDED"})
+                        parent_action = TutorAction(id=bounded_id("action", branch.get("returnObjectiveId"), parent_next.id, "return"), type="ask_free_response", conceptId=str(branch.get("returnObjectiveId")), stepId=parent_next.id, rationale="Return to the original concept after prerequisite repair.")
+                        parent_decision = TutorDecision(targetConcept=str(branch.get("returnObjectiveId")), teachingAction=parent_action.type, pedagogicalGoal="VERIFY_UNDERSTANDING", pedagogicalStrategy="GUIDED_DISCOVERY", scaffoldLevel=parent_concept.get("scaffold", "GUIDED"), nextStepId=parent_next.id, transitionMessage="That supporting idea is in place. Now let’s apply it back to the original concept.", rationale="Prerequisite evidence is sufficient to resume the parent concept.")
+                        rendered = compose_learning_scene(session_id=str(session.id), objective=parent, steps=parent_steps, step_index=0, current_step=parent_next, action=parent_action, decision=parent_decision, concept=parent_concept, state=state, feedback="Good — the supporting idea is in place.", feedback_kind="correct", evaluation=evaluation)
+                        private_next = _private_for_rendered_scene(rendered, objective_id=str(branch.get("returnObjectiveId")), decision=parent_decision, fallback_step=parent_next, objective=parent)
+                        return persist_scene_revision(session, rendered, private_next, event_id=event_id_value if 'event_id_value' in locals() else None, db=db), private_next
+
     # A bounded prerequisite branch is an agent-proposed transition, validated
     # against the objective graph before any scene is composed.  The branch is
     # only taken when the prerequisite is actually weak; demonstrated
