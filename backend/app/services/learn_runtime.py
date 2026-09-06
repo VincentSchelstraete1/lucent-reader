@@ -550,6 +550,13 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
 
     scene, private = ensure_runtime_state(session, db=db)
     state = _state(session)
+    # Carry the authoritative scene visual into the composer as a transient
+    # handoff for this turn.  The scene remains the sole persisted owner;
+    # persist_scene_revision() removes this compatibility handoff before
+    # writing session.state, while subsequent scene revisions retain the
+    # current stage/highlights instead of resetting to stage zero.
+    if scene.visual_state is not None:
+        state["visualState"] = scene.visual_state.model_dump(by_alias=True)
     event_type = getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")
     if event_type == "ASK_LUCENT":
         # Ask Lucent is an interruption in the same tutor runtime. The route
