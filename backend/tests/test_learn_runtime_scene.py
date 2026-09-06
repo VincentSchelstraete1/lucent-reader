@@ -74,6 +74,22 @@ def test_explicit_uncertainty_is_not_graded_as_correct_or_advanced():
     assert session.state["concepts"][0].get("uncertaintyCount", 0) == 1
 
 
+def test_idk_produces_teaching_support_before_followup_practice():
+    session = _session()
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    # First miss creates the teaching turn; Continue exposes the guided check.
+    scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
+    scene, _ = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    active = scene.response_interaction_id
+    scene, private = process_tutor_event(session, {"id": "idk", "type": "RESPONSE", "interactionId": active, "response": {"response": "I don't know"}})
+    assert private is None
+    assert any(block.kind == "explanation" and block.content for block in scene.blocks)
+    assert scene.response_interaction_id is None
+    followup, followup_private = process_tutor_event(session, {"id": "guided", "type": "CONTINUE"})
+    assert followup_private is not None
+    assert followup.response_interaction_id != active
+
+
 def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     session = _session()
     scene, private = ensure_runtime_state(session)
