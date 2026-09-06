@@ -249,7 +249,7 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
         if objective_id == str(exclude_concept_id) or objective_id in queued_ids:
             continue
         concept = concepts.get(objective_id, {})
-        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state):
+        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state, session):
             return objective_id
     for concept_id in state.get("revisitQueue", []):
         concept_id = str(concept_id)
@@ -257,7 +257,7 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
             continue
         objective = objectives_by_id.get(concept_id)
         concept = concepts.get(concept_id, {})
-        if objective is not None and (_objective_has_remaining_candidates(objective, state) or int(concepts.get(concept_id, {}).get("reviewVisits", 0) or 0) < 1):
+        if objective is not None and (_objective_has_remaining_candidates(objective, state, session) or int(concepts.get(concept_id, {}).get("reviewVisits", 0) or 0) < 1):
             # Consume the queue entry when selecting the revisit. A later
             # response may schedule it again, but only while a real candidate
             # remains; exhausted objectives cannot oscillate indefinitely.
@@ -272,7 +272,7 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
         if objective_id == str(exclude_concept_id):
             continue
         concept = concepts.get(objective_id, {})
-        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state):
+        if concept.get("state", "NOT_SEEN") != "DEMONSTRATED" and _objective_has_remaining_candidates(objective, state, session):
             return objective_id
     return None
 
@@ -498,7 +498,7 @@ def build_student_feedback(evaluation: Any, *, interaction_id: str, source_block
     return {"result": getattr(evaluation, "result", "insufficient_evidence"), "message": getattr(evaluation, "evidence", "Let's look at this together."), "respondsToInteractionId": interaction_id, "sourceSectionIds": [str(item) for block in (source_blocks or []) for item in block.get("sectionIds", [])][:8], "sourceBlockIds": [str(item) for block in (source_blocks or []) for item in block.get("blockIds", [])][:12]}
 
 
-def _objective_has_remaining_candidates(objective: dict[str, Any], state: dict[str, Any]) -> bool:
+def _objective_has_remaining_candidates(objective: dict[str, Any], state: dict[str, Any], session=None) -> bool:
     """Whether an objective still has an unanswered/unused authored candidate.
 
     Selecting an objective by "not DEMONSTRATED" alone is not enough: a
@@ -506,7 +506,7 @@ def _objective_has_remaining_candidates(objective: dict[str, Any], state: dict[s
     also "not DEMONSTRATED", so two such objectives would bounce the learner
     back and forth between them forever instead of ever completing.
     """
-    answered = _answered_interaction_ids(session, state)
+    answered = _answered_interaction_ids(session, state) if session is not None else set(state.get("answeredInteractionIds") or [])
     used_teaching = set(state.get("usedTeachingIds") or [])
     for raw in objective.get("steps") or []:
         if not isinstance(raw, dict):
