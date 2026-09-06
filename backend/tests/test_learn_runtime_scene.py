@@ -90,6 +90,22 @@ def test_ask_message_mutates_authoritative_scene_and_visual_state():
     assert session.state["currentScene"]["visualState"]["stage"] == 2
 
 
+def test_ask_message_can_add_grounded_visual_reference_to_teaching_only_scene():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene = apply_scene_message(
+        session,
+        message="Show me visually",
+        answer="Watch the conversion at the bottom.",
+        source_section_ids=["s1"],
+        source_block_ids=["b1"],
+        visual_action={"stage": 0, "visualRef": {"sectionId": "s1", "componentIndex": 0}},
+    )
+    assert scene is not None
+    visual_blocks = [block for block in scene.blocks if block.kind == "visual"]
+    assert visual_blocks and visual_blocks[0].visual_ref == {"sectionId": "s1", "componentIndex": 0}
+
+
 def test_visual_event_persists_canonical_stage_and_highlight():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
