@@ -137,25 +137,25 @@ def _diagnosis_type(result: str, step_type: str, attempts: int, misconception: s
     return "KNOWLEDGE_GAP"
 
 def _tutor_observation(session: LearnSession, objective: dict, concept: dict, step, state: dict, *, source_context: dict | None = None, candidates: list[dict] | None = None) -> TutorObservation:
-    """Build a bounded, structured observation for one replanning turn."""
+    """Compatibility shim delegating to the canonical runtime observation.
+
+    Ask and normal learner events must observe the same persisted scene/evidence;
+    this adapter remains only for older scenario fixtures that pass explicit
+    source/candidate context.
+    """
+    from app.services.learn_runtime import build_tutor_observation
     source_context = source_context or {}
     blocks = []
     if source_context.get("text"):
         blocks.append({"text": str(source_context.get("text", ""))[:900], "sectionIds": list(source_context.get("sourceSectionIds", []))[:4], "blockIds": list(source_context.get("sourceBlockIds", []))[:6]})
-    return TutorObservation(
-        sessionId=str(session.id), objectiveId=str(objective.get("id", "concept")), currentConcept=str(objective.get("title", "Concept")),
-        contentType=content_policy(objective), learnerGoal=session.goal,
-        evidence={key: concept.get(key) for key in ("state", "attempts", "correct", "partiallyCorrect", "incorrect", "recognitionEvidence", "recallEvidence", "explanationEvidence", "applicationEvidence", "transferEvidence", "hintsUsed", "scaffold", "scaffoldingLevel", "lastResult", "reviewDue")},
-        recentAttempts=list(state.get("recentAttempts", []))[-8:], misconceptions=list(concept.get("misconceptions", []))[-6:],
-        previousDiagnoses=[str(concept.get("diagnosisType"))] if concept.get("diagnosisType") else [],
-        successfulStrategies=list(concept.get("successfulStrategies", []))[-8:], failedStrategies=list(concept.get("failedStrategies", []))[-8:],
-        successfulModalities=list(concept.get("successfulModalities", []))[-8:], failedModalities=list(concept.get("failedModalities", []))[-8:],
-        prerequisiteEvidence=state.get("prerequisiteEvidence", {}), previousTutorActions=list(state.get("previousTutorActions", []))[-8:],
-        currentTeachingSurface=getattr(step, "type", None), currentVisual=getattr(step, "visual_spec", None).model_dump(by_alias=True) if getattr(step, "visual_spec", None) else None,
-        currentVisualStage=state.get("visualStage"), reviewState=concept.get("reviewDue"), sourceBlocks=blocks,
-        sourceSectionIds=list(getattr(step, "source_section_ids", []) or objective.get("sourceSectionIds", []))[:8], sourceBlockIds=list(getattr(step, "source_block_ids", []) or objective.get("sourceBlockIds", []))[:12],
-        candidateSteps=(candidates or [])[:12],
-    )
+    observation = build_tutor_observation(session, event={"type": "ASK_LUCENT"}, source_blocks=blocks)
+    return observation.model_copy(update={
+        "candidateSteps": (candidates or [])[:12],
+        "currentTeachingSurface": getattr(step, "type", None) or observation.current_teaching_surface,
+        "currentVisual": getattr(step, "visual_spec", None).model_dump(by_alias=True) if getattr(step, "visual_spec", None) else observation.current_visual,
+        "sourceSectionIds": list(getattr(step, "source_section_ids", []) or objective.get("sourceSectionIds", []))[:8] or observation.source_section_ids,
+        "sourceBlockIds": list(getattr(step, "source_block_ids", []) or objective.get("sourceBlockIds", []))[:12] or observation.source_block_ids,
+    })
 
 
 def _report(session: LearnSession) -> LearnSessionReport:
