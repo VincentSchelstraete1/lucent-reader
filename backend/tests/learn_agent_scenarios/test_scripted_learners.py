@@ -140,10 +140,30 @@ def test_independent_then_transfer_success_reduces_scaffolding(client):
         _, session = create_source_material(client)
         trace = TutorScenarioTrace("independent_and_transfer_success")
         session = run_turn(client, trace, session, {})
-        session = run_turn(client, trace, session, {"response": "independent correct"})
+        # Drive the interaction that is actually active in the authoritative
+        # scene.  The old harness always sent free text here, which made an
+        # ordering/prediction block fail before the runtime could record
+        # application evidence.
+        with SessionLocal() as db:
+            active = dict((db.get(LearnSession, UUID(session["id"])).state or {}).get("currentScenePrivate", {}).get("interaction") or {})
+        if active.get("type") == "ordering":
+            payload = {"orderedIds": active.get("correctOrder") or [item.get("id") for item in active.get("items", [])]}
+        elif active.get("type") in {"multiple_choice", "prediction"}:
+            payload = {"optionId": active.get("answerId") or ""}
+        else:
+            payload = {"response": "independent correct"}
+        session = run_turn(client, trace, session, payload)
         first_scaffold = trace.turns[-1].evidence_update[0]["scaffold"]
         if session.get("status") == "active" and session.get("scene"):
-            session = run_turn(client, trace, session, {"response": "transfer success"})
+            with SessionLocal() as db:
+                active = dict((db.get(LearnSession, UUID(session["id"])).state or {}).get("currentScenePrivate", {}).get("interaction") or {})
+            if active.get("type") == "ordering":
+                payload = {"orderedIds": active.get("correctOrder") or [item.get("id") for item in active.get("items", [])]}
+            elif active.get("type") in {"multiple_choice", "prediction"}:
+                payload = {"optionId": active.get("answerId") or ""}
+            else:
+                payload = {"response": "transfer success"}
+            session = run_turn(client, trace, session, payload)
     assert_trace_invariants(trace)
     assert first_scaffold in {"FULL", "GUIDED", "PARTIAL", "INDEPENDENT", "TRANSFER"}
     final = trace.turns[-1].evidence_update[0]
