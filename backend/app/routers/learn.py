@@ -469,15 +469,8 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             replacement = alternatives[0]
             replacement_step = replacement
             _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_scene_recompose", metadata={"request": "different_question", "replacementId": replacement.id, "previousId": getattr(current_step, "id", None)})
-            active_scene = load_current_scene(session)
-            if active_scene:
-                practice = LearningSceneBlock(id=_bounded_id("practice", session.id, replacement.id), kind="practice", label="Try", title=replacement.title, content=replacement.prompt or replacement.content, step=public_step(replacement), sourceSectionIds=list(getattr(replacement, "source_section_ids", []) or []), sourceBlockIds=list(getattr(replacement, "source_block_ids", []) or []))
-                blocks = [block for block in active_scene.blocks if block.kind != "practice"] + [practice]
-                active_scene = active_scene.model_copy(update={"blocks": blocks[-6:], "response_interaction_id": replacement.id})
-                private = _private_for_rendered_scene(active_scene, objective_id=str(objective.get("id")), fallback_step=replacement, objective=objective)
-                persist_scene_revision(session, active_scene, private, event_id=_bounded_id("ask-question", session.id, replacement.id), db=db)
-                visual_action = None
-                scene_kind, ask_label = "tutor_message", "Try"
+            visual_action = None
+            scene_kind, ask_label = "tutor_message", "Try"
     scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
     process_tutor_event(session, {
         "type": "ASK_LUCENT",
@@ -490,17 +483,6 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         "blockLabel": ask_label,
         "replacementStep": replacement_step.model_dump(by_alias=True) if replacement_step is not None else None,
     }, db=db)
-    if replacement_step is not None:
-        # Re-assert the practice target after appending the conversational
-        # block; this keeps the active interaction authoritative even when
-        # scene normalization trims older blocks.
-        active_scene = load_current_scene(session)
-        if active_scene:
-            practice = LearningSceneBlock(id=_bounded_id("practice", session.id, replacement_step.id), kind="practice", label="Try", title=replacement_step.title, content=replacement_step.prompt or replacement_step.content, step=public_step(replacement_step), sourceSectionIds=list(getattr(replacement_step, "source_section_ids", []) or []), sourceBlockIds=list(getattr(replacement_step, "source_block_ids", []) or []))
-            blocks = [block for block in active_scene.blocks if block.kind != "practice"] + [practice]
-            active_scene = active_scene.model_copy(update={"blocks": blocks[-6:], "response_interaction_id": replacement_step.id})
-            private = _private_for_rendered_scene(active_scene, objective_id=str(objective.get("id")), fallback_step=replacement_step, objective=objective)
-            persist_scene_revision(session, active_scene, private, event_id=_bounded_id("ask-question-final", session.id, replacement_step.id), db=db)
     scene_response = _session_payload(session)
     db.commit()
     return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scenePatch=scene_response.scene, scene=scene_response.scene)
