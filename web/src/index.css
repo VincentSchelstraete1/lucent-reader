@@ -299,7 +299,7 @@
 .structured-visual-modal-panel { width: min(1100px, 96vw); max-height: 92vh; overflow: auto; background: #fbfaf6; border: 1px solid #d8d2c5; border-radius: 12px; padding: 1.25rem; box-shadow: 0 18px 60px rgba(38, 40, 34, .2); }
 .structured-visual-modal-panel .structured-visual { border: 0; margin: 0; padding: 0; background: transparent; }
 .structured-visual svg { width: 100%; height: auto; display: block; }
-.structured-visual-edge line { stroke: #879184; stroke-width: 1.5; color: #879184; }
+.structured-visual-edge path { stroke: #879184; stroke-width: 1.5; color: #879184; }
 .structured-visual-edge text { fill: #74796f; font-size: 10px; text-anchor: middle; }
 .structured-visual-divider { stroke: #d9d2c6; stroke-dasharray: 3 4; }
 .structured-visual-column-label { fill: #687067; font-size: 11px; text-anchor: middle; }
