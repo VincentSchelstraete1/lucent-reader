@@ -121,7 +121,8 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         # LearnPlan asset list.
         from app.schemas.learn import TeachBackStep
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-        review_id = bounded_id("review", session.id, objective.get("id"), len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
+        concept_attempts = next((int(item.get("attempts", 0) or 0) for item in state.get("concepts", []) if str(item.get("conceptId")) == str(objective.get("id"))), 0)
+        review_id = bounded_id("review", session.id, objective.get("id"), concept_attempts, len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
         parsed = TeachBackStep(id=review_id, type="teach_back", title="Recall it without the original prompt", prompt=f"Without looking back at the earlier question, explain how {objective.get('title', 'this concept')} works and what result it predicts.", requiredConcepts=_required_concepts(outcome), hints=[f"Use this source-supported idea: {outcome[:220]}"], feedbackIncorrect=f"Start with the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
     if parsed is None and parsed_candidates:
         # Never resurrect an answered authored interaction when a scene is
