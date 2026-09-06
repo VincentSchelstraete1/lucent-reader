@@ -348,7 +348,33 @@ def completion_met(session) -> bool:
     if not objectives or state.get("revisitQueue") or state.get("branchStack"):
         return False
     by_id = {str(item.get("conceptId")): item for item in concepts}
-    return all(by_id.get(str(item.get("id")), {}).get("state") == "DEMONSTRATED" for item in objectives)
+    return all(
+        by_id.get(str(item.get("id")), {}).get("state") == "DEMONSTRATED"
+        and _objective_evidence_sufficient(item, by_id.get(str(item.get("id")), {}))
+        for item in objectives
+    )
+
+
+def _objective_evidence_sufficient(objective: dict[str, Any], concept: dict[str, Any]) -> bool:
+    """Require stronger evidence when an objective tests doing, not just naming.
+
+    Authored plans do not always carry an explicit content policy. Infer the
+    minimum evidence requirement from their interaction assets so a pair of
+    recognition checks cannot complete a procedural/process objective before
+    the learner has demonstrated application (and, where possible, transfer).
+    """
+    types = {str(step.get("type")) for step in (objective.get("steps") or []) if isinstance(step, dict)}
+    title = f"{objective.get('title', '')} {objective.get('outcome', '')}".casefold()
+    requires_application = bool(types & {"problem", "numeric", "worked_step", "prediction", "ordering"}) or any(
+        token in title for token in ("calculate", "solve", "process", "mechanism", "energy", "force", "application", "apply")
+    )
+    if requires_application and int(concept.get("applicationEvidence", 0) or 0) < 1:
+        return False
+    # Transfer is a stronger optional target. Once the runtime has explicitly
+    # entered TRANSFER scaffolding, require that evidence before completion.
+    if concept.get("scaffold") == "TRANSFER" and int(concept.get("transferEvidence", 0) or 0) < 1:
+        return False
+    return True
 
 
 def persist_scene_revision(session, scene: LearningScene, private: dict[str, Any] | None = None, *, event_id: str | None = None, db=None) -> LearningScene:
@@ -629,7 +655,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         concept["reviewDue"] = review_due(evaluation.result, hints=hints_used, scaffold=concept["scaffold"], transfer=transfer, delayed=bool(state.get("revisitMode")))
         if evaluation.result == "correct":
             concept["correct"] = int(concept.get("correct", 0)) + 1
-            concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 else "DEMONSTRATED"
+            concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 or not _objective_evidence_sufficient(objective, concept) else "DEMONSTRATED"
             evidence_key = {
                 "multiple_choice": "recognitionEvidence",
                 "prediction": "applicationEvidence",
