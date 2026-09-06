@@ -156,7 +156,24 @@ def build_tutor_observation(session, *, event: dict[str, Any] | None = None, sou
         scene, _ = ensure_runtime_state(session)
     state = _state(session)
     concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == scene.objective_id), {})
-    return TutorObservation(sessionId=str(session.id), objectiveId=scene.objective_id, currentConcept=scene.objective, learnerGoal=session.goal, evidence={key: concept.get(key) for key in ("state", "attempts", "correct", "incorrect", "hintsUsed", "scaffold", "lastResult")}, recentAttempts=list(state.get("recentAttempts", []))[-8:], misconceptions=list(concept.get("misconceptions", []))[-6:], successfulStrategies=list(concept.get("successfulStrategies", []))[-8:], failedStrategies=list(concept.get("failedStrategies", []))[-8:], successfulModalities=list(concept.get("successfulModalities", []))[-8:], failedModalities=list(concept.get("failedModalities", []))[-8:], previousTutorActions=list(state.get("previousTutorActions", []))[-8:], currentTeachingSurface=next((block.kind for block in scene.blocks if block.kind == "practice"), None), currentVisual=scene.visual_state.model_dump(by_alias=True) if scene.visual_state else None, currentVisualStage=scene.visual_state.stage if scene.visual_state else 0, reviewState=concept.get("reviewDue"), sourceBlocks=(source_blocks or [])[:8], sourceSectionIds=scene.source_section_ids[:8], sourceBlockIds=scene.source_block_ids[:12], candidateSteps=[])
+    evidence_keys = (
+        "state", "attempts", "correct", "incorrect", "partiallyCorrect",
+        "insufficientEvidence", "hintsUsed", "hintDependence", "scaffold",
+        "scaffoldingLevel", "scaffoldDependence", "lastResult",
+        "recognitionEvidence", "recallEvidence", "explanationEvidence",
+        "applicationEvidence", "transferEvidence", "assistedSuccesses",
+        "independentSuccesses", "uncertaintyCount",
+    )
+    evidence = {key: concept.get(key) for key in evidence_keys if key in concept}
+    evidence["answeredInteractionIds"] = list(state.get("answeredInteractionIds") or [])[-16:]
+    evidence["usedTeachingIds"] = list(state.get("usedTeachingIds") or [])[-8:]
+    evidence["sceneRevision"] = scene.revision
+    evidence["sceneBlockKinds"] = [block.kind for block in scene.blocks]
+    visual_block = next((block for block in scene.blocks if block.kind in {"visual", "animation"} and (block.visual_spec is not None or block.visual_ref is not None)), None)
+    current_visual = scene.visual_state.model_dump(by_alias=True) if scene.visual_state else None
+    if visual_block is not None:
+        current_visual = {"state": current_visual, "spec": visual_block.visual_spec.model_dump(by_alias=True) if visual_block.visual_spec else None, "ref": visual_block.visual_ref}
+    return TutorObservation(sessionId=str(session.id), objectiveId=scene.objective_id, currentConcept=scene.objective, learnerGoal=session.goal, evidence=evidence, recentAttempts=list(state.get("recentAttempts", []))[-8:], misconceptions=list(concept.get("misconceptions", []))[-6:], previousDiagnoses=list(concept.get("previousDiagnoses", []))[-6:], successfulStrategies=list(concept.get("successfulStrategies", []))[-8:], failedStrategies=list(concept.get("failedStrategies", []))[-8:], successfulModalities=list(concept.get("successfulModalities", []))[-8:], failedModalities=list(concept.get("failedModalities", []))[-8:], previousTutorActions=list(state.get("previousTutorActions", []))[-8:], currentTeachingSurface=next((block.kind for block in scene.blocks if block.kind == "practice"), None), currentVisual=current_visual, currentVisualStage=scene.visual_state.stage if scene.visual_state else 0, reviewState=concept.get("reviewDue"), sourceBlocks=(source_blocks or [])[:8], sourceSectionIds=scene.source_section_ids[:8], sourceBlockIds=scene.source_block_ids[:12], candidateSteps=[])
 
 
 def select_target_objective(session, *, exclude_concept_id: str | None = None) -> str | None:
@@ -644,6 +661,31 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     event_id_value = getattr(event, "id", None) if not isinstance(event, dict) else event.get("id")
     if next_step is None:
         if evaluation is not None and evaluation.result == "correct":
+            # A correct recognition/recall response is not sufficient evidence
+            # for transfer. Before advancing an objective, compose one new,
+            # source-grounded application/transfer check in memory. This is
+            # deliberately scene-local: authored plan steps remain assets,
+            # never a finite progression cursor.
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0:
+                outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+                transfer_id = bounded_id("transfer", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
+                transfer_step = TeachBackStep(
+                    id=transfer_id,
+                    type="teach_back",
+                    title="Apply it in a new situation",
+                    prompt=f"How would the same idea apply in a new situation involving {objective.get('title', 'this concept')}? Explain the reasoning, not just the label.",
+                    requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5],
+                    hints=[f"Start from this source-supported idea: {outcome[:220]}"],
+                    feedbackIncorrect=f"Use the same mechanism described here: {outcome[:260]}",
+                    sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                    sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+                )
+                transfer_action = TutorAction(id=bounded_id("action", concept_id, transfer_id), type="ask_teach_back", conceptId=concept_id, stepId=transfer_id, rationale="Check whether the learner can transfer the idea beyond the original example.")
+                transfer_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_teach_back", pedagogicalGoal="TEST_TRANSFER", pedagogicalStrategy="TRANSFER_PRACTICE", scaffoldLevel="TRANSFER", nextStepId=transfer_id, transitionMessage="Good. Now let's use the idea in a new situation.", rationale="Application evidence is present; transfer evidence is still needed.")
+                session.state = state
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
+                private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=transfer_decision, fallback_step=transfer_step, objective=objective)
+                return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
             return _advance_objective_or_complete(session, state, completed_scene, exclude_concept_id=concept_id, event_id=event_id_value, db=db)
         # Candidate assets are finite, but the tutor runtime is not.  Compose

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.learn_runtime import apply_scene_message, apply_visual_event, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, build_tutor_observation, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite
 from app.schemas.learn import ConceptEvidence
 
 
@@ -304,3 +304,20 @@ def test_prerequisite_branch_is_bounded_and_returns_to_original_objective():
     assert branch and session.state["currentObjectiveId"] == "prereq"
     assert return_from_prerequisite(session)["returnObjectiveId"] == "energy"
     assert session.state["currentObjectiveId"] == "energy"
+
+
+def test_tutor_observation_carries_evidence_history_and_visual_state():
+    session = _session()
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    state = session.state
+    concept = state["concepts"][0]
+    concept.update({"recognitionEvidence": 2, "recallEvidence": 1, "explanationEvidence": 1, "applicationEvidence": 1, "transferEvidence": 0, "scaffoldingLevel": "GUIDED", "uncertaintyCount": 1})
+    state["answeredInteractionIds"] = ["old-check"]
+    state["usedTeachingIds"] = ["teach"]
+    session.state = state
+    observation = build_tutor_observation(session)
+    assert observation.evidence["applicationEvidence"] == 1
+    assert observation.evidence["transferEvidence"] == 0
+    assert observation.evidence["scaffoldingLevel"] == "GUIDED"
+    assert observation.evidence["answeredInteractionIds"] == ["old-check"]
+    assert observation.evidence["sceneRevision"] == scene.revision
