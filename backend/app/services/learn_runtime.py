@@ -936,7 +936,18 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 # across that boundary so persistence and the API response
                 # cannot silently reset the visual to its prior stage.
                 state["visualState"] = scene.visual_state.model_dump(by_alias=True)
-            rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=feedback if 'feedback' in locals() else (evaluation.student_message or evaluation.evidence if evaluation else None), evaluation=evaluation)
+            # Always surface a concise learner-facing acknowledgement on the
+            # remediation scene.  Model-backed evaluations may provide a
+            # student message, while deterministic grading only has its
+            # internal evidence/rationale; the misconception is the safest
+            # specific fallback and the final sentence keeps the scene
+            # usable when neither is available.
+            remediation_feedback = (
+                evaluation.student_message
+                or evaluation.misconception
+                or ("Let's look at the key relationship together." if evaluation else None)
+            )
+            rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=remediation_feedback, evaluation=evaluation)
             if scene.visual_state is not None:
                 rendered = rendered.model_copy(update={"visual_state": scene.visual_state})
             private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=teaching_decision, fallback_step=teaching, objective=objective)

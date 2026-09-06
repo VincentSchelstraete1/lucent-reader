@@ -52,6 +52,15 @@ def test_failed_response_teaches_before_exposing_another_assessment():
     assert next_scene.response_interaction_id != "check"
 
 
+def test_failed_response_remediation_scene_includes_learner_feedback():
+    session = _session()
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
+    feedback = [block for block in scene.blocks if block.kind == "feedback"]
+    assert feedback, "a remediation response must visibly acknowledge the learner's error"
+    assert feedback[0].content
+
+
 def test_failed_response_advances_grounded_visual_for_followup():
     session = _session()
     session.plan["objectives"][0]["steps"][0]["visualSpec"] = {
