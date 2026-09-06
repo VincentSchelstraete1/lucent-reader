@@ -403,6 +403,15 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             visual_action["visualRef"] = visual_candidate.visual_ref
         elif getattr(visual_candidate, "type", None) == "walkthrough":
             visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
+    # If a grounded visual is already available, a provider response that
+    # asks the learner to supply more detail is contradictory: the learner
+    # explicitly requested a visual and the runtime has one it can show now.
+    # Keep the model answer when it is useful, but normalize this narrow
+    # fallback so the learner is directed to the visual that is actually being
+    # added/reused in the authoritative scene.
+    if requested_visual and visual_action is not None and any(phrase in str(answer).casefold() for phrase in ("need more specific", "need more information", "which aspect", "what would help", "can't show")):
+        visual_title = getattr(getattr(visual_candidate, "visual_spec", None), "title", None) or "source-supported visual"
+        answer = f"Let’s use the {visual_title} in the main scene. Watch the highlighted relationship as you connect it to the idea we’re studying."
     fallback_block = TutorSceneBlockPlan(
         kind=ask_kind, label=ask_label,
         title=objective.get("title"),
