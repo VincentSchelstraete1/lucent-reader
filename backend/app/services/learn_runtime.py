@@ -98,6 +98,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
             continue
         parsed_candidates.append(candidate)
     answered = set(state.get("answeredInteractionIds") or [])
+    used_teaching = set(state.get("usedTeachingIds") or [])
     revisit = str(objective.get("id")) in {str(item) for item in state.get("revisitQueue", [])}
     if revisit:
         # A revisit is a retrieval opportunity, not a replay of the original
@@ -105,7 +106,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         # must recall/apply the idea in a different surface.
         parsed = next((candidate for candidate in parsed_candidates if candidate.id not in answered and candidate.type not in {"teach", "walkthrough"}), None)
     else:
-        parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"}), None)
+        parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"} and candidate.id not in used_teaching), None)
     parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered), None)
     if parsed is None and revisit:
         # Once authored assets have all been answered, a due revisit still
