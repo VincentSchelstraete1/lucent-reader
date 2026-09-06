@@ -1,4 +1,4 @@
-from app.services.learn_engine import build_learn_plan, build_remediation_step, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues
+from app.services.learn_engine import build_learn_plan, build_remediation_step, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
@@ -12,6 +12,17 @@ def _note():
         "sourceBlockIds": ["b1"], "keyTakeaways": ["Projection isolates the parallel component."],
         "components": [{"kind": "key_definition", "term": "Projection", "definition": "The component along a direction."}],
     }]}
+
+
+def test_metadata_only_or_extraction_diagnostic_source_cannot_build_lesson():
+    payload = {"title": "Lecture.pdf", "sectionNotes": [{"id": "s1", "title": "Insufficient Source Material", "sourceBlockIds": ["metadata"], "bigIdea": "The supplied material contains only a metadata header with no substantive content"}]}
+    assert validate_substantive_source(payload)
+    try:
+        build_learn_plan(payload, "understand", "new")
+    except ValueError as exc:
+        assert "substantive content" in str(exc)
+    else:
+        raise AssertionError("diagnostic-only source must not produce a LearnPlan")
 
 
 def test_goal_changes_the_learning_strategy():

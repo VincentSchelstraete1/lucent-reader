@@ -30,6 +30,46 @@ def _components(section: dict) -> list[dict]:
     return [item for item in section.get("components", []) if isinstance(item, dict)]
 
 
+_SOURCE_DIAGNOSTIC_PATTERNS = (
+    "insufficient source", "no substantive content", "extraction error",
+    "unable to extract", "could not extract", "metadata header",
+    "source material unavailable", "document contains no text",
+)
+
+
+def validate_substantive_source(note_payload: dict) -> list[str]:
+    """Validate the source/content boundary before building learner content.
+
+    Section-note metadata (IDs, titles, provenance, timestamps) is not a
+    teachable source. Diagnostic strings emitted by extraction are likewise
+    untrusted and must never become concepts or distractors.
+    """
+    sections = [section for section in note_payload.get("sectionNotes", []) if isinstance(section, dict)]
+    if not sections:
+        return ["No extracted sections are available for this material."]
+    substantive: list[str] = []
+    for section in sections:
+        values = [section.get("bigIdea"), *(section.get("keyTakeaways") or [])]
+        for component in _components(section):
+            values.extend([component.get("title"), component.get("content"), component.get("description"), component.get("definition")])
+            values.extend(item.get("label") or item.get("name") for item in (component.get("nodes") or component.get("items") or []) if isinstance(item, dict))
+        for value in values:
+            text = _clean(value)
+            lowered = text.casefold()
+            if text and not any(pattern in lowered for pattern in _SOURCE_DIAGNOSTIC_PATTERNS):
+                substantive.append(text)
+    joined = " ".join(substantive)
+    words = _words(joined)
+    issues: list[str] = []
+    # Short notes can still be valid (for example a concise definition), but
+    # a title/metadata header alone is not enough to teach from.
+    if len(joined) < 20 or len(words) < 3:
+        issues.append("The extracted material does not contain enough substantive content to build a lesson.")
+    if substantive and all(any(pattern in value.casefold() for pattern in _SOURCE_DIAGNOSTIC_PATTERNS) for value in substantive):
+        issues.append("The extracted material contains only an extraction diagnostic, not teachable content.")
+    return issues
+
+
 def _source_ids(section: dict) -> tuple[list[str], list[str]]:
     return list(section.get("id") and [str(section["id"])] or []), [str(item) for item in section.get("sourceBlockIds", [])]
 
@@ -102,6 +142,9 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
     performed the semantic work, while this layer chooses an interaction
     sequence appropriate to the learner's stated goal.
     """
+    source_issues = validate_substantive_source(note_payload)
+    if source_issues:
+        raise ValueError(source_issues[0])
     sections = [s for s in note_payload.get("sectionNotes", []) if isinstance(s, dict)]
     objectives: list[LearningObjective] = []
     for section in sections[:4]:

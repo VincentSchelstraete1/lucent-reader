@@ -510,7 +510,13 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     if not request.restart:
         existing = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.plan_fingerprint == fingerprint, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
         if existing: return _session_payload(existing)
-    plan = build_learn_plan(payload, request.goal, request.familiarity); plan_data = plan.model_dump(by_alias=True)
+    try:
+        plan = build_learn_plan(payload, request.goal, request.familiarity)
+    except ValueError as exc:
+        # Source extraction diagnostics are not learner content. Refuse to
+        # start a session and send a recoverable, user-facing source error.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    plan_data = plan.model_dump(by_alias=True)
     session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
     db.add(session); db.commit(); db.refresh(session)
     _ensure_session_runtime(db, session)
