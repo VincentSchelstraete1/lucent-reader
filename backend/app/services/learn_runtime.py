@@ -97,7 +97,16 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         except Exception:
             continue
         parsed_candidates.append(candidate)
-    parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"}), None) or (parsed_candidates[0] if parsed_candidates else None)
+    answered = set(state.get("answeredInteractionIds") or [])
+    revisit = str(objective.get("id")) in {str(item) for item in state.get("revisitQueue", [])}
+    if revisit:
+        # A revisit is a retrieval opportunity, not a replay of the original
+        # introduction. Prefer an unanswered interactive asset so the learner
+        # must recall/apply the idea in a different surface.
+        parsed = next((candidate for candidate in parsed_candidates if candidate.id not in answered and candidate.type not in {"teach", "walkthrough"}), None)
+    else:
+        parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"}), None)
+    parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered), None) or (parsed_candidates[0] if parsed_candidates else None)
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
     scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
