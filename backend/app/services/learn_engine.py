@@ -312,8 +312,29 @@ def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     return LearnStepView(id=data["id"], type=data["type"], title=data["title"], prompt=data.get("prompt"), content=data.get("content"), options=options, items=items, visualSpec=data.get("visualSpec"), visualRef=visual_ref, sectionId=data.get("sectionId"), componentIndex=data.get("componentIndex"), hintsAvailable=max(0, len(step.hints) - hints_used), sourceSectionIds=list(getattr(step, "source_section_ids", [])), sourceBlockIds=list(getattr(step, "source_block_ids", [])))
 
 
+def is_explicit_uncertainty(response: str | None) -> bool:
+    normalized = _clean(response).casefold()
+    return bool(normalized and any(token in normalized for token in (
+        "i don't know", "i do not know", "idk", "not sure", "unsure",
+        "don't understand", "do not understand", "no idea",
+    )))
+
+
 def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | None, ordered_ids: list[str] | None = None) -> LearnEvaluation:
     """Deterministic first-pass evaluator used by the adaptive runtime."""
+    # Explicit uncertainty is evidence about the learner's state, not an
+    # incorrect answer to grade or a signal to advance.  Normalize it before
+    # type-specific grading (and before the optional model diagnosis) so the
+    # runtime must teach/build understanding before offering another ordinary
+    # assessment.
+    if is_explicit_uncertainty(response):
+        return LearnEvaluation(
+            result="insufficient_evidence",
+            confidence=0.15,
+            evidence="The learner expressed uncertainty and needs more support before another check.",
+            remediationCategory="simplify",
+            studentMessage="No problem — let's build the idea together first.",
+        )
     answer = _clean(option_id or response)
     if isinstance(step, (TeachStep, WalkthroughStep)):
         return LearnEvaluation(result="insufficient_evidence", confidence=0.15, evidence=f"Let's check what you noticed about {step.title}.", remediationCategory="none")

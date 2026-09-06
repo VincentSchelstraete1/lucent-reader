@@ -474,7 +474,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     """
     from pydantic import TypeAdapter
     from app.models.learn import LearnAttempt
-    from app.services.learn_engine import build_remediation_step, evaluate_step, public_step
+    from app.services.learn_engine import build_remediation_step, evaluate_step, is_explicit_uncertainty, public_step
     from app.services.learn_scene import compose_learning_scene
     from app.services.learn_tutor import choose_tutor_decision, diagnose_response
 
@@ -551,7 +551,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if event_type == "RESPONSE" and current is not None:
         from app.services.adaptive_policy import next_scaffold, prerequisite_ids, review_due
         evaluation = evaluate_step(current, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
-        if response_text and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
+        if response_text and not is_explicit_uncertainty(response_text) and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
             expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
             evaluation = diagnose_response(prompt=getattr(current, "prompt", ""), expected=expected, response=str(response_text), source_context=" ".join(str(x) for x in objective.get("sourceBlockIds", [])), fallback=evaluation)
         now = datetime.now(timezone.utc).isoformat()
@@ -595,6 +595,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if evaluation.misconception and evaluation.misconception not in concept.setdefault("misconceptions", []): concept["misconceptions"].append(evaluation.misconception)
         else:
             concept["insufficientEvidence"] = int(concept.get("insufficientEvidence", 0)) + 1
+            concept["uncertaintyCount"] = int(concept.get("uncertaintyCount", 0)) + 1
+            concept["state"] = "DEVELOPING"
         state["lastErrorContext"] = current.model_dump(by_alias=True)
         # Lightweight, interpretable review scheduling.  Immediate supported
         # success is revisited later; independent/transfer evidence earns a

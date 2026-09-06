@@ -45,6 +45,19 @@ def test_failed_response_teaches_before_exposing_another_assessment():
     assert next_scene.response_interaction_id != "check"
 
 
+def test_explicit_uncertainty_is_not_graded_as_correct_or_advanced():
+    session = _session()
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    # The first active interaction is the authored matching check.
+    scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
+    scene, private = process_tutor_event(session, {"id": "idk", "type": "CONTINUE"})
+    scene, private = process_tutor_event(session, {"id": "uncertain", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "I don't know"}})
+    assert private is None
+    assert scene.objective_id == "energy"
+    assert any(block.kind == "explanation" for block in scene.blocks)
+    assert session.state["concepts"][0].get("uncertaintyCount", 0) == 1
+
+
 def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     session = _session()
     scene, private = ensure_runtime_state(session)
