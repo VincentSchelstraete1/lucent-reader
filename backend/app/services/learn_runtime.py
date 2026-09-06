@@ -567,6 +567,13 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # already present. Teaching-only scenes must advance/recompose.
         if event_type == "CONTINUE" and private is not None and current is not None and scene.response_interaction_id:
             return scene, private
+        if event_type == "CONTINUE" and private is None:
+            # A persisted teaching-only scene from an older runtime may not
+            # have recorded usedTeachingIds. Mark authored teaching assets as
+            # consumed before replanning so Continue cannot replay the same
+            # explanation forever.
+            state["usedTeachingIds"] = list(dict.fromkeys([*(state.get("usedTeachingIds") or []), *[str(item.get("id")) for item in steps if isinstance(item, dict) and item.get("type") in {"teach", "walkthrough"}]]))
+            session.state = state
 
     event_type = event_type or "CONTINUE"
     response = getattr(event, "response", None) if not isinstance(event, dict) else event.get("response")
