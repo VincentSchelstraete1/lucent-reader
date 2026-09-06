@@ -147,6 +147,19 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
 
   useEffect(() => {
     if (!documentId) return
+    // LearnView can remain mounted while the learner switches between saved
+    // documents.  Do not let the previous document's sessionRef keep the old
+    // scene authoritative for the newly selected material.
+    sessionRef.current = null
+    setSession(null)
+    setFocusMode(false)
+    setAskAnswer(null)
+    setAskMessage("")
+    setAnswer("")
+    setSelectedOption(null)
+    setOrderedIds([])
+    setStructuredAnswers({})
+    setHint(null)
     let cancelled = false
     api.getActiveLearnSession(documentId).then((active) => { if (!cancelled && active && !sessionRef.current) { sessionRef.current = active; setSession(active); setFocusMode(true) } }).catch(() => undefined)
     return () => { cancelled = true }
