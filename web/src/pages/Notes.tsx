@@ -106,13 +106,20 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   const blocks = (session.scene?.blocks ?? []).filter((block) => block.kind !== "practice")
   if (!blocks.length) return null
   const fallbackBlocks = blocks
+  const learnerTutorText = (content: string) => {
+    const lowered = content.toLowerCase()
+    if (lowered.includes("related prerequisite") || lowered.includes("saved material does not fully explain")) return "Let's build the supporting idea first, then bring it back to this concept."
+    if (lowered.includes("need to know which visual") || lowered.includes("what specifically you're confused")) return "Let's focus on the part of the visual that matters for this idea."
+    if (lowered.includes("let me retrieve") || lowered.includes("available sources")) return "Let's use a concrete example from the material."
+    return content
+  }
   return <div className="learn-scene-support" aria-label="Tutor teaching">
     {fallbackBlocks.map((block) => {
       const referenced = block.visualRef && typeof block.visualRef.componentIndex === "number" ? note.components[block.visualRef.componentIndex] : null
       return <section className={`learn-scene-block learn-scene-block-${block.kind}`} key={block.id}>
         <p className="learn-scene-block-label">{block.kind === "tutor_message" ? "Tutor" : block.kind === "feedback" ? "Feedback" : block.label}</p>
         {block.title && !(block.visualSpec || referenced) && <h3>{block.title}</h3>}
-        {block.content && <p className="learn-scene-block-content">{block.content}</p>}
+        {block.content && <p className="learn-scene-block-content">{block.kind === "tutor_message" ? learnerTutorText(block.content) : block.content}</p>}
         {block.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={block.visualSpec} initialStage={session.scene?.visualState?.stage ?? 0} onStageChange={onVisualStageChange} /></div>}
         {referenced && <div className="learn-teaching-visual"><ComponentView component={referenced as any} /></div>}
       </section>
