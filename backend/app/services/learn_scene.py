@@ -128,7 +128,8 @@ def compose_learning_scene(
             blocks.append(candidate)
 
     support = None
-    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES:
+    scaffold_level = str(concept.get("scaffold", "FULL"))
+    if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and scaffold_level in {"FULL", "GUIDED"}:
         prior = [_parse(raw) for raw in steps[: max(0, step_index)]]
         support = next((item for item in reversed(prior) if item and item.type in {"teach", "walkthrough"} and not student_facing_quality_issues(item, source_text)), None)
         if support is None:
