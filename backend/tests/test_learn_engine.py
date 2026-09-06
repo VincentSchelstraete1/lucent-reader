@@ -3,7 +3,7 @@ from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, di
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
-from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event
+from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event, _grounded_example
 
 
 def _note():
@@ -299,3 +299,19 @@ def test_tutor_agent_rejects_unauthorized_next_step_and_tool_arguments():
         assert choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={"safe"}) == fallback
     finally:
         set_tutor_provider(None)
+
+def test_ask_example_fallback_is_concrete_and_grounded():
+    payload = {"sectionNotes": [{
+        "id": "satire", "title": "Enlightenment Satire",
+        "bigIdea": "Satire exposes hypocrisy through exaggerated sincere claims.",
+        "keyTakeaways": ["A confident claim can reveal institutional hypocrisy."],
+        "components": [{"kind": "comparison", "items": [
+            {"id": "a", "name": "surface statement", "values": {"role": "sounds sincere"}},
+            {"id": "b", "name": "underlying critique", "values": {"role": "exposes hypocrisy"}},
+        ]}],
+    }]}
+    objective = {"id": "satire", "title": "Enlightenment Satire", "sourceSectionIds": ["satire"]}
+    result = _grounded_example(payload, objective, {"sourceSectionIds": ["satire"]})
+    assert result is not None
+    assert "surface statement" in result and "underlying critique" in result
+    assert "retrieve" not in result.casefold()

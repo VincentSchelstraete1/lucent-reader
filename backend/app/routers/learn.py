@@ -68,6 +68,49 @@ def _objective_context(payload: dict, objective: dict, context: dict) -> dict:
     block_ids = [str(block) for item in sections for block in (item.get("sourceBlockIds") or [])]
     return {**context, "text": text, "sourceSectionIds": [str(item.get("id")) for item in sections], "sourceBlockIds": block_ids[:12]}
 
+def _grounded_example(payload: dict, objective: dict, context: dict) -> str | None:
+    """Build a concrete, source-grounded example for Ask Lucent fallbacks.
+
+    Provider answers are untrusted and sometimes stop at retrieval narration
+    ("let me retrieve...").  An example request must still put a useful
+    learner-facing example in the authoritative scene, so derive one from the
+    active objective's persisted components rather than exposing that narration.
+    """
+    allowed = {str(value) for value in (objective.get("sourceSectionIds") or context.get("sourceSectionIds") or [])}
+    sections = [item for item in (payload.get("sectionNotes") or []) if isinstance(item, dict) and (not allowed or str(item.get("id")) in allowed)]
+    for section in sections:
+        title = str(section.get("title") or objective.get("title") or "this concept").strip()
+        for component in section.get("components") or []:
+            if not isinstance(component, dict):
+                continue
+            kind = str(component.get("kind") or "")
+            if kind in {"worked_example", "equation"}:
+                problem = str(component.get("problem") or component.get("equation") or "").strip()
+                result = str(component.get("result") or "").strip()
+                if problem and result:
+                    return f"For example, {problem} The material's result is {result}."
+            if kind == "comparison":
+                items = [item for item in (component.get("items") or []) if isinstance(item, dict)]
+                if len(items) >= 2:
+                    left, right = items[0], items[1]
+                    def describe(item: dict) -> str:
+                        name = str(item.get("name") or item.get("label") or "the first case").strip()
+                        values = item.get("values") if isinstance(item.get("values"), dict) else {}
+                        detail = next((str(value).strip() for value in values.values() if str(value).strip()), "")
+                        return f"{name}: {detail}" if detail else name
+                    return f"For example, compare these two cases from {title}: {describe(left)}; {describe(right)}."
+            if kind in {"example", "illustration", "case"}:
+                detail = str(component.get("content") or component.get("description") or component.get("text") or "").strip()
+                if detail:
+                    return f"For example, the material describes this case: {detail}"
+        takeaways = [str(value).strip() for value in (section.get("keyTakeaways") or []) if str(value).strip()]
+        if takeaways:
+            return f"For example, apply {title} here: {takeaways[0]}"
+        big_idea = str(section.get("bigIdea") or "").strip()
+        if big_idea:
+            return f"For example, {big_idea}"
+    return None
+
 def _now() -> str: return datetime.now(timezone.utc).isoformat()
 def _parse_step(raw: dict):
     try: return STEP_ADAPTER.validate_python(raw)
@@ -467,6 +510,17 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
                 visual_action["visualRef"] = visual_candidate.visual_ref
             elif getattr(visual_candidate, "type", None) == "walkthrough":
                 visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
+    # Do not let retrieval/tool narration become the example itself.  When the
+    # provider returns a generic promise to retrieve an example (or otherwise
+    # fails to include a concrete source detail), derive a concise example from
+    # the active objective's grounded components.
+    if ask_kind == "example":
+        lowered_answer = str(answer).casefold()
+        retrieval_narration = any(phrase in lowered_answer for phrase in ("let me retrieve", "retrieve the available", "i'd be happy to help", "most relevant example", "to give you"))
+        grounded_example = _grounded_example(payload, objective, context)
+        if grounded_example and (retrieval_narration or len(str(answer).split()) < 12):
+            answer = grounded_example
+            _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_example_grounding_fallback", metadata={"sourceSectionIds": context.get("sourceSectionIds", []), "sourceBlockIds": context.get("sourceBlockIds", [])})
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
