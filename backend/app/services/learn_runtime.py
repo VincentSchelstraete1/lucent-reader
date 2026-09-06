@@ -7,6 +7,7 @@ already the only place allowed to normalize or persist scene revisions.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -30,6 +31,11 @@ class AuthorizedAssetCatalog:
 def bounded_id(prefix: str, *parts: object, max_length: int = 60) -> str:
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()[:14]
     return f"{prefix}-{digest}"[:max_length]
+
+
+def _required_concepts(text: str) -> list[str]:
+    """Return normalized concept tokens for generated teach-back grading."""
+    return list(dict.fromkeys(re.findall(r"[a-z][a-z-]{3,}", str(text).casefold())))[:5]
 
 
 def _state(session) -> dict[str, Any]:
@@ -116,7 +122,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         from app.schemas.learn import TeachBackStep
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
         review_id = bounded_id("review", session.id, objective.get("id"), len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
-        parsed = TeachBackStep(id=review_id, type="teach_back", title="Recall it without the original prompt", prompt=f"Without looking back at the earlier question, explain how {objective.get('title', 'this concept')} works and what result it predicts.", requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5], hints=[f"Use this source-supported idea: {outcome[:220]}"], feedbackIncorrect=f"Start with the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
+        parsed = TeachBackStep(id=review_id, type="teach_back", title="Recall it without the original prompt", prompt=f"Without looking back at the earlier question, explain how {objective.get('title', 'this concept')} works and what result it predicts.", requiredConcepts=_required_concepts(outcome), hints=[f"Use this source-supported idea: {outcome[:220]}"], feedbackIncorrect=f"Start with the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
     parsed = parsed or (parsed_candidates[0] if parsed_candidates else None)
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
@@ -642,6 +648,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         evaluation = evaluate_step(current, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
         if response_text and not is_explicit_uncertainty(response_text) and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
             expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
+            if not expected and getattr(current, "required_concepts", None):
+                expected = " ".join(str(item) for item in current.required_concepts)
             evaluation = diagnose_response(prompt=getattr(current, "prompt", ""), expected=expected, response=str(response_text), source_context=" ".join(str(x) for x in objective.get("sourceBlockIds", [])), fallback=evaluation)
         now = datetime.now(timezone.utc).isoformat()
         concept = dict(concept)
@@ -748,7 +756,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                             type="teach_back",
                             title="Apply the idea again",
                             prompt=f"Now that the supporting idea is clear, explain how it applies to {parent.get('title', 'the original concept')}.",
-                            requiredConcepts=[word for word in str(parent.get("outcome") or parent.get("title") or "the concept").split() if len(word) > 4][:5],
+                            requiredConcepts=_required_concepts(str(parent.get("outcome") or parent.get("title") or "the concept")),
                             hints=[],
                             sourceSectionIds=list(parent.get("sourceSectionIds", [])),
                             sourceBlockIds=list(parent.get("sourceBlockIds", [])),
@@ -816,7 +824,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             # source-grounded application/transfer check in memory. This is
             # deliberately scene-local: authored plan steps remain assets,
             # never a finite progression cursor.
-            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"}:
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and concept.get("scaffold") in {"PARTIAL", "INDEPENDENT", "TRANSFER"}:
                 outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
                 transfer_id = bounded_id("transfer", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
                 transfer_step = TeachBackStep(
@@ -824,7 +832,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     type="teach_back",
                     title="Apply it in a new situation",
                     prompt=f"How would the same idea apply in a new situation involving {objective.get('title', 'this concept')}? Explain the reasoning, not just the label.",
-                    requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5],
+                    requiredConcepts=_required_concepts(outcome),
                     hints=[f"Start from this source-supported idea: {outcome[:220]}"],
                     feedbackIncorrect=f"Use the same mechanism described here: {outcome[:260]}",
                     sourceSectionIds=list(objective.get("sourceSectionIds", [])),
@@ -841,9 +849,14 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 # check before the tutor is allowed to demand transfer.
                 independent_id = bounded_id("independent", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
                 outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-                independent_step = TeachBackStep(id=independent_id, type="teach_back", title="Apply it with less help", prompt=f"Explain how {objective.get('title', 'this concept')} would work in a concrete situation, using your own reasoning.", requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5], hints=[], feedbackIncorrect=f"Start from the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
+                independent_step = TeachBackStep(id=independent_id, type="teach_back", title="Apply it with less help", prompt=f"Explain how {objective.get('title', 'this concept')} would work in a concrete situation, using your own reasoning.", requiredConcepts=_required_concepts(outcome), hints=[], feedbackIncorrect=f"Start from the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
                 independent_action = TutorAction(id=bounded_id("action", concept_id, independent_id), type="ask_teach_back", conceptId=concept_id, stepId=independent_id, rationale="Check independent application before transfer.")
                 independent_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_teach_back", pedagogicalGoal="TEST_APPLICATION", pedagogicalStrategy="SCAFFOLDED_PRACTICE", scaffoldLevel="INDEPENDENT", nextStepId=independent_id, transitionMessage="Good progress. Now try the idea with less help.", rationale="Guided success is not yet independent mastery.")
+                # Evidence and answered-interaction history were mutated above;
+                # persist that state before returning the scene-local
+                # independent check so the next response cannot resurrect the
+                # original authored interaction.
+                session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=independent_step, action=independent_action, decision=independent_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good progress. Now try the idea with less help.", feedback_kind="correct", evaluation=evaluation)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=independent_decision, fallback_step=independent_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
@@ -880,7 +893,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             distinctions = [f"{getattr(pair, 'label', pair.id)}: {matches.get(pair.id, '')}" for pair in pairs if matches.get(pair.id)]
             if distinctions:
                 outcome = f"{outcome} Key distinctions: {'; '.join(distinctions)}."
-        required_concepts = [word for word in outcome.split() if len(word) > 4][:5]
+        required_concepts = _required_concepts(outcome)
         # A failed/uncertain response must earn a teaching turn before the
         # runtime creates another assessment.  When authored teaching assets
         # are exhausted, compose one bounded, grounded explanation in memory;

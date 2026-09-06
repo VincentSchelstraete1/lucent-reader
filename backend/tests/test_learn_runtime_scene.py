@@ -473,3 +473,7 @@ def test_application_success_composes_transfer_before_objective_completion():
     assert private["interaction"]["id"].startswith("independent-")
     assert scene.response_interaction_id != "solve"
     assert "concrete situation" in private["interaction"]["prompt"]
+    scene, private = process_tutor_event(session, {"id": "independent-answer", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "Force equals mass times acceleration in a concrete situation."}})
+    assert session.status == "active"
+    assert private and private["interaction"]["id"].startswith("transfer-")
+    assert "new situation" in private["interaction"]["prompt"]
