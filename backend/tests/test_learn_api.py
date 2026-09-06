@@ -90,6 +90,27 @@ def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):
     finally:
         set_tutor_provider(None)
 
+def test_ask_example_replaces_provider_retrieval_narration_with_grounded_content(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/satire"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Satire material", "content": "A source-grounded comparison."}).json()
+    note = {"title": "Satire", "sectionNotes": [{"id": "satire", "title": "Satire as critique", "bigIdea": "Satire exposes hypocrisy through exaggerated sincere claims.", "sourceBlockIds": ["b1"], "components": [{"kind": "comparison", "items": [{"id": "surface", "name": "surface statement", "values": {"role": "sounds sincere"}}, {"id": "critique", "name": "underlying critique", "values": {"role": "exposes hypocrisy"}}]}]}]}
+    client.post("/notes", json={"title": "Satire", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    def fake_provider(_prompt, tool_name, _schema, **_kwargs):
+        if tool_name == "ask_lucent":
+            return {"answer": "I'd be happy to help with an example. Let me retrieve the available sources.", "toolCalls": [{"tool": "request_example", "arguments": {}}], "sourceSectionIds": ["satire"], "sourceBlockIds": ["b1"]}
+        return None
+    set_tutor_provider(fake_provider)
+    try:
+        response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Give me an example"})
+        assert response.status_code == 200
+        answer = response.json()["answer"]
+        assert "surface statement" in answer and "underlying critique" in answer
+        assert "retrieve" not in answer.casefold()
+        assert any(block.get("kind") == "example" and "surface statement" in block.get("content", "") for block in response.json()["scene"]["blocks"])
+    finally:
+        set_tutor_provider(None)
+
 def test_ask_another_question_recomposes_active_scene(client):
     document = _document_with_note(client)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
