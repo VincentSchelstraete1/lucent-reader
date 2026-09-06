@@ -667,7 +667,22 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             session.state = state
             teaching_action = TutorAction(id=bounded_id("action", concept_id, teaching.id), type="teach_concept", conceptId=concept_id, stepId=teaching.id, rationale="Teach the missing distinction before asking for another response.")
             teaching_decision = TutorDecision(targetConcept=concept_id, teachingAction="teach_concept", pedagogicalGoal="CORRECT_MISCONCEPTION" if evaluation.misconception else "BUILD_INTUITION", pedagogicalStrategy="ERROR_CORRECTION" if evaluation.misconception else "DIRECT_INSTRUCTION", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=teaching.id, transitionMessage="Let's clarify the idea before you try it again.", rationale="A teaching intervention is required before another assessment.")
+            # When the current scene already has a grounded visual, reuse it
+            # for remediation instead of replacing it with a disposable
+            # illustration. Advance to the next validated stage and expose
+            # its active elements so the explanation and visual point to the
+            # same misunderstood relationship.
+            visual_state = scene.visual_state
+            visual_block = next((block for block in scene.blocks if block.kind in {"visual", "animation"} and block.visual_spec), None)
+            if visual_block is not None and visual_state is not None:
+                spec = visual_block.visual_spec
+                next_stage = min(int(visual_state.stage) + 1, max(0, len(spec.stages) - 1))
+                active_nodes = list(spec.stages[next_stage].active_node_ids) if spec.stages else []
+                scene = scene.model_copy(update={"visual_state": visual_state.model_copy(update={"stage": next_stage, "highlightedElementIds": active_nodes})})
+                teaching.content = f"{teaching.content[:760]} Watch the highlighted part of the visual as you connect this relationship."
             rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=feedback if 'feedback' in locals() else (evaluation.student_message or evaluation.evidence if evaluation else None), evaluation=evaluation)
+            if scene.visual_state is not None:
+                rendered = rendered.model_copy(update={"visual_state": scene.visual_state})
             private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=teaching_decision, fallback_step=teaching, objective=objective)
             return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
         generated_id = bounded_id("repair", concept_id, attempt_no, int(scene.revision or 0) + 1)
