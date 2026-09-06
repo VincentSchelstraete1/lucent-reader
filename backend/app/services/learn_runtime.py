@@ -203,6 +203,7 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
         if concept_id == str(exclude_concept_id):
             continue
         objective = objectives_by_id.get(concept_id)
+        concept = concepts.get(concept_id, {})
         if objective is not None and _objective_has_remaining_candidates(objective, state):
             # Consume the queue entry when selecting the revisit. A later
             # response may schedule it again, but only while a real candidate
