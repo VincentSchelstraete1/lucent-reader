@@ -811,7 +811,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # Explicit uncertainty is a request for more teaching, never a reason
         # to finish or advance the objective.  Keep the learner in the scene
         # and compose a grounded explanation even after earlier attempts.
-        if attempt_no > 3 and (evaluation is None or evaluation.result != "insufficient_evidence"):
+        if attempt_no > 3 and evaluation is not None and evaluation.result != "insufficient_evidence":
             concept["state"] = "NEEDS_REVIEW"
             concept["reviewDue"] = "NEXT_SESSION"
             state["revisitQueue"] = list(dict.fromkeys([*state.get("revisitQueue", []), concept_id]))[:12]
