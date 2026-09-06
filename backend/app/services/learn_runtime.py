@@ -106,7 +106,17 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         parsed = next((candidate for candidate in parsed_candidates if candidate.id not in answered and candidate.type not in {"teach", "walkthrough"}), None)
     else:
         parsed = next((candidate for candidate in parsed_candidates if candidate.type in {"teach", "walkthrough"}), None)
-    parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered), None) or (parsed_candidates[0] if parsed_candidates else None)
+    parsed = parsed or next((candidate for candidate in parsed_candidates if candidate.id not in answered), None)
+    if parsed is None and revisit:
+        # Once authored assets have all been answered, a due revisit still
+        # needs a real retrieval opportunity. Compose it in scene-private
+        # state rather than resurrecting an answered candidate or mutating the
+        # LearnPlan asset list.
+        from app.schemas.learn import TeachBackStep
+        outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+        review_id = bounded_id("review", session.id, objective.get("id"), len(state.get("recentAttempts", [])), len(state.get("sceneHistory", [])))
+        parsed = TeachBackStep(id=review_id, type="teach_back", title="Recall it without the original prompt", prompt=f"Without looking back at the earlier question, explain how {objective.get('title', 'this concept')} works and what result it predicts.", requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5], hints=[f"Use this source-supported idea: {outcome[:220]}"], feedbackIncorrect=f"Start with the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
+    parsed = parsed or (parsed_candidates[0] if parsed_candidates else None)
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
     scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
@@ -194,6 +204,14 @@ def select_target_objective(session, *, exclude_concept_id: str | None = None) -
             continue
         objective = objectives_by_id.get(concept_id)
         if objective is not None and _objective_has_remaining_candidates(objective, state):
+            # Consume the queue entry when selecting the revisit. A later
+            # response may schedule it again, but only while a real candidate
+            # remains; exhausted objectives cannot oscillate indefinitely.
+            state["revisitQueue"] = [item for item in state.get("revisitQueue", []) if str(item) != concept_id]
+            for item in state.get("concepts", []):
+                if str(item.get("conceptId")) == concept_id:
+                    item["reviewVisits"] = int(item.get("reviewVisits", 0) or 0) + 1
+            session.state = state
             return concept_id
     for objective in (session.plan or {}).get("objectives", []):
         objective_id = str(objective.get("id"))
@@ -584,12 +602,16 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         if evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
             concept["reviewDue"] = "LATER_THIS_SESSION"
             queue = list(state.get("revisitQueue") or [])
-            if concept_id not in queue:
+            if concept_id not in queue and int(concept.get("reviewVisits", 0) or 0) < 1:
                 queue.append(concept_id)
             state["revisitQueue"] = queue[:12]
         elif evaluation.result == "correct":
             if hints_used:
-                concept["reviewDue"] = "NEXT_SESSION"
+                concept["reviewDue"] = "LATER_THIS_SESSION"
+                queue = list(state.get("revisitQueue") or [])
+                if concept_id not in queue:
+                    queue.append(concept_id)
+                state["revisitQueue"] = queue[:12]
             elif concept.get("state") == "DEMONSTRATED":
                 concept["reviewDue"] = "FUTURE_REVIEW"
             else:
