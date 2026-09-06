@@ -37,6 +37,16 @@ _SOURCE_DIAGNOSTIC_PATTERNS = (
 )
 
 
+def contains_source_diagnostic(value: Any) -> bool:
+    """Return whether persisted learner content contains extraction diagnostics."""
+    if isinstance(value, dict):
+        return any(contains_source_diagnostic(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(contains_source_diagnostic(item) for item in value)
+    text = str(value or "").casefold()
+    return any(pattern in text for pattern in _SOURCE_DIAGNOSTIC_PATTERNS)
+
+
 def validate_substantive_source(note_payload: dict) -> list[str]:
     """Validate the source/content boundary before building learner content.
 

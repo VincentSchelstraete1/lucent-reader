@@ -20,7 +20,7 @@ from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest
-from app.services.learn_engine import build_learn_plan, plan_fingerprint, public_step, student_facing_quality_issues
+from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
@@ -207,6 +207,19 @@ def _session_payload(session: LearnSession, feedback: str | None = None, feedbac
 
 def _ensure_session_runtime(db, session: LearnSession) -> None:
     """Normalize legacy state once, then leave GET serialization read-only."""
+    # Existing active sessions may predate the source-content boundary. Never
+    # continue serving a persisted plan that contains extraction diagnostics;
+    # stop it cleanly so the learner can restart after fixing the material.
+    if contains_source_diagnostic(session.plan or {}) or contains_source_diagnostic((session.state or {}).get("currentScene")):
+        state = dict(session.state or {})
+        state.pop("currentScene", None)
+        state.pop("currentScenePrivate", None)
+        session.state = state
+        session.status = "stopped"
+        session.ended_reason = "source_content_invalid"
+        db.commit()
+        db.refresh(session)
+        return
     before = json.dumps(session.state or {}, sort_keys=True, default=str)
     ensure_runtime_state(session, db=db)
     after = json.dumps(session.state or {}, sort_keys=True, default=str)

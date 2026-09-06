@@ -1,4 +1,4 @@
-from app.services.learn_engine import build_learn_plan, build_remediation_step, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
+from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
@@ -23,6 +23,11 @@ def test_metadata_only_or_extraction_diagnostic_source_cannot_build_lesson():
         assert "substantive content" in str(exc)
     else:
         raise AssertionError("diagnostic-only source must not produce a LearnPlan")
+
+
+def test_persisted_plan_diagnostic_is_detected_recursively():
+    assert contains_source_diagnostic({"steps": [{"prompt": "Insufficient Source Material"}]})
+    assert not contains_source_diagnostic({"steps": [{"prompt": "Proto-oncogenes gain function."}]})
 
 
 def test_goal_changes_the_learning_strategy():
