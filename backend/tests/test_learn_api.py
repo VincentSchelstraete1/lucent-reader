@@ -102,6 +102,29 @@ def test_ask_another_question_recomposes_active_scene(client):
     assert any(block.get("kind") == "practice" for block in scene["blocks"])
 
 
+def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/visual"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Mechanism material", "content": "A source-grounded comparison."}).json()
+    note = {
+        "title": "Mechanism material", "sectionNotes": [{
+            "id": "s-visual", "title": "Two mechanisms", "bigIdea": "Two mechanisms produce different outcomes.",
+            "sourceBlockIds": ["b-visual"], "keyTakeaways": ["The mechanisms must be distinguished."],
+            "components": [{"kind": "comparison", "title": "Compare mechanisms", "dimensions": ["effect"], "items": [
+                {"id": "m1", "name": "Mechanism A", "values": {"effect": "increases output"}},
+                {"id": "m2", "name": "Mechanism B", "values": {"effect": "reduces output"}},
+            ]}],
+        }],
+    }
+    client.post("/notes", json={"title": "Mechanism note", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
+    assert response.status_code == 200
+    scene = response.json()["scene"]
+    visual = [block for block in scene["blocks"] if block.get("kind") in {"visual", "animation"}]
+    assert visual and visual[0].get("visualSpec", {}).get("nodes")
+    assert response.json()["visualAction"]["type"] == "show_visual"
+
+
 def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
     document = _document_with_note(client)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "solve", "familiarity": "new"}).json()

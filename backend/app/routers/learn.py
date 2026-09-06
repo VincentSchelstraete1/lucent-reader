@@ -20,7 +20,7 @@ from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest
-from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues
+from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues, synthesize_visual_spec
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
@@ -378,6 +378,23 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             if candidate is not None and (getattr(candidate, "visual_spec", None) is not None or getattr(candidate, "visual_ref", None) is not None or getattr(candidate, "type", None) == "walkthrough"):
                 visual_candidate = candidate
                 break
+    # Some authored objectives contain a source comparison/flow component but
+    # no dedicated visual step.  A request to see the idea visually should
+    # still use that grounded asset rather than returning a chat-only answer.
+    # Synthesize the same canonical VisualSpec used during plan generation;
+    # never accept arbitrary provider JSON as a visual.
+    if requested_visual and (visual_candidate is None or (getattr(visual_candidate, "visual_spec", None) is None and getattr(visual_candidate, "visual_ref", None) is None)):
+        allowed_sections = {str(value) for value in (objective.get("sourceSectionIds") or context.get("sourceSectionIds") or [])}
+        source_sections = [item for item in (payload.get("sectionNotes") or []) if not allowed_sections or str(item.get("id")) in allowed_sections]
+        for section in source_sections:
+            nested_content = section.get("content") if isinstance(section.get("content"), dict) else {}
+            components = section.get("components") or nested_content.get("components") or []
+            component = next((item for item in components if isinstance(item, dict) and str(item.get("kind")) in {"comparison", "flow", "relationship_map", "structure"}), None)
+            if component:
+                spec = synthesize_visual_spec(component, str(objective.get("title") or section.get("title") or "Concept visual"), list(context.get("sourceSectionIds", [])), list(context.get("sourceBlockIds", [])))
+                if spec is not None:
+                    visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual", objective.get("id"), section.get("id")), "visual_spec": spec, "visual_ref": None, "type": "teach"})()
+                    break
     if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
         visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0}
         if getattr(visual_candidate, "visual_spec", None) is not None:
