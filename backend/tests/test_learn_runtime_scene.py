@@ -45,6 +45,22 @@ def test_failed_response_teaches_before_exposing_another_assessment():
     assert next_scene.response_interaction_id != "check"
 
 
+def test_failed_response_advances_grounded_visual_for_followup():
+    session = _session()
+    session.plan["objectives"][0]["steps"][0]["visualSpec"] = {
+        "type": "process_flow", "title": "Energy flow", "purpose": "See the conversion.",
+        "nodes": [{"id": "top", "label": "Top"}, {"id": "bottom", "label": "Bottom"}],
+        "edges": [{"source": "top", "target": "bottom", "label": "PE to KE"}],
+        "stages": [{"title": "Top", "explanation": "PE is high.", "activeNodeIds": ["top"]}, {"title": "Bottom", "explanation": "KE is high.", "activeNodeIds": ["bottom"]}],
+    }
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    assert scene.visual_state.stage == 0
+    scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
+    assert scene.visual_state.stage == 1
+    assert scene.visual_state.highlighted_element_ids == ["bottom"]
+    assert any("highlighted" in (block.content or "") for block in scene.blocks if block.kind == "explanation")
+
+
 def test_explicit_uncertainty_is_not_graded_as_correct_or_advanced():
     session = _session()
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

@@ -770,9 +770,15 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if visual_block is not None and visual_state is not None:
                 spec = visual_block.visual_spec
                 next_stage = min(int(visual_state.stage) + 1, max(0, len(spec.stages) - 1))
-                active_nodes = list(spec.stages[next_stage].active_node_ids) if spec.stages else []
-                scene = scene.model_copy(update={"visual_state": visual_state.model_copy(update={"stage": next_stage, "highlightedElementIds": active_nodes})})
+                stage = spec.stages[next_stage] if spec.stages else None
+                active_nodes = list((stage.get("activeNodeIds") or stage.get("active_node_ids") or []) if isinstance(stage, dict) else (stage.active_node_ids if stage else []))
+                scene = scene.model_copy(update={"visual_state": visual_state.model_copy(update={"stage": next_stage, "highlighted_element_ids": active_nodes})})
                 teaching.content = f"{teaching.content[:760]} Watch the highlighted part of the visual as you connect this relationship."
+                # compose_learning_scene takes its visual state from the
+                # mutable runtime state. Carry the validated scene mutation
+                # across that boundary so persistence and the API response
+                # cannot silently reset the visual to its prior stage.
+                state["visualState"] = scene.visual_state.model_dump(by_alias=True)
             rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=feedback if 'feedback' in locals() else (evaluation.student_message or evaluation.evidence if evaluation else None), evaluation=evaluation)
             if scene.visual_state is not None:
                 rendered = rendered.model_copy(update={"visual_state": scene.visual_state})
