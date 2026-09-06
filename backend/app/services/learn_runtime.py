@@ -328,10 +328,11 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         # none.  The spec is carried through the validated candidate step;
         # arbitrary model-generated visual JSON is never accepted here.
         visual_spec = visual_action.get("visualSpec")
-        if visual_spec and not any(existing.visual_spec is not None for existing in blocks):
+        visual_ref = visual_action.get("visualRef")
+        if (visual_spec or visual_ref) and not any(existing.visual_spec is not None or existing.visual_ref is not None for existing in blocks):
             try:
                 from app.schemas.learn import VisualSpec
-                visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec), sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+                visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec) if visual_spec else None, visualRef=visual_ref if visual_ref else None, sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
                 blocks.append(visual_block)
             except Exception:
                 pass

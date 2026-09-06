@@ -359,8 +359,14 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             if candidate is not None and (getattr(candidate, "visual_spec", None) is not None or getattr(candidate, "visual_ref", None) is not None or getattr(candidate, "type", None) == "walkthrough"):
                 visual_candidate = candidate
                 break
-    if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
-        visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True)}
+    if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
+        visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0}
+        if getattr(visual_candidate, "visual_spec", None) is not None:
+            visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
+        if getattr(visual_candidate, "visual_ref", None) is not None:
+            visual_action["visualRef"] = visual_candidate.visual_ref
+        elif getattr(visual_candidate, "type", None) == "walkthrough":
+            visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
     fallback_block = TutorSceneBlockPlan(
         kind=ask_kind, label=ask_label,
         title=objective.get("title"),
@@ -407,9 +413,15 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         # Preserve an explicit visual request when the bounded provider only
         # returned a generic explanation action; the candidate/spec validation
         # above still controls whether a visual can actually be introduced.
-        if requested_visual and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
+        if requested_visual and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
             ask_kind, ask_label = "visual", "Watch"
-            visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True)}
+            visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0}
+            if getattr(visual_candidate, "visual_spec", None) is not None:
+                visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
+            if getattr(visual_candidate, "visual_ref", None) is not None:
+                visual_action["visualRef"] = visual_candidate.visual_ref
+            elif getattr(visual_candidate, "type", None) == "walkthrough":
+                visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
