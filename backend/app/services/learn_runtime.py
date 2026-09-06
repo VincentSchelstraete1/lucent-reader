@@ -682,6 +682,21 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     parent_candidates = [adapter.validate_python(raw) for raw in parent_steps if isinstance(raw, dict)]
                     answered_parent = set(state.get("answeredInteractionIds") or [])
                     parent_next = next((item for item in parent_candidates if item.id not in answered_parent and item.type not in {"teach", "walkthrough"}), None) or next((item for item in parent_candidates if item.id not in answered_parent), None)
+                    if parent_next is None:
+                        # Returning from a prerequisite must not depend on an
+                        # unanswered authored asset. Compose a bounded parent
+                        # application check in scene state instead of replaying
+                        # the answered interaction.
+                        parent_next = TeachBackStep(
+                            id=bounded_id("parent-retry", session.id, branch.get("returnObjectiveId"), len(state.get("recentAttempts", []))),
+                            type="teach_back",
+                            title="Apply the idea again",
+                            prompt=f"Now that the supporting idea is clear, explain how it applies to {parent.get('title', 'the original concept')}.",
+                            requiredConcepts=[word for word in str(parent.get("outcome") or parent.get("title") or "the concept").split() if len(word) > 4][:5],
+                            hints=[],
+                            sourceSectionIds=list(parent.get("sourceSectionIds", [])),
+                            sourceBlockIds=list(parent.get("sourceBlockIds", [])),
+                        )
                     if parent_next is not None:
                         parent_concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == branch.get("returnObjectiveId")), {"conceptId": branch.get("returnObjectiveId"), "state": "DEVELOPING", "scaffold": "GUIDED"})
                         parent_action = TutorAction(id=bounded_id("action", branch.get("returnObjectiveId"), parent_next.id, "return"), type="ask_free_response", conceptId=str(branch.get("returnObjectiveId")), stepId=parent_next.id, rationale="Return to the original concept after prerequisite repair.")
