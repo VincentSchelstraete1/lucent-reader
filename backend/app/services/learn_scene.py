@@ -114,6 +114,10 @@ def compose_learning_scene(
     their validated outputs with source-grounded teaching and interaction
     components. It never lets the model mutate state or emit executable UI.
     """
+    # ``step_index`` remains accepted only so old callers can be upgraded
+    # without a flag day. It is deliberately ignored: candidate assets are
+    # unordered and the authoritative runtime supplies the selected
+    # ``current_step``.
     source_text = _source_text(objective, steps)
     section_ids = list(dict.fromkeys(list(objective.get("sourceSectionIds", [])) + list(getattr(current_step, "source_section_ids", []) or [])))[:8]
     block_ids = list(dict.fromkeys(list(objective.get("sourceBlockIds", [])) + list(getattr(current_step, "source_block_ids", []) or [])))[:12]
@@ -130,8 +134,7 @@ def compose_learning_scene(
     support = None
     scaffold_level = str(concept.get("scaffold", "FULL"))
     if getattr(current_step, "type", None) in _INTERACTIVE_TYPES and scaffold_level in {"FULL", "GUIDED"}:
-        prior = [_parse(raw) for raw in steps[: max(0, step_index)]]
-        support = next((item for item in reversed(prior) if item and item.type in {"teach", "walkthrough"} and not student_facing_quality_issues(item, source_text)), None)
+        support = next((item for item in reversed([_parse(raw) for raw in steps]) if item and item.type in {"teach", "walkthrough"} and not student_facing_quality_issues(item, source_text)), None)
         if support is None:
             support = next((item for item in (_parse(raw) for raw in steps) if item and item.type in {"teach", "walkthrough"} and not student_facing_quality_issues(item, source_text)), None)
 
@@ -176,7 +179,7 @@ def compose_learning_scene(
             # Visual assets are source-grounded scene material, not ordered
             # cursor steps.  A visual authored before the active practice is
             # still the right teaching surface to reuse here.
-            for raw in steps[step_index + 1:] + steps[:step_index]:
+            for raw in steps:
                 candidate = _parse(raw)
                 if not candidate or candidate.id in set(state.get("answeredInteractionIds") or []) or student_facing_quality_issues(candidate, source_text):
                     continue
@@ -188,7 +191,7 @@ def compose_learning_scene(
                     add(kind="animation" if candidate.type == "walkthrough" else "visual", label="Watch", title=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
                     break
         if not any(block.kind == "practice" for block in blocks):
-            for raw in steps[step_index + 1:] + steps[:step_index]:
+            for raw in steps:
                 candidate = _parse(raw)
                 if candidate and candidate.id not in set(state.get("answeredInteractionIds") or []) and candidate.type in _INTERACTIVE_TYPES and not student_facing_quality_issues(candidate, source_text):
                     label = {"prediction": "Predict", "matching": "Compare", "labeling": "Label", "ordering": "Reconstruct", "worked_step": "Solve", "problem": "Try", "numeric": "Solve", "teach_back": "Explain", "fill_blank": "Recall", "short_answer": "Explain", "multiple_choice": "Check"}.get(candidate.type, "Try")
