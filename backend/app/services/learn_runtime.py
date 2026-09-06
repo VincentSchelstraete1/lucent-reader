@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -533,6 +533,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if evaluation.misconception and evaluation.misconception not in concept.setdefault("misconceptions", []): concept["misconceptions"].append(evaluation.misconception)
         else:
             concept["insufficientEvidence"] = int(concept.get("insufficientEvidence", 0)) + 1
+        state["lastErrorContext"] = current.model_dump(by_alias=True)
         # Lightweight, interpretable review scheduling.  Immediate supported
         # success is revisited later; independent/transfer evidence earns a
         # future review instead of being treated as permanent mastery.
@@ -605,7 +606,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # Prefer an unused grounded teaching asset, then a different unanswered
         # check, and finally the bounded scene-local fallback below.
         teaching = next((item for item in candidates if item.id != getattr(current, "id", None) and item.type in {"teach", "walkthrough"} and item.id not in used_teaching), None)
-        next_step = teaching or next((item for item in candidates if item.id != getattr(current, "id", None) and item.id not in answered_ids), None)
+        # Do not fall through directly to another ordinary assessment after
+        # a miss. If no unused authored teaching asset remains, the bounded
+        # generated teaching turn below will run instead.
+        next_step = teaching
     else:
         answered_ids = set(state.get("answeredInteractionIds") or [])
         used_teaching = set(state.get("usedTeachingIds") or [])
@@ -630,11 +634,45 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
             return _advance_objective_or_complete(session, state, review_scene, exclude_concept_id=concept_id, event_id=event_id_value, db=db)
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+        title = str(objective.get("title", "this concept"))
+        error_context = current
+        if error_context is None and state.get("lastErrorContext"):
+            try:
+                error_context = _coerce_step(state["lastErrorContext"], objective)
+            except Exception:
+                error_context = None
+        if error_context is not None and getattr(error_context, "type", None) == "matching":
+            pairs = getattr(error_context, "pairs", []) or []
+            matches = getattr(error_context, "matches", {}) or {}
+            distinctions = [f"{getattr(pair, 'label', pair.id)}: {matches.get(pair.id, '')}" for pair in pairs if matches.get(pair.id)]
+            if distinctions:
+                outcome = f"{outcome} Key distinctions: {'; '.join(distinctions)}."
+        required_concepts = [word for word in outcome.split() if len(word) > 4][:5]
+        # A failed/uncertain response must earn a teaching turn before the
+        # runtime creates another assessment.  When authored teaching assets
+        # are exhausted, compose one bounded, grounded explanation in memory;
+        # the following Continue event can then expose a new practice target.
+        if evaluation is not None and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
+            teaching_id = bounded_id("teach-repair", concept_id, int(concept.get("attempts", 0)), getattr(current, "id", "none"))
+            teaching_content = str(getattr(error_context, "feedback_incorrect", None) or getattr(error_context, "content", None) or objective.get("bottleneck") or outcome)
+            teaching = TeachStep(
+                id=teaching_id,
+                type="teach",
+                title=f"Let's clarify {title}",
+                content=teaching_content[:900],
+                sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+            )
+            state["usedTeachingIds"] = list(dict.fromkeys([*(state.get("usedTeachingIds") or []), teaching.id]))[-16:]
+            session.state = state
+            teaching_action = TutorAction(id=bounded_id("action", concept_id, teaching.id), type="teach_concept", conceptId=concept_id, stepId=teaching.id, rationale="Teach the missing distinction before asking for another response.")
+            teaching_decision = TutorDecision(targetConcept=concept_id, teachingAction="teach_concept", pedagogicalGoal="CORRECT_MISCONCEPTION" if evaluation.misconception else "BUILD_INTUITION", pedagogicalStrategy="ERROR_CORRECTION" if evaluation.misconception else "DIRECT_INSTRUCTION", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=teaching.id, transitionMessage="Let's clarify the idea before you try it again.", rationale="A teaching intervention is required before another assessment.")
+            rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=feedback if 'feedback' in locals() else (evaluation.student_message or evaluation.evidence if evaluation else None), evaluation=evaluation)
+            private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=teaching_decision, fallback_step=teaching, objective=objective)
+            return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
         generated_id = bounded_id("repair", concept_id, attempt_no, int(scene.revision or 0) + 1)
         if current is not None and generated_id == current.id:
             generated_id = bounded_id("repair", concept_id, attempt_no + 1)
-        title = str(objective.get("title", "this concept"))
-        required_concepts = [word for word in outcome.split() if len(word) > 4][:5]
         # Repeated remediation for the same objective must read as a genuinely
         # different follow-up, not the same canned prompt with a new ID --
         # vary both the interaction type and the phrasing by attempt. The

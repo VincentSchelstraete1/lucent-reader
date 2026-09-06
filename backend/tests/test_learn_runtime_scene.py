@@ -32,6 +32,19 @@ def test_runtime_composes_teaching_and_practice_and_updates_evidence():
     assert scene.revision > 1
 
 
+def test_failed_response_teaches_before_exposing_another_assessment():
+    session = _session()
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
+    assert scene.response_interaction_id is None
+    assert any(block.kind == "explanation" for block in scene.blocks)
+    assert private is None
+    next_scene, next_private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    assert next_private is not None
+    assert next_scene.response_interaction_id is not None
+    assert next_scene.response_interaction_id != "check"
+
+
 def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     session = _session()
     scene, private = ensure_runtime_state(session)
@@ -256,9 +269,14 @@ def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
     scene, private = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     assert scene.response_interaction_id == "match"
     scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "match", "response": {"response": "{}"}})
+    # A miss first produces a teaching-only contrast; it must not immediately
+    # expose another assessment before the learner sees the correction.
+    assert private is None
+    assert any(block.kind == "explanation" for block in scene.blocks)
+    scene, private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
     assert private is not None
     interaction = private["interaction"]
-    assert interaction["type"] == "multiple_choice"
+    assert interaction["type"] in {"multiple_choice", "short_answer"}
     text = str(interaction).casefold()
     assert "gain-of-function" in text and "loss-of-function" in text
     assert "proto-oncogene" in text and "tumor suppressor" in text
