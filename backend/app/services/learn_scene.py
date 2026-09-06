@@ -194,6 +194,22 @@ def compose_learning_scene(
                     add(kind="practice", label=label, title=candidate.title, content=None, step=candidate, visual_spec=getattr(candidate, "visual_spec", None), visual_ref=None)
                     break
 
+    # Keep a source-grounded visual alongside the first active practice even
+    # when the authored visual asset is a separate candidate.  LearnPlan
+    # candidates are assets rather than a cursor, so the visual must not be
+    # lost merely because the learner is currently answering an ordering or
+    # prediction step.
+    if not any(block.kind in {"visual", "animation"} for block in blocks):
+        for raw in steps:
+            candidate = _parse(raw)
+            candidate_spec = getattr(candidate, "visual_spec", None) if candidate is not None else None
+            candidate_ref = getattr(candidate, "visual_ref", None) if candidate is not None else None
+            if candidate_ref is None and candidate is not None and getattr(candidate, "type", None) == "walkthrough":
+                candidate_ref = {"sectionId": candidate.section_id, "componentIndex": candidate.component_index}
+            if candidate_spec is not None or candidate_ref is not None:
+                add(kind="animation" if getattr(candidate, "type", None) == "walkthrough" else "visual", label="Watch", title=getattr(candidate, "title", None), content=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
+                break
+
     if decision:
         for tool in decision.actions:
             mapping = _ACTION_BLOCKS.get(tool.tool)
