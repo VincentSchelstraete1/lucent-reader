@@ -488,6 +488,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         "visualAction": visual_action,
         "blockKind": scene_kind,
         "blockLabel": ask_label,
+        "replacementStep": replacement_step.model_dump(by_alias=True) if replacement_step is not None else None,
     }, db=db)
     if replacement_step is not None:
         # Re-assert the practice target after appending the conversational

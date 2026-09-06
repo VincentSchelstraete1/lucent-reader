@@ -498,6 +498,22 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             block_label=str(payload.get("blockLabel") or "Ask Lucent"),
             db=db,
         )
+        replacement_raw = payload.get("replacementStep")
+        if updated is not None and isinstance(replacement_raw, dict):
+            try:
+                replacement = _coerce_step(replacement_raw, _objective(session.plan or {}, updated.objective_id) or {})
+                from app.services.learn_engine import public_step
+                practice = LearningSceneBlock(id=bounded_id("practice", session.id, replacement.id), kind="practice", label="Try", title=replacement.title, content=getattr(replacement, "prompt", None) or getattr(replacement, "content", None), step=public_step(replacement), sourceSectionIds=list(getattr(replacement, "source_section_ids", []) or []), sourceBlockIds=list(getattr(replacement, "source_block_ids", []) or []))
+                blocks = [block for block in updated.blocks if block.kind != "practice"] + [practice]
+                updated = updated.model_copy(update={"blocks": blocks[-6:], "response_interaction_id": replacement.id})
+                objective_for_private = _objective(session.plan or {}, updated.objective_id) or {}
+                private = _private_for_rendered_scene(updated, objective_id=str(updated.objective_id), fallback_step=replacement, objective=objective_for_private)
+                updated = persist_scene_revision(session, updated, private, event_id=bounded_id("ask-recompose", session.id, replacement.id), db=db)
+                return updated, private
+            except Exception:
+                # Invalid Ask replacement is ignored; the conversational scene
+                # remains authoritative and usable.
+                pass
         return updated or scene, _state(session).get("currentScenePrivate")
     objective = _objective(session.plan or {}, scene.objective_id)
     if objective is None:
