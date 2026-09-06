@@ -302,7 +302,11 @@ export function Notes() {
       if (saved) { try { const parsed = JSON.parse(saved) as LearningNoteRecord[]; if (Array.isArray(parsed) && parsed.length) { setHistory(parsed); setState({ status: "complete", result: parsed[0] }) } } catch { sessionStorage.removeItem("lucent-note-history") } }
     })
     return () => { cancelled = true }
-  }, [routeDocumentId, searchParams])
+  // Re-fetching notes when only the study mode changes would overwrite a
+  // saved-note selection with the document encoded in the URL (which may be
+  // an older material).  The selected record is React state; only a document
+  // route change should reload it.
+  }, [routeDocumentId, Number(searchParams.get("document_id") ?? routeDocumentId)])
   function saveResult(result: DocumentIngestionResult, run: number) { if (run !== runRef.current) return; const record = recordFromIngestion(result); setDepth(record.teaching_depth ?? depth); setHistory((previous) => { const next = [record, ...previous.filter((item) => item.document_id ? item.document_id !== record.document_id : item.filename !== record.filename)]; sessionStorage.setItem("lucent-note-history", JSON.stringify(next)); return next }); setSelectedHistory(0); setState({ status: "complete", result: record }); if (record.document_id) navigate(`/app/material/${record.document_id}?mode=notes`) }
 
   async function startQuiz() {
