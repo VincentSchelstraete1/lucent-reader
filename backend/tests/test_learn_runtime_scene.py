@@ -379,6 +379,8 @@ def test_application_success_composes_transfer_before_objective_completion():
     scene, private = process_tutor_event(session, {"id": "answer", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "10"}})
     assert session.status == "active"
     assert private and private["interaction"]["type"] == "teach_back"
-    assert private["interaction"]["id"].startswith("transfer-")
+    # Guided/application success earns an independent check before transfer;
+    # transfer is only composed after that stronger evidence is collected.
+    assert private["interaction"]["id"].startswith("independent-")
     assert scene.response_interaction_id != "solve"
-    assert "new situation" in private["interaction"]["prompt"]
+    assert "concrete situation" in private["interaction"]["prompt"]

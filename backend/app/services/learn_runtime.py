@@ -690,7 +690,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             # source-grounded application/transfer check in memory. This is
             # deliberately scene-local: authored plan steps remain assets,
             # never a finite progression cursor.
-            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0:
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"}:
                 outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
                 transfer_id = bounded_id("transfer", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
                 transfer_step = TeachBackStep(
@@ -709,6 +709,17 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=transfer_decision, fallback_step=transfer_step, objective=objective)
+                return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0:
+                # Assisted/guided success earns a lower-support application
+                # check before the tutor is allowed to demand transfer.
+                independent_id = bounded_id("independent", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
+                outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+                independent_step = TeachBackStep(id=independent_id, type="teach_back", title="Apply it with less help", prompt=f"Explain how {objective.get('title', 'this concept')} would work in a concrete situation, using your own reasoning.", requiredConcepts=[word for word in outcome.split() if len(word) > 4][:5], hints=[], feedbackIncorrect=f"Start from the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
+                independent_action = TutorAction(id=bounded_id("action", concept_id, independent_id), type="ask_teach_back", conceptId=concept_id, stepId=independent_id, rationale="Check independent application before transfer.")
+                independent_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_teach_back", pedagogicalGoal="TEST_APPLICATION", pedagogicalStrategy="SCAFFOLDED_PRACTICE", scaffoldLevel="INDEPENDENT", nextStepId=independent_id, transitionMessage="Good progress. Now try the idea with less help.", rationale="Guided success is not yet independent mastery.")
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=independent_step, action=independent_action, decision=independent_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good progress. Now try the idea with less help.", feedback_kind="correct", evaluation=evaluation)
+                private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=independent_decision, fallback_step=independent_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
             return _advance_objective_or_complete(session, state, completed_scene, exclude_concept_id=concept_id, event_id=event_id_value, db=db)
