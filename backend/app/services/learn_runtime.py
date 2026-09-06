@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -718,7 +718,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # the concept and attempt count, so repeated replans never create
         # recursive IDs or mutate the authored plan.
         attempt_no = max(int(concept.get("attempts", 0)) + 1, len(state.get("recentAttempts", [])) + 1)
-        if attempt_no > 3:
+        # Explicit uncertainty is a request for more teaching, never a reason
+        # to finish or advance the objective.  Keep the learner in the scene
+        # and compose a grounded explanation even after earlier attempts.
+        if attempt_no > 3 and evaluation.result != "insufficient_evidence":
             concept["state"] = "NEEDS_REVIEW"
             concept["reviewDue"] = "NEXT_SESSION"
             state["revisitQueue"] = list(dict.fromkeys([*state.get("revisitQueue", []), concept_id]))[:12]
@@ -765,9 +768,13 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             # illustration. Advance to the next validated stage and expose
             # its active elements so the explanation and visual point to the
             # same misunderstood relationship.
-            visual_state = scene.visual_state
+            # A scene composed from an older persisted revision may contain a
+            # visual block but no explicit visualState yet.  Treat that as the
+            # initial stage rather than silently skipping the tutor-directed
+            # visual intervention.
+            visual_state = scene.visual_state or LearningVisualState()
             visual_block = next((block for block in scene.blocks if block.kind in {"visual", "animation"} and block.visual_spec), None)
-            if visual_block is not None and visual_state is not None:
+            if visual_block is not None:
                 spec = visual_block.visual_spec
                 next_stage = min(int(visual_state.stage) + 1, max(0, len(spec.stages) - 1))
                 stage = spec.stages[next_stage] if spec.stages else None
@@ -794,7 +801,16 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # response was attempt 1); attempt_no > 3 exits to needs_review
         # above, so 3 is the only other value this branch ever sees.
         generated = None
-        if attempt_no < 3 and current is not None and getattr(current, "type", None) in {"multiple_choice", "prediction", "matching", "ordering", "labeling"}:
+        if evaluation is not None and evaluation.result == "insufficient_evidence":
+            generated = TeachStep(
+                id=generated_id,
+                type="teach",
+                title=f"Let's build {title}",
+                content=f"No problem — let's build the idea first. {outcome[:760]}",
+                sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+            )
+        elif attempt_no < 3 and current is not None and getattr(current, "type", None) in {"multiple_choice", "prediction", "matching", "ordering", "labeling"}:
             # A wrong structured answer deserves a targeted contrast built
             # from what the learner actually got wrong, not the generic
             # "explain the main idea" prompt every objective falls back to.
@@ -865,6 +881,27 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     state["lastFeedbackKind"] = "correct" if evaluation and evaluation.result == "correct" else "incorrect" if evaluation else "info"
     if evaluation is not None and current is not None:
         state["answeredInteractionIds"] = list(dict.fromkeys([*(state.get("answeredInteractionIds") or []), current.id]))[-32:]
+    # A misconception should change the teaching surface, not only swap the
+    # interaction.  Reuse the scene's grounded visual when it can express a
+    # meaningful next stage; otherwise leave it untouched and let the tutor's
+    # textual intervention stand on its own.  This runs for both authored and
+    # generated remediation paths (the earlier fallback-only mutation missed
+    # authored teaching assets).
+    if evaluation is not None and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"}:
+        visual_state = scene.visual_state or LearningVisualState()
+        visual_block = next((block for block in scene.blocks if block.kind in {"visual", "animation"} and block.visual_spec), None)
+        if visual_block is not None and visual_block.visual_spec and visual_block.visual_spec.stages:
+            spec = visual_block.visual_spec
+            next_stage = min(int(visual_state.stage) + 1, len(spec.stages) - 1)
+            stage = spec.stages[next_stage]
+            active_nodes = list((stage.get("activeNodeIds") or stage.get("active_node_ids") or []) if isinstance(stage, dict) else (stage.active_node_ids if stage else []))
+            visual_state = visual_state.model_copy(update={"stage": next_stage, "highlighted_element_ids": active_nodes})
+            state["visualState"] = visual_state.model_dump(by_alias=True)
+            # Keep the explanation and visual semantically coupled.  The
+            # sentence is appended only to a remediation teaching turn and
+            # remains grounded in the existing visual stage.
+            if next_step.type in {"teach", "walkthrough"} and getattr(next_step, "content", None) and "visual" not in str(next_step.content).casefold():
+                next_step = next_step.model_copy(update={"content": f"{next_step.content[:760]} Watch the highlighted part of the visual as you connect this relationship."})
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
     private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=next_step, objective=objective)
