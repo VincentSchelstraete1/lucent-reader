@@ -163,6 +163,16 @@ def test_ask_event_uses_authoritative_runtime_scene_executor():
     assert private is not None
 
 
+def test_ask_event_replacement_step_is_executed_by_runtime():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    replacement = {"id": "ask-replacement", "type": "multiple_choice", "title": "Explain the relationship", "prompt": "Where does energy go as the pendulum falls?", "options": [{"id": "a", "label": "Into motion"}, {"id": "b", "label": "It disappears"}], "answerId": "a", "sourceSectionIds": [], "sourceBlockIds": []}
+    scene, private = process_tutor_event(session, {"id": "ask", "type": "ASK_LUCENT", "message": "Ask me another question", "answer": "Let's try a new check.", "replacementStep": replacement})
+    assert scene.response_interaction_id == "ask-replacement"
+    assert private and private["interaction"]["id"] == "ask-replacement"
+    assert any(block.kind == "practice" and block.step and block.step.id == "ask-replacement" for block in scene.blocks)
+
+
 def test_ask_message_can_add_grounded_visual_reference_to_teaching_only_scene():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningSceneBlock, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -510,10 +510,11 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 private = _private_for_rendered_scene(updated, objective_id=str(updated.objective_id), fallback_step=replacement, objective=objective_for_private)
                 updated = persist_scene_revision(session, updated, private, event_id=bounded_id("ask-recompose", session.id, replacement.id), db=db)
                 return updated, private
-            except Exception:
+            except Exception as exc:
                 # Invalid Ask replacement is ignored; the conversational scene
                 # remains authoritative and usable.
-                pass
+                import logging
+                logging.getLogger(__name__).warning("Ask replacement rejected: %s", exc)
         return updated or scene, _state(session).get("currentScenePrivate")
     objective = _objective(session.plan or {}, scene.objective_id)
     if objective is None:
