@@ -38,6 +38,13 @@ def test_generated_option_labels_are_bounded_for_long_source_prose():
             assert all(len(option.label) <= 160 for option in step.options)
 
 
+def test_visual_nodes_bound_long_source_details():
+    detail = "Target: " + ("Abstract reasoning and discourse; serious tone; " * 20)
+    spec = synthesize_visual_spec({"kind": "comparison", "title": "Literary techniques", "items": [{"id": "a", "name": "Irony", "detail": detail}, {"id": "b", "name": "Exaggeration", "detail": detail}]}, "Literary techniques", ["s1"], ["b1"])
+    assert spec is not None
+    assert all(len(node.detail or "") <= 260 for node in spec.nodes)
+
+
 def test_goal_changes_the_learning_strategy():
     understand = build_learn_plan(_note(), "understand", "new")
     solve = build_learn_plan(_note(), "solve", "new")

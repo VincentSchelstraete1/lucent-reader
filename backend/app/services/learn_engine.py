@@ -123,13 +123,13 @@ def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], 
             if kind == "comparison" and not group:
                 # Comparisons are two semantic sides, not one vertical list.
                 group = "left" if len(nodes) < max(1, len(raw_nodes) // 2) else "right"
-            nodes.append({"id": str(item["id"]), "label": _clean(item.get("label") or item.get("name")), "detail": _clean(item.get("detail") or item.get("description") or value_detail) or None, "group": group})
+            nodes.append({"id": str(item["id"]), "label": _option_label(item.get("label") or item.get("name"), 100), "detail": _option_label(item.get("detail") or item.get("description") or value_detail, 260) or None, "group": group})
     if len(nodes) < 2:
         return None
     edges = []
     for edge in ((component.get("edges") or []) + generated_edges)[:24]:
         if isinstance(edge, dict) and edge.get("source") and edge.get("target"):
-            edges.append({"source": str(edge["source"]), "target": str(edge["target"]), "label": _clean(edge.get("label") or edge.get("relation")) or None})
+            edges.append({"source": str(edge["source"]), "target": str(edge["target"]), "label": _option_label(edge.get("label") or edge.get("relation"), 80) or None})
     valid_ids = {node["id"] for node in nodes}; edges = [edge for edge in edges if edge["source"] in valid_ids and edge["target"] in valid_ids]
     structure_type = str(component.get("structureType", "hierarchy"))
     visual_type = {"flow": "process_flow", "relationship_map": "relationship_map", "comparison": "comparison", "structure": "hierarchy" if structure_type == "hierarchy" else "spatial_structure"}.get(kind, "diagram")
@@ -153,7 +153,7 @@ def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], 
     animations = [{"operation": "flow", "targetIds": [edge["source"], edge["target"]], "durationMs": 850, "explanation": edge.get("label") or "Follow the relationship."} for edge in edges[:16]] if visual_type in {"process_flow", "causal_chain", "sequence", "hierarchy", "spatial_structure"} else []
     if visual_type == "comparison" and len(nodes) >= 2:
         animations = [{"operation": "compare", "targetIds": [node["id"] for node in nodes[:2]], "durationMs": 1400, "explanation": "Compare the two mechanisms side by side."}]
-    return VisualSpec(type=visual_type, title=_clean(component.get("title") or title), purpose="See the relationships that make this concept work.", nodes=nodes, edges=edges, stages=stages, animations=animations, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
+    return VisualSpec(type=visual_type, title=_option_label(component.get("title") or title, 160), purpose="See the relationships that make this concept work.", nodes=nodes, edges=edges, stages=stages, animations=animations, sourceSectionIds=section_ids, sourceBlockIds=block_ids)
 
 
 def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPlan:
