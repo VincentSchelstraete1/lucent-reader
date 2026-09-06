@@ -16,6 +16,17 @@ def _clean(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+def _option_label(value: Any, limit: int = 160) -> str:
+    """Keep generated learner options within the public schema contract."""
+    text = _clean(value)
+    if len(text) <= limit:
+        return text
+    # Prefer a complete sentence/word boundary; the source remains grounded
+    # while avoiding Pydantic failures from long extracted prose.
+    clipped = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return clipped or text[:limit]
+
+
 def _words(value: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if len(word) > 2}
 
@@ -199,7 +210,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             elif any(c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2 for c in comps):
                 flow = next(c for c in comps if c.get("kind") == "flow" and len(c.get("nodes", [])) >= 2)
                 node_ids = [str(node.get("id")) for node in flow.get("nodes", []) if node.get("id")]
-                options = [{"id": node_id, "label": _clean(next((node.get("label") for node in flow.get("nodes", []) if str(node.get("id")) == node_id), node_id))} for node_id in node_ids]
+                options = [{"id": node_id, "label": _option_label(next((node.get("label") for node in flow.get("nodes", []) if str(node.get("id")) == node_id), node_id))} for node_id in node_ids]
                 steps.append(OrderingStep(id=_bounded_plan_id("order", section_identity), type="ordering", title="Put the process in order", prompt=f"What is the sequence for {title}?", items=options[:8], correctOrder=node_ids[:8], feedbackIncorrect="Follow the transition from one step to the next in the process.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 if goal == "understand" and len(options) >= 3:
                     steps.append(PredictionStep(id=_bounded_plan_id("predict", section_identity), type="prediction", title="Predict the next transition", prompt=f"What happens immediately after {_clean(options[0]['label'])}?", options=options[1:4], answerId=options[1]["id"], reveal=f"The process continues with {_clean(options[1]['label'])}, which sets up the next transition.", feedbackIncorrect="Trace the direction of the process from the first step.", hints=["Look at the first outgoing transition.", "Ask what state must be established next."], sourceSectionIds=section_ids, sourceBlockIds=block_ids))
@@ -221,7 +232,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
                     steps.append(LabelingStep(id=_bounded_plan_id("label", section_identity), type="labeling", title="Label the structure", prompt=f"Name the important parts of {title}.", targets=targets, labels=labels, answerMap={item["id"]: item["id"] for item in targets}, sourceSectionIds=section_ids, sourceBlockIds=block_ids, hints=["Start with the outermost part.", "Use the labels from the diagram."], feedbackIncorrect="Match each label to the part it names."))
             else:
                 answer = takeaways[0] if takeaways else big_idea
-                steps.append(MultipleChoiceStep(id=_bounded_plan_id("check", section_identity), type="multiple_choice", title="Check the central idea", prompt=f"Which statement accurately describes {title}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{title} has the opposite effect: {answer[:120]}"}, {"id": "c", "label": f"{title} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"Return to this claim about {title}: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(MultipleChoiceStep(id=_bounded_plan_id("check", section_identity), type="multiple_choice", title="Check the central idea", prompt=f"Which statement accurately describes {title}?", options=[{"id": "a", "label": _option_label(answer)}, {"id": "b", "label": _option_label(f"{title} has the opposite effect: {answer}")}, {"id": "c", "label": _option_label(f"{title} changes a different part of the system.")}], answerId="a", feedbackIncorrect=f"Return to this claim about {title}: {answer[:260]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
                 if goal == "exam":
                     steps.append(ShortAnswerStep(id=_bounded_plan_id("exam", section_identity), type="short_answer", title="Explain the distinction", prompt=f"State the exam-relevant point about {title}.", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State the claim about {title} and its consequence.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         elif goal == "memorize":
@@ -229,7 +240,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             term = _clean(definition.get("term")) if definition else title
             answer = _clean(definition.get("definition")) if definition else (takeaways[0] if takeaways else big_idea)
             steps.append(TeachStep(id=_bounded_plan_id("definition", section_identity), type="teach", title=term, content=answer, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-            steps.append(MultipleChoiceStep(id=_bounded_plan_id("recognize", section_identity), type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": answer[:160]}, {"id": "b", "label": f"{term} produces the opposite effect."}, {"id": "c", "label": f"{term} changes a different part of the system."}], answerId="a", feedbackIncorrect=f"The definition of {term} is: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+            steps.append(MultipleChoiceStep(id=_bounded_plan_id("recognize", section_identity), type="multiple_choice", title="Recognize it", prompt=f"Which statement defines {term}?", options=[{"id": "a", "label": _option_label(answer)}, {"id": "b", "label": _option_label(f"{term} produces the opposite effect.")}, {"id": "c", "label": _option_label(f"{term} changes a different part of the system.")}], answerId="a", feedbackIncorrect=f"The definition of {term} is: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(ShortAnswerStep(id=_bounded_plan_id("recall", section_identity), type="short_answer", title="Retrieve it", prompt=f"In your own words, what is {term}?", acceptedAnswers=[answer], requiredConcepts=list(_words(answer))[:5], feedbackIncorrect=f"State what {term} means and what it affects.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             steps.append(FillBlankStep(id=_bounded_plan_id("fill", section_identity), type="fill_blank", title="Fill the key term", prompt=f"Complete: {term} means ____.", acceptedAnswers=[answer], hints=[f"Recall what {term} changes."], feedbackIncorrect=f"Use the definition of {term}: {answer[:220]}", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
             # Keep a final unaided recall check after the fill-in interaction;

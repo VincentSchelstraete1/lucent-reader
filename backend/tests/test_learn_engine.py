@@ -30,6 +30,14 @@ def test_persisted_plan_diagnostic_is_detected_recursively():
     assert not contains_source_diagnostic({"steps": [{"prompt": "Proto-oncogenes gain function."}]})
 
 
+def test_generated_option_labels_are_bounded_for_long_source_prose():
+    payload = {"title": "Long source", "sectionNotes": [{"id": "s1", "title": "Irony and Exaggeration", "bigIdea": "This material explains a literary technique with enough substantive context to teach the concept clearly.", "keyTakeaways": ["The technique changes how readers interpret a statement."], "components": []}]}
+    plan = build_learn_plan(payload, "understand", "new")
+    for step in plan.objectives[0].steps:
+        if hasattr(step, "options"):
+            assert all(len(option.label) <= 160 for option in step.options)
+
+
 def test_goal_changes_the_learning_strategy():
     understand = build_learn_plan(_note(), "understand", "new")
     solve = build_learn_plan(_note(), "solve", "new")
