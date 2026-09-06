@@ -458,6 +458,21 @@ def _advance_objective_or_complete(session, state: dict[str, Any], inert_scene: 
         session.state = state
         scene = persist_scene_revision(session, scene, private, event_id=event_id, db=db)
         return scene, private
+    # Candidate exhaustion is not evidence of mastery. Keep the session active
+    # and schedule one bounded retrieval scene when the objective still lacks
+    # its required evidence, instead of presenting a misleading completion.
+    if not completion_met(session):
+        current_objective = _objective(session.plan or {}, exclude_concept_id)
+        concept = next((item for item in state.get("concepts", []) if str(item.get("conceptId")) == str(exclude_concept_id)), None)
+        if current_objective is not None and concept is not None and int(concept.get("reviewVisits", 0) or 0) < 1:
+            concept["state"] = "NEEDS_REVIEW"
+            concept["reviewDue"] = "LATER_THIS_SESSION"
+            state["revisitQueue"] = list(dict.fromkeys([*state.get("revisitQueue", []), str(exclude_concept_id)]))[:12]
+            state["revisitMode"] = True
+            session.state = state
+            review_scene, review_private = _legacy_scene(session, current_objective)
+            review_scene = persist_scene_revision(session, review_scene, review_private, event_id=event_id, db=db)
+            return review_scene, review_private
     scene = persist_scene_revision(session, inert_scene, None, event_id=event_id, db=db)
     session.status = "completed"
     session.ended_reason = "evidence_sufficient" if completion_met(session) else "objectives_exhausted"

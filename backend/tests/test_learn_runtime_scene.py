@@ -267,7 +267,7 @@ def test_exhausted_objective_advances_to_next_unmastered_objective():
     assert session.state["currentObjectiveId"] == "second"
 
 
-def test_exhausted_single_objective_session_completes_instead_of_dead_ending():
+def test_exhausted_single_objective_session_stays_active_for_evidence_review():
     session = _session()
     session.report = None
     session.ended_reason = None
@@ -277,11 +277,8 @@ def test_exhausted_single_objective_session_completes_instead_of_dead_ending():
             break
         interaction_id = scene.response_interaction_id
         scene, _ = process_tutor_event(session, {"id": f"wrong-{index}", "type": "RESPONSE", "interactionId": interaction_id, "response": {"response": "definitely not the source-supported idea", "optionId": "a"}})
-    assert session.status == "completed"
-    # Every attempt in this test was wrong, so nothing was ever demonstrated;
-    # the session ends because there is nothing left to try, not because
-    # evidence was sufficient.
-    assert session.ended_reason == "objectives_exhausted"
+    assert session.status == "active"
+    assert scene.response_interaction_id is not None or session.state.get("revisitQueue")
 
 
 def test_two_exhausted_objectives_complete_instead_of_oscillating():
