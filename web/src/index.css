@@ -215,6 +215,11 @@
 .learn-ask-answer p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; max-height: 36vh; overflow-y: auto; }
 .learn-ask-answer small { display: block; margin-top: .45rem; color: #6c746e; }
 .learn-step-actions, .learn-result-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+.learn-complete { padding: 2rem 0 3rem; }
+.learn-complete h2 { margin-bottom: 1.25rem; }
+.learn-report { display: grid; gap: .7rem; margin: 1.25rem 0 1.5rem; }
+.learn-report p { margin: 0; padding: .85rem 1rem; border: 1px solid #dfe5dc; border-radius: 10px; background: #fbfcf8; color: #4f5750; line-height: 1.5; overflow-wrap: anywhere; }
+.learn-report p strong { display: block; margin-bottom: .25rem; color: #315d4d; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
 .learn-feedback { margin-top: 1rem; padding: .75rem .85rem; border-left: 3px solid #58735d; background: #f1f5ef; }
 .learn-feedback.incorrect { border-color: #b65c48; background: #fbf1ed; }
 .learn-hint { margin-top: .8rem; color: #5d674f; }
