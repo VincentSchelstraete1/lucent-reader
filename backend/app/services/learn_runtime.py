@@ -7,12 +7,15 @@ already the only place allowed to normalize or persist scene revisions.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningSceneBlock, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ProblemStep, ShortAnswerStep, TeachBackStep, TeachStep
+
+logger = logging.getLogger(__name__)
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -751,6 +754,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 anchor_block_ids=list(getattr(step, "source_block_ids", []) or []),
             )
             if retrieved.status != RetrievalStatus.SUPPORTED:
+                logger.warning(
+                    "learn_source_unavailable session_id=%s document_id=%s event=ASK_INTERACTION_RESPONSE status=%s failure_code=%s",
+                    session.id, session.document_id, retrieved.status.value, retrieved.failure_code,
+                )
                 raise SourceContextUnavailable(retrieved.status)
             source_context_text = serialize_source_context(retrieved, max_chars=5000)
         if evaluation.result != "correct" and response_text and not is_explicit_uncertainty(str(response_text)) and step.type in {
@@ -912,6 +919,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             anchor_block_ids=list(getattr(current, "source_block_ids", []) or objective.get("sourceBlockIds", [])),
         )
         if retrieved.status != RetrievalStatus.SUPPORTED:
+            logger.warning(
+                "learn_source_unavailable session_id=%s document_id=%s event=%s status=%s failure_code=%s",
+                session.id, session.document_id, event_type, retrieved.status.value, retrieved.failure_code,
+            )
             raise SourceContextUnavailable(retrieved.status)
         source_blocks = retrieved.observation_blocks()
         source_context_text = serialize_source_context(retrieved)
@@ -1167,7 +1178,16 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 fallback=fallback_decision,
                 allowed_step_ids={repair.id},
             )
-        except Exception:
+            logger.info(
+                "tutor_decision session_id=%s branch=remediation concept=%s goal=%s strategy=%s action=%s next_step=%s",
+                session.id, concept_id, decision.pedagogical_goal, decision.pedagogical_strategy,
+                decision.teaching_action, decision.next_step_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "tutor_decision_fallback session_id=%s branch=remediation concept=%s exception=%s",
+                session.id, concept_id, type(exc).__name__,
+            )
             decision = fallback_decision
 
         visual_state = scene.visual_state or LearningVisualState()
@@ -1461,7 +1481,16 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     observation = build_tutor_observation(session, event=event, source_blocks=source_blocks)
     try:
         decision = choose_tutor_decision(observation=observation, context={"source": source_context_text}, fallback=fallback, allowed_step_ids={item.id for item in candidates})
-    except Exception:
+        logger.info(
+            "tutor_decision session_id=%s branch=main concept=%s goal=%s strategy=%s action=%s next_step=%s candidates=%s",
+            session.id, concept_id, decision.pedagogical_goal, decision.pedagogical_strategy,
+            decision.teaching_action, decision.next_step_id, len(candidates),
+        )
+    except Exception as exc:
+        logger.warning(
+            "tutor_decision_fallback session_id=%s branch=main concept=%s exception=%s",
+            session.id, concept_id, type(exc).__name__,
+        )
         decision = fallback
     # The decision selects the next candidate; the fallback is only used when
     # the provider is unavailable or fails validation.

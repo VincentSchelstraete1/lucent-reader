@@ -4,8 +4,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 import uuid
 from typing import Any
 
@@ -16,6 +18,8 @@ from app.models.learning_block import DocumentSourceIndex, PersistedLearningBloc
 from app.database import SessionLocal
 from app.services.embeddings import EmbeddingError, get_embedding_provider
 
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_INPUT_VERSION = "learning-block-input-v1"
 DEFAULT_EMBEDDING_PROVIDER = "voyage"
@@ -247,13 +251,26 @@ def index_document(document_id: int, generation_id: uuid.UUID) -> bool:
     """Embed and atomically publish one immutable corpus generation."""
     attempt_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
+    started = time.perf_counter()
     with SessionLocal.begin() as db:
         source_index = db.get(DocumentSourceIndex, document_id, with_for_update=True)
         if source_index is None or source_index.generation_id != generation_id:
+            logger.warning(
+                "source_index_skipped document_id=%s generation_id=%s reason=%s",
+                document_id, generation_id, "missing" if source_index is None else "generation_mismatch",
+            )
             return False
         lease_active = source_index.status == "INDEXING" and source_index.lease_expires_at and source_index.lease_expires_at > now
         if lease_active or source_index.status == "READY":
+            logger.warning(
+                "source_index_skipped document_id=%s generation_id=%s reason=%s status=%s",
+                document_id, generation_id, "lease_active" if lease_active else "already_ready", source_index.status,
+            )
             return False
+        logger.info(
+            "source_index_started document_id=%s generation_id=%s attempt_id=%s attempt_count=%s block_count=%s",
+            document_id, generation_id, attempt_id, source_index.attempt_count + 1, source_index.block_count,
+        )
         source_index.status = "INDEXING"
         source_index.attempt_id = attempt_id
         source_index.attempt_count += 1
@@ -330,6 +347,11 @@ def index_document(document_id: int, generation_id: uuid.UUID) -> bool:
             source_index.failure_code = None
             source_index.lease_expires_at = None
             source_index.indexed_at = published_at
+        logger.info(
+            "source_index_ready document_id=%s generation_id=%s provider=%s model=%s dimensions=%s embedded=%s duration_ms=%.1f",
+            document_id, generation_id, provider.metadata.provider, provider.metadata.model,
+            provider.metadata.dimensions, len(vectors), (time.perf_counter() - started) * 1000,
+        )
         return True
     except (EmbeddingError, SourceCorpusInvalid) as exc:
         with SessionLocal.begin() as db:
@@ -342,4 +364,9 @@ def index_document(document_id: int, generation_id: uuid.UUID) -> bool:
                 source_index.status = "FAILED"
                 source_index.failure_code = getattr(exc, "code", "source_invalid")
                 source_index.lease_expires_at = None
+        logger.error(
+            "source_index_failed document_id=%s generation_id=%s attempt_id=%s failure_code=%s exception=%s duration_ms=%.1f",
+            document_id, generation_id, attempt_id, getattr(exc, "code", "source_invalid"),
+            type(exc).__name__, (time.perf_counter() - started) * 1000,
+        )
         return False
