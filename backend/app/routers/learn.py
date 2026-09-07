@@ -356,6 +356,24 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     objective = next((item for item in objectives if str(item.get("id")) == str(active_objective_id)), None)
     if objective is None:
         objective = objectives[min(session.objective_index, max(0, len(objectives) - 1))] if objectives else {}
+    lowered = request.message.lower()
+    requested_visual = any(word in lowered for word in ("show me", "visual", "diagram", "stage", "highlight"))
+    objective_source_ids = {str(value) for value in objective.get("sourceBlockIds", [])}
+    scene_visual_blocks = [
+        block for block in (active_scene_for_ask.blocks if active_scene_for_ask else [])
+        if block.kind in {"visual", "animation"} and block.visual_spec is not None
+    ]
+    # An explicit request to operate on an already-authorized scene visual is
+    # grounded by that visual's persisted source identity. Semantic similarity
+    # for the imperative words "show me visually" is not an answerability
+    # signal and can be weak even when the scene already contains the exact
+    # source-backed asset. This exception applies only to bounded visual
+    # operations whose block IDs are owned by the active objective.
+    grounded_scene_visual_request = requested_visual and any(
+        block.source_block_ids
+        and set(map(str, block.source_block_ids)) <= objective_source_ids
+        for block in scene_visual_blocks
+    )
     note = _latest_note(db, session.document_id); payload = {}
     if note:
         try: payload = json.loads(note.content)
@@ -396,7 +414,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         )
     scope = _ask_scope(request.message, objective, context)
     _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_request", metadata={"scope": scope, "sourceSectionIds": context.get("sourceSectionIds", [])})
-    if retrieved is not None and retrieved.status == RetrievalStatus.WEAK:
+    if retrieved is not None and retrieved.status == RetrievalStatus.WEAK and not grounded_scene_visual_request:
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": "UNSUPPORTED_SOURCE", "queryFingerprint": retrieved.query_fingerprint})
         db.commit()
         return AskLucentResponse(answer="The uploaded material doesn’t establish that answer. I can help you work with what this source does cover.", scope="OUT_OF_SCOPE")
@@ -411,8 +429,6 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         current_step = _parse_step(active_practice.model_dump(by_alias=True)) if active_practice is not None else None
     tool = "retrieve_source" if context.get("text") else "request_explanation"
     visual_action = None
-    lowered = request.message.lower()
-    requested_visual = any(word in lowered for word in ("show me", "visual", "diagram", "stage", "highlight"))
     def _visual_request_action(candidate):
         spec = getattr(candidate, "visual_spec", None)
         if spec is None:
@@ -437,10 +453,16 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         answer = model.answer; tool = "request_explanation"; visual_action = None
         authorized_model_ids = set(context.get("sourceBlockIds") or [])
         model_ids_authorized = not model.source_block_ids or set(model.source_block_ids) <= authorized_model_ids
-        if not model.supported or not model_ids_authorized:
+        if (not model.supported or not model_ids_authorized) and not grounded_scene_visual_request:
             _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": "UNSUPPORTED_SOURCE", "reason": "model_support" if not model.supported else "unauthorized_source_ids"})
             db.commit()
             return AskLucentResponse(answer="The uploaded material doesn’t establish that answer. I can help you work with what this source does cover.", scope="OUT_OF_SCOPE")
+        if not model.supported or not model_ids_authorized:
+            # The model's support judgment is irrelevant to the bounded scene
+            # operation above. Discard its prose/tool claims and let the
+            # validated grounded-visual fallback below compose the response.
+            model = None
+            answer = str(objective.get("outcome") or objective.get("bottleneck") or context.get("text", "")[:500])
     if model:
         for call in model.tool_calls:
             args = call.arguments
@@ -532,7 +554,10 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         current_title = str(getattr(visual_candidate.visual_spec, "title", ""))
         alternate = None
         alternate_spec_created = False
+        active_visual_sections = {str(value) for value in objective.get("sourceSectionIds", [])}
         for section in (payload.get("sectionNotes") or []):
+            if active_visual_sections and str(section.get("id")) not in active_visual_sections:
+                continue
             nested_content = section.get("content") if isinstance(section, dict) and isinstance(section.get("content"), dict) else {}
             components = (section.get("components") or nested_content.get("components") or []) if isinstance(section, dict) else []
             for component in components:
@@ -717,6 +742,12 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         # provider acknowledgement, so the guidance remains attached to the
         # active task in the authoritative scene.
         answer = guided_content
+    if visual_action is not None and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
+        visual_action = {
+            **visual_action,
+            "sourceSectionIds": list(visual_candidate.visual_spec.source_section_ids),
+            "sourceBlockIds": list(visual_candidate.visual_spec.source_block_ids),
+        }
     process_tutor_event(session, {
         "type": "ASK_LUCENT",
         "message": request.message,

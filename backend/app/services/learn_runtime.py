@@ -68,6 +68,37 @@ def _visual_supports_remediation(scene: LearningScene, interaction) -> bool:
     return bool(pair_words.intersection(visual_words))
 
 
+def _carry_authoritative_visual(previous: LearningScene, rendered: LearningScene) -> LearningScene:
+    """Keep the persisted visual surface across same-objective replans.
+
+    Ask Lucent can replace the authoritative visual without changing the
+    objective. A later answer must not rebuild that surface from an authored
+    candidate and silently resurrect the old visual. Ordinary response
+    replanning may still change the authoritative stage/highlights.
+    """
+    if str(previous.objective_id) != str(rendered.objective_id):
+        return rendered
+    current_visual = next(
+        (block for block in previous.blocks if block.kind in {"visual", "animation"} and (block.visual_spec is not None or block.visual_ref is not None)),
+        None,
+    )
+    if current_visual is None:
+        return rendered
+    blocks = list(rendered.blocks)
+    visual_indexes = [index for index, block in enumerate(blocks) if block.kind in {"visual", "animation"}]
+    if visual_indexes:
+        first = visual_indexes[0]
+        blocks[first] = current_visual
+        blocks = [block for index, block in enumerate(blocks) if index == first or block.kind not in {"visual", "animation"}]
+    else:
+        practice_index = next((index for index, block in enumerate(blocks) if block.kind == "practice"), len(blocks))
+        blocks.insert(practice_index, current_visual)
+    return rendered.model_copy(update={
+        "blocks": blocks,
+        "visual_state": rendered.visual_state or previous.visual_state,
+    })
+
+
 def _state(session) -> dict[str, Any]:
     return dict(session.state or {})
 
@@ -535,7 +566,7 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         if can_add_visual:
             try:
                 from app.schemas.learn import VisualSpec
-                visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec) if visual_spec else None, visualRef=visual_ref if visual_ref else None, sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+                visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec) if visual_spec else None, visualRef=visual_ref if visual_ref else None, sourceSectionIds=list(visual_action.get("sourceSectionIds") or source_section_ids or [])[:8], sourceBlockIds=list(visual_action.get("sourceBlockIds") or source_block_ids or [])[:12])
                 # One authoritative visual surface: a new grounded view
                 # replaces the prior visual block in place so the scene does
                 # not grow a second competing visual card.
@@ -1168,6 +1199,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             teaching_override=teaching,
         )
         rendered = rendered.model_copy(update={"visual_state": visual_state})
+        rendered = _carry_authoritative_visual(scene, rendered)
         private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=repair, objective=objective)
         return persist_scene_revision(
             session, rendered, private_next,
@@ -1228,6 +1260,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=application_step, action=application_action, decision=application_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good. Now apply the idea without the worked path.", feedback_kind="correct", evaluation=evaluation)
+                rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=application_decision, fallback_step=application_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("independentSuccesses", 0) or 0) > 0 and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"}:
@@ -1251,6 +1284,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
+                rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=transfer_decision, fallback_step=transfer_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and int(concept.get("independentSuccesses", 0) or 0) == 0:
@@ -1270,6 +1304,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 # original authored interaction.
                 session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=independent_step, action=independent_action, decision=independent_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good progress. Now try the idea with less help.", feedback_kind="correct", evaluation=evaluation)
+                rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=independent_decision, fallback_step=independent_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             completed_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "demonstrated"}})
@@ -1360,6 +1395,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 or ("Let's look at the key relationship together." if evaluation else None)
             )
             rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=remediation_feedback, evaluation=evaluation)
+            rendered = _carry_authoritative_visual(scene, rendered)
             if scene.visual_state is not None:
                 rendered = rendered.model_copy(update={"visual_state": scene.visual_state})
             private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=teaching_decision, fallback_step=teaching, objective=objective)
@@ -1477,6 +1513,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 next_step = next_step.model_copy(update={"content": f"{next_step.content[:760]} Watch the highlighted part of the visual as you connect this relationship."})
     session.state = state
     rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
+    rendered = _carry_authoritative_visual(scene, rendered)
     private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=next_step, objective=objective)
     rendered = persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)
     return rendered, private_next

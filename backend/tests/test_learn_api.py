@@ -2,6 +2,7 @@ import json
 import re
 import hashlib
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -295,6 +296,61 @@ def test_ask_show_visual_can_add_a_new_grounded_visual_surface(client):
     after_count = sum(block.get("kind") in {"visual", "animation"} for block in scene["blocks"])
     assert after_count == before_count == 1, {"before": first.json(), "after": second.json()}
     assert second.json()["visualAction"]["type"] == "add_visual"
+    active_objective = next(item for item in session["conceptStates"] if item["conceptId"] == scene["objectiveId"])
+    visual_block = next(block for block in scene["blocks"] if block.get("kind") in {"visual", "animation"})
+    assert set(visual_block["sourceSectionIds"]) <= set(active_objective["sourceSectionIds"])
+
+
+def test_grounded_scene_visual_request_survives_weak_semantic_query_without_weakening_other_refusals(client, monkeypatch):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/visual-intent"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Visual mechanism", "content": "A grounded process."}).json()
+    note = {"title": "Visual mechanism", "sectionNotes": [{
+        "id": "s-visual", "title": "Energy pathway", "bigIdea": "Potential energy changes into kinetic energy.",
+        "sourceBlockIds": ["b-visual"], "keyTakeaways": ["Energy changes form."],
+        "components": [{"kind": "flow", "title": "Energy flow", "nodes": [
+            {"id": "potential", "label": "Potential energy"}, {"id": "kinetic", "label": "Kinetic energy"},
+        ], "edges": [{"source": "potential", "target": "kinetic", "label": "converts to"}]}],
+    }]}
+    _save_indexed_note(client, document, title="Visual mechanism", note=note)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+
+    from app.routers import learn as learn_router
+    real_retrieve = learn_router.retrieve_source
+
+    def weak_retrieve(*args, **kwargs):
+        return replace(real_retrieve(*args, **kwargs), status=learn_router.RetrievalStatus.WEAK)
+
+    def unsupported_provider(_prompt, tool_name, _schema, **_kwargs):
+        if tool_name == "ask_lucent":
+            return {"answer": "I cannot establish an answer.", "toolCalls": [], "sourceSectionIds": [], "sourceBlockIds": [], "supported": False}
+        return None
+
+    monkeypatch.setattr(learn_router, "retrieve_source", weak_retrieve)
+    set_tutor_provider(unsupported_provider)
+    try:
+        visual = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
+        assert visual.status_code == 200
+        assert visual.json()["scope"] != "OUT_OF_SCOPE"
+        assert visual.json()["scene"]["revision"] > session["scene"]["revision"]
+        assert visual.json()["scene"]["responseInteractionId"] == session["scene"]["responseInteractionId"]
+        assert visual.json()["visualAction"]["type"] in {"show_visual", "add_visual"}
+        visual_scene = visual.json()["scene"]
+        visual_title = next(block["visualSpec"]["title"] for block in visual_scene["blocks"] if block.get("kind") == "visual")
+        practice = next(block["step"] for block in visual_scene["blocks"] if block.get("kind") == "practice")
+        response = client.post(f"/learn-sessions/{session['id']}/responses", json={
+            "sceneId": visual_scene["id"], "sceneRevision": visual_scene["revision"],
+            "interactionId": practice["id"], "eventType": "RESPONSE",
+            "orderedIds": list(reversed([item["id"] for item in practice["items"]])),
+        })
+        assert response.status_code == 200
+        response_visual_title = next(block["visualSpec"]["title"] for block in response.json()["scene"]["blocks"] if block.get("kind") == "visual")
+        assert response_visual_title == visual_title
+
+        unsupported = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Was the author born in Dublin?"})
+        assert unsupported.status_code == 200
+        assert unsupported.json()["scope"] == "OUT_OF_SCOPE"
+    finally:
+        set_tutor_provider(None)
 
 
 def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
