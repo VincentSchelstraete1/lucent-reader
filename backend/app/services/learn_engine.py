@@ -437,9 +437,12 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     # central relationship in natural language. Require the key concepts to
     # be represented, with a bounded overlap threshold, while retaining
     # exact/accepted-answer matching for ordinary short answers.
-    teach_back = getattr(step, "type", None) == "teach_back"
+    explanatory_response = getattr(step, "type", None) in {"teach_back", "problem"}
     concept_coverage = len(required.intersection(normalized))
-    required_coverage = bool(required) and (required <= normalized or (teach_back and concept_coverage >= max(2, (len(required) + 1) // 2)))
+    required_coverage = bool(required) and (
+        required <= normalized
+        or (explanatory_response and concept_coverage >= max(2, (len(required) + 1) // 2))
+    )
     if accepted or required_coverage:
         result = "correct"
     elif normalized and required and normalized.intersection(required):

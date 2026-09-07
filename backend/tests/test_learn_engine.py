@@ -203,6 +203,22 @@ def test_required_concept_evidence_is_case_insensitive():
         option_id=None,
     ).result == "correct"
 
+    generated_application = ProblemStep(
+        id="generated-application",
+        type="problem",
+        title="Apply in context",
+        prompt="Predict what changes and explain why.",
+        responseType="short_answer",
+        acceptedAnswers=["Gravity converts gravitational potential energy into kinetic energy as a pendulum descends."],
+        requiredConcepts=["gravity", "converts", "gravitational", "potential", "energy", "kinetic"],
+        solution="Gravity converts gravitational potential energy into kinetic energy as a pendulum descends.",
+    )
+    assert evaluate_step(
+        generated_application,
+        response="As it swings down, gravity changes potential energy into kinetic energy.",
+        option_id=None,
+    ).result == "correct"
+
 def test_generated_remediation_uses_meaningful_required_concepts():
     failed = MultipleChoiceStep(
         id="choice",
