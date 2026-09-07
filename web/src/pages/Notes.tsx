@@ -123,7 +123,10 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     // scene blocks render as plain learner-facing text. Strip presentation
     // markers at this boundary so raw `**bold**`/`__bold__` never reaches the
     // learner UI, while preserving the words themselves.
+    const narratedVisual = /^(?:I'll|I will) show you (?:a|the) visual/i.test(content)
     return content
+      .replace(/^(?:I'll|I will) show you (?:a|the) visual[^.!?]*[.!?]\s*/i, "")
+      .replace(/^This will help you see[^.!?]*[.!?]\s*/i, "")
       .replace(/I'd be happy to (show you|help with)[^.!?]*[.!?]\s*/i, "")
       .replace(/Let me (display|show) (that|this|a visual)[^.!?]*[.!?]\s*/i, "")
       .replace(/^(Great!\s*)?Let me check your understanding[^:]*:\s*/i, "")
@@ -131,7 +134,7 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
       .replace(/\*\*(.*?)\*\*/g, "$1")
       .replace(/__(.*?)__/g, "$1")
       .replace(/\s{2,}/g, " ")
-      .trim()
+      .trim() || (narratedVisual ? "Follow the highlighted relationship in the visual as you connect it to the idea." : "")
   }
   const polishLearnerText = (content: string) => content
     .replace(/^(Great!\s*)?Let me check your understanding[^:]*:\s*/i, "")
