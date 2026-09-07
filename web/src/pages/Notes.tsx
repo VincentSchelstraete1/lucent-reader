@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote } from "../api/client"
+import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote, type SourceIndexStatus } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 import { StructuredVisual } from "../learning/visuals/StructuredVisual"
 
@@ -220,6 +220,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   const [askAnswer, setAskAnswer] = useState<{ answer: string; scope: string; tool?: string } | null>(null)
   const [askLoading, setAskLoading] = useState(false)
   const [restartRequested, setRestartRequested] = useState(false)
+  const [sourceIndex, setSourceIndex] = useState<SourceIndexStatus | null>(null)
   const sessionRef = useRef<LearnSession | null>(null)
   const headingRef = useRef<HTMLHeadingElement | null>(null)
   const focusedSceneId = useRef<string | null>(null)
@@ -275,6 +276,30 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
       }
     }).catch(() => undefined)
     return () => { cancelled = true }
+  }, [documentId])
+
+  useEffect(() => {
+    if (!documentId) {
+      setSourceIndex(null)
+      return
+    }
+    let cancelled = false
+    let timer: number | undefined
+    const refresh = async () => {
+      try {
+        const status = await api.getSourceIndex(documentId)
+        if (cancelled) return
+        setSourceIndex(status)
+        if (status.status === "PENDING" || status.status === "INDEXING") {
+          timer = window.setTimeout(refresh, 750)
+        }
+      } catch {
+        if (!cancelled) setSourceIndex(null)
+      }
+    }
+    setSourceIndex(null)
+    void refresh()
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer) }
   }, [documentId])
 
   async function start() {
@@ -345,8 +370,11 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     <p className="learn-context">{note.title}</p>
     <div className="learn-choice-group"><p className="learn-choice-label">Choose a goal</p><div className="learn-choice-grid">{([['understand', 'Understand the concepts', 'Build intuition and see how ideas connect.'], ['solve', 'Learn to solve problems', 'Practice methods and apply them step by step.'], ['memorize', 'Memorize the content', 'Practice important facts, terms, and formulas.'], ['exam', 'Prepare for an exam', 'Mix understanding, recall, and application.']] as const).map(([value, label, description]) => <button type="button" key={value} className={goal === value ? "learn-choice selected" : "learn-choice"} onClick={() => setGoal(value)}><strong>{label}</strong><span>{description}</span></button>)}</div></div>
     <div className="learn-choice-group"><p className="learn-choice-label">How familiar are you with this already?</p><div className="learn-familiarity-row">{([['new', 'New to this'], ['somewhat_familiar', 'Somewhat familiar'], ['reviewing', 'Mostly reviewing']] as const).map(([value, label]) => <button type="button" key={value} className={familiarity === value ? "learn-familiarity selected" : "learn-familiarity"} onClick={() => setFamiliarity(value)}>{label}</button>)}</div></div>
+    {sourceIndex?.status === "PENDING" || sourceIndex?.status === "INDEXING" ? <p className="learn-context" role="status">Lucent is preparing the original source for grounded learning…</p> : null}
+    {sourceIndex?.status === "FAILED" ? <p className="error" role="alert">Lucent could not prepare this source for grounded learning. Re-upload the material to try again.</p> : null}
+    {sourceIndex?.status === "NOT_INDEXED" ? <p className="error" role="alert">Re-upload this material before starting grounded learning.</p> : null}
     {error && <p className="error learn-onboarding-error" role="alert">{error}</p>}
-    <button className="btn btn-primary" type="button" disabled={loading || !documentId} onClick={start}>{loading ? "Preparing your session…" : "Start learning"}</button>
+    <button className="btn btn-primary" type="button" disabled={loading || !documentId || sourceIndex?.status !== "READY"} onClick={start}>{loading ? "Preparing your session…" : sourceIndex?.status === "PENDING" || sourceIndex?.status === "INDEXING" || sourceIndex === null ? "Preparing source…" : "Start learning"}</button>
   </section>
 
   if (session.status !== "active") return <section className="learn-workspace learn-complete" aria-labelledby="learn-heading"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><p className="note-kicker">{session.status === "stopped" ? "Session paused" : "Session complete"}</p><h2 id="learn-heading">{session.status === "stopped" ? "Your progress is saved." : `You worked through ${session.completedObjectives} objective${session.completedObjectives === 1 ? "" : "s"}.`}</h2>{session.report && <div className="learn-report"><p><strong>Next focus:</strong> {session.report.nextFocus.join(", ") || "Continue with a new concept."}</p>{session.report.demonstrated.length > 0 && <p><strong>Demonstrated:</strong> {session.report.demonstrated.join(", ")}</p>}{session.report.developing.length > 0 && <p><strong>Still developing:</strong> {session.report.developing.join(", ")}</p>}{session.report.struggles.length > 0 && <p><strong>Needs attention:</strong> {session.report.struggles.join(" ")}</p>}{session.report.misconceptions?.length ? <p><strong>Misconceptions:</strong> {session.report.misconceptions.join(" ")}</p> : null}{session.report.notCovered.length > 0 && <p><strong>Not covered yet:</strong> {session.report.notCovered.join(", ")}</p>}</div>}<div className="learn-result-actions"><button className="btn" type="button" onClick={onBack}>Review notes</button>{session.status === "stopped" && documentId && <button className="btn btn-primary" type="button" onClick={() => { sessionRef.current = null; setSession(null); setRestartRequested(true); setFocusMode(false); setError(null) }}>Start a new learning session</button>}{documentId && <button className="btn" type="button" onClick={() => window.location.assign(`/quizzes/generating?document_id=${documentId}`)}>Take the quiz</button>}</div></section>

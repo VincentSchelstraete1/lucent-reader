@@ -337,7 +337,19 @@ export type DocumentIngestionResult = {
   source_id?: number | null
   document_id?: number | null
   note_id?: number | null
+  source_generation?: string | null
+  source_index_status?: "PENDING" | "INDEXING" | "READY" | "FAILED" | null
   teaching_depth?: "concise" | "balanced" | "detailed"
+}
+
+export type SourceIndexStatus = {
+  document_id: number
+  generation_id?: string | null
+  status: "NOT_INDEXED" | "PENDING" | "INDEXING" | "READY" | "FAILED"
+  block_count: number
+  embedded_count: number
+  coverage_warnings: string[]
+  retryable: boolean
 }
 
 export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
@@ -395,6 +407,7 @@ export const api = {
   getSource: (id: number) => get<Source>(`/sources/${id}`),
   getDocuments: () => get<Document[]>("/documents"),
   getDocument: (id: number) => get<Document>(`/documents/${id}`),
+  getSourceIndex: (id: number) => get<SourceIndexStatus>(`/documents/${id}/source-index`),
   updateDocument: (id: number, updates: { title?: string }) => patch<Document>(`/documents/${id}`, updates),
   deleteDocument: (id: number) => del<Document>(`/documents/${id}`),
   getNotes: () => get<Note[]>("/notes"),

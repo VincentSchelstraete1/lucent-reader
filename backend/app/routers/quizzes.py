@@ -1,5 +1,6 @@
 import json
 import re
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -11,8 +12,10 @@ from app.models.auth import User
 from app.auth_dependencies import get_current_user, require_csrf
 from app.models.quiz import Quiz, QuizAttempt
 from app.models.note import Note
+from app.models.learning_block import DocumentSourceIndex
 from app.schemas.quiz import QuizResponse, QuizAttemptCreateRequest, QuizAttemptResponse
 from app.services.anthropic_service import generate_quiz_questions
+from app.services.retrieval import RetrievalStatus, SourceQuery, retrieve_source
 
 router = APIRouter()
 
@@ -60,6 +63,35 @@ def _associate_question(question, section_ids: list[str], section_source: str):
             best_id, best_score = section_id, score
     return question.model_copy(update={"section_id": best_id})
 
+
+def _associate_indexed_question(db, *, question, document_id: int, user_id, generation: UUID,
+                                section_ids: list[str]):
+    """Resolve quiz navigation from original source blocks when available.
+
+    This intentionally changes only the question's section association, not
+    quiz generation or factual grounding. A single unambiguous section on the
+    best retrieved block is required; retrieval failure or ambiguity leaves
+    navigation unset rather than inventing a lexical match.
+    """
+    if question.section_id in section_ids:
+        return question
+    context = retrieve_source(
+        db,
+        user_id=user_id,
+        document_id=document_id,
+        expected_generation=generation,
+        query=SourceQuery(
+            purpose="quiz_association",
+            text=f"{question.question}\n{question.explanation}"[:1200],
+        ),
+        top_k=3,
+    )
+    if context.status != RetrievalStatus.SUPPORTED or not context.blocks:
+        return question.model_copy(update={"section_id": None})
+    valid = set(section_ids)
+    candidates = list(dict.fromkeys(section for section in context.blocks[0].section_ids if section in valid))
+    return question.model_copy(update={"section_id": candidates[0] if len(candidates) == 1 else None})
+
 @router.post("/documents/{document_id}/quizzes", response_model=QuizResponse, dependencies=[Depends(require_csrf)])
 def create_quiz(document_id: int, db = Depends(get_db), user: User = Depends(get_current_user)):
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
@@ -77,10 +109,37 @@ def create_quiz(document_id: int, db = Depends(get_db), user: User = Depends(get
     except ValueError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    source_index = db.get(DocumentSourceIndex, document.id)
+    note_generation = None
+    if note and note.content_type == "section_note":
+        try:
+            note_generation = UUID(str(json.loads(note.content).get("sourceGeneration")))
+        except (TypeError, ValueError, AttributeError):
+            note_generation = None
+    use_index = bool(
+        source_index
+        and source_index.status == "READY"
+        and note_generation is not None
+        and source_index.generation_id == note_generation
+    )
+    associated = []
+    for question in generated.questions:
+        if use_index:
+            associated.append(_associate_indexed_question(
+                db,
+                question=question,
+                document_id=document.id,
+                user_id=user.id,
+                generation=source_index.generation_id,
+                section_ids=section_ids,
+            ))
+        else:
+            associated.append(_associate_question(question, section_ids, quiz_content))
+
     quiz = Quiz(
         document_id=document.id,
         title=f"Quiz: {document.title}",
-        questions=[_associate_question(q, section_ids, quiz_content).model_dump() for q in generated.questions]
+        questions=[question.model_dump() for question in associated],
     )
     db.add(quiz)
     db.commit()

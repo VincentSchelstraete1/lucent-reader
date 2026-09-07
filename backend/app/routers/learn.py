@@ -748,6 +748,9 @@ def submit_ask_interaction(session_id: UUID, interaction_id: str, request: Learn
         raise HTTPException(status_code=409, detail="That Ask Lucent interaction is no longer active")
     try:
         process_tutor_event(session, {"type": "ASK_INTERACTION_RESPONSE", "interactionId": interaction_id, "response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}, db=db)
+    except SourceContextUnavailable as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail={"code": exc.status.value.lower(), "message": "The source is temporarily unavailable. Your learning scene is unchanged."}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()

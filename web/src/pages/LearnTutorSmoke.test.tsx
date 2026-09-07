@@ -23,7 +23,7 @@ describe("Learn tutor browser smoke fixture", () => {
     expect(html).toContain("Understand the concepts")
     expect(html).toContain("Learn to solve problems")
     expect(html).toContain("How familiar are you with this already?")
-    expect(html).toContain("Start learning")
+    expect(html).toContain("Preparing source…")
     expect(html).not.toContain("source-grounded relationship")
   })
 })

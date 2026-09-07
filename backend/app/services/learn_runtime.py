@@ -627,8 +627,64 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         option_id = response.get("optionId") if isinstance(response, dict) else payload.get("optionId")
         ordered_ids = response.get("orderedIds") if isinstance(response, dict) else payload.get("orderedIds")
         evaluation = evaluate_step(step, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
+        # Inline Ask practice is intentionally outside the primary evidence
+        # progression, but open responses still need the same original-source
+        # grounding as the primary interaction. Retrieve with the inline
+        # interaction's own anchors (never the primary practice's private
+        # payload) before asking the diagnosis model to interpret the answer.
+        source_context_text = ""
+        source_generation = state.get("sourceGeneration")
+        if db is not None and source_generation:
+            from uuid import UUID
+            from app.services.retrieval import (
+                RetrievalStatus,
+                SourceContextUnavailable,
+                build_source_query,
+                retrieve_source,
+                serialize_source_context,
+            )
+
+            query = build_source_query(
+                purpose="ask_inline_response",
+                objective_title=str(objective.get("title") or ""),
+                objective_outcome=str(objective.get("outcome") or ""),
+                active_prompt=str(getattr(step, "prompt", "") or ""),
+                learner_text=str(response_text or ""),
+                objective_id=str(objective.get("id") or ""),
+            )
+            retrieved = retrieve_source(
+                db,
+                user_id=session.user_id,
+                document_id=session.document_id,
+                expected_generation=UUID(str(source_generation)),
+                query=query,
+                anchor_block_ids=list(getattr(step, "source_block_ids", []) or []),
+            )
+            if retrieved.status != RetrievalStatus.SUPPORTED:
+                raise SourceContextUnavailable(retrieved.status)
+            source_context_text = serialize_source_context(retrieved, max_chars=5000)
+        if response_text and not is_explicit_uncertainty(str(response_text)) and step.type in {
+            "short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step",
+        }:
+            expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
+            if not expected and getattr(step, "required_concepts", None):
+                expected = " ".join(str(item) for item in step.required_concepts)
+            evaluation = diagnose_response(
+                prompt=getattr(step, "prompt", ""),
+                expected=expected,
+                response=str(response_text),
+                source_context=source_context_text,
+                fallback=evaluation,
+            )
         feedback = "That’s right—your answer matches the idea we’re practicing." if evaluation.result == "correct" else "Not quite. Recheck the explanation above and look for the relationship it emphasizes."
-        feedback_block = LearningSceneBlock(id=bounded_id("ask-feedback", session.id, interaction_id, scene.revision), kind="feedback", label="Feedback", content=feedback, sourceSectionIds=list(scene.source_section_ids), sourceBlockIds=list(scene.source_block_ids))
+        feedback_block = LearningSceneBlock(
+            id=bounded_id("ask-feedback", session.id, interaction_id, scene.revision),
+            kind="feedback",
+            label="Feedback",
+            content=feedback,
+            sourceSectionIds=list(getattr(step, "source_section_ids", []) or scene.source_section_ids),
+            sourceBlockIds=list(getattr(step, "source_block_ids", []) or scene.source_block_ids),
+        )
         updated = scene.model_copy(update={"inline_interaction": None, "blocks": [*scene.blocks, feedback_block][-6:]})
         state.pop("askInlinePrivate", None)
         session.state = state

@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from sqlalchemy import select
@@ -6,6 +7,7 @@ from app.ingestion import RawContentBlock, RawDocument, RawPage
 from app.main import app
 from app.models.learn import LearnSession
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
+from app.models.note import Note
 from app.routers.ingestion import get_document_ingestor
 from app.services.embeddings import DeterministicEmbeddingProvider, set_embedding_provider
 from app.services.source_index import index_document
@@ -256,3 +258,121 @@ def test_ingested_ask_uses_same_original_source_and_does_not_mutate_evidence(cli
     assert body["scene"]["responseInteractionId"] == active_id
     refreshed = client.get(f"/learn-sessions/{session['id']}").json()
     assert refreshed["conceptStates"] == before_evidence
+
+
+def test_ingested_ask_inline_response_uses_its_own_original_source_anchors_without_evidence_writes(client):
+    raw_source = (
+        "The inline-source-token establishes that ironic praise exposes hypocrisy by making readers infer "
+        "the criticism beneath a deliberately literal statement."
+    )
+    uploaded = _upload(client, MutableIngestor(raw_source), "inline-grounding.pdf").json()
+    session = client.post(
+        f"/documents/{uploaded['document_id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new", "restart": True},
+    ).json()
+    source_block_id = uploaded["learning_blocks"][0]["id"]
+    prompts = []
+
+    def tutor_provider(prompt, tool_name, _schema, **_kwargs):
+        prompts.append((tool_name, prompt))
+        if tool_name == "ask_lucent":
+            return {
+                "answer": "Let's check the distinction with one more question.",
+                "toolCalls": [],
+                "sourceSectionIds": ["section-0"],
+                "sourceBlockIds": [source_block_id],
+                "supported": True,
+            }
+        return {}
+
+    set_embedding_provider(DeterministicEmbeddingProvider())
+    set_tutor_provider(tutor_provider)
+    try:
+        asked = client.post(
+            f"/learn-sessions/{session['id']}/ask",
+            json={"message": "Ask me another question"},
+        ).json()
+        before_evidence = client.get(f"/learn-sessions/{session['id']}").json()["conceptStates"]
+        inline = asked["scene"]["inlineInteraction"]
+        assert inline["sourceBlockIds"] == [source_block_id]
+        checked = client.post(
+            f"/learn-sessions/{session['id']}/ask-interactions/{inline['id']}/responses",
+            json={"response": "It exposes the contradiction indirectly."},
+        )
+    finally:
+        set_tutor_provider(None)
+        set_embedding_provider(None)
+
+    assert checked.status_code == 200
+    assert any(
+        tool == "learn_response_evaluation" and "inline-source-token" in prompt
+        for tool, prompt in prompts
+    )
+    assert checked.json()["conceptStates"] == before_evidence
+
+
+def test_ingested_ask_visual_and_example_mutate_scene_with_original_source_references(client):
+    raw_source = (
+        "The visual-source-token explains that ironic praise sounds sincere on the surface while its exaggerated "
+        "claim exposes the institution's hypocrisy to the audience."
+    )
+    uploaded = _upload(client, MutableIngestor(raw_source), "ask-visual-grounding.pdf").json()
+    source_block_id = uploaded["learning_blocks"][0]["id"]
+    with TestSessionLocal() as db:
+        note = db.execute(
+            select(Note).where(Note.document_id == uploaded["document_id"], Note.content_type == "section_note")
+        ).scalar_one()
+        payload = json.loads(note.content)
+        section = payload["sectionNotes"][0]
+        section["components"] = [{
+            "kind": "comparison", "title": "Surface and critique", "dimensions": ["role"],
+            "items": [
+                {"id": "surface", "name": "Sincere surface", "values": {"role": "sounds literal"}},
+                {"id": "critique", "name": "Underlying critique", "values": {"role": "exposes hypocrisy"}},
+            ],
+            "sourceBlockIds": [source_block_id],
+        }]
+        note.content = json.dumps(payload)
+        db.commit()
+
+    session = client.post(
+        f"/documents/{uploaded['document_id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new", "restart": True},
+    ).json()
+    before_evidence = session["conceptStates"]
+    prompts = []
+
+    def tutor_provider(prompt, tool_name, _schema, **_kwargs):
+        prompts.append((tool_name, prompt))
+        if tool_name == "ask_lucent":
+            visual = "visual" in prompt.casefold()
+            return {
+                "answer": "Compare the sincere surface with the underlying critique in the source.",
+                "toolCalls": [{"tool": "show_visual" if visual else "request_example", "arguments": {}}],
+                "sourceSectionIds": ["section-0"],
+                "sourceBlockIds": [source_block_id],
+                "supported": True,
+            }
+        return {}
+
+    set_embedding_provider(DeterministicEmbeddingProvider())
+    set_tutor_provider(tutor_provider)
+    try:
+        visual_response = client.post(
+            f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"}
+        )
+        example_response = client.post(
+            f"/learn-sessions/{session['id']}/ask", json={"message": "Give me an example"}
+        )
+    finally:
+        set_tutor_provider(None)
+        set_embedding_provider(None)
+
+    assert visual_response.status_code == 200
+    assert example_response.status_code == 200
+    assert all("visual-source-token" in prompt for tool, prompt in prompts if tool == "ask_lucent")
+    visual_blocks = [block for block in visual_response.json()["scene"]["blocks"] if block["kind"] == "visual"]
+    assert visual_blocks and source_block_id in visual_blocks[-1]["sourceBlockIds"]
+    example_blocks = [block for block in example_response.json()["scene"]["blocks"] if block["kind"] == "example"]
+    assert example_blocks and source_block_id in example_blocks[-1]["sourceBlockIds"]
+    assert client.get(f"/learn-sessions/{session['id']}").json()["conceptStates"] == before_evidence
