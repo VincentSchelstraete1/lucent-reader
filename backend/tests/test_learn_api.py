@@ -144,6 +144,10 @@ def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(clien
     visual = [block for block in scene["blocks"] if block.get("kind") in {"visual", "animation"}]
     assert visual and visual[0].get("visualSpec", {}).get("nodes")
     assert response.json()["visualAction"]["type"] == "show_visual"
+    first_stage = scene.get("visualState", {}).get("stage", 0)
+    second = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
+    assert second.status_code == 200
+    assert second.json()["scene"].get("visualState", {}).get("stage", 0) >= first_stage
 
 
 def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):

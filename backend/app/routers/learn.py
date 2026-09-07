@@ -355,8 +355,21 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     visual_action = None
     lowered = request.message.lower()
     requested_visual = any(word in lowered for word in ("show me", "visual", "diagram", "stage", "highlight"))
+    def _visual_request_action(candidate):
+        spec = getattr(candidate, "visual_spec", None)
+        if spec is None:
+            return {"type": "show_visual", "stepId": candidate.id, "stage": 0}
+        current_stage = int((active_scene_for_ask.visual_state.stage if active_scene_for_ask and active_scene_for_ask.visual_state else 0) or 0)
+        stage = min(current_stage + 1, max(0, len(spec.stages) - 1))
+        action = {"type": "show_visual", "stepId": candidate.id, "stage": stage}
+        if spec.stages:
+            stage_data = spec.stages[stage]
+            active_nodes = getattr(stage_data, "active_node_ids", None) or (stage_data.get("activeNodeIds", []) if isinstance(stage_data, dict) else [])
+            if active_nodes:
+                action["nodeId"] = active_nodes[0]
+        return action
     if current_step and getattr(current_step, "visual_spec", None) and any(word in lowered for word in ("show", "visual", "diagram", "stage", "highlight")):
-        tool = "show_visual"; visual_action = {"type": "show_visual", "stepId": current_step.id, "stage": 0}
+        tool = "show_visual"; visual_action = _visual_request_action(current_step)
     learner = _concept_for(session, objective)
     recent_attempts = list((session.state or {}).get("recentAttempts") or [])[-4:]
     last_decision = (session.state or {}).get("lastTutorDecision") or {}
@@ -439,7 +452,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
                     visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual", objective.get("id"), section.get("id")), "visual_spec": spec, "visual_ref": None, "type": "teach"})()
                     break
     if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
-        visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0}
+        visual_action = _visual_request_action(visual_candidate)
         if getattr(visual_candidate, "visual_spec", None) is not None:
             visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
         if getattr(visual_candidate, "visual_ref", None) is not None:
@@ -503,7 +516,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         # above still controls whether a visual can actually be introduced.
         if requested_visual and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
             ask_kind, ask_label = "visual", "Watch"
-            visual_action = {"type": "show_visual", "stepId": visual_candidate.id, "stage": 0}
+            visual_action = _visual_request_action(visual_candidate)
             if getattr(visual_candidate, "visual_spec", None) is not None:
                 visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
             if getattr(visual_candidate, "visual_ref", None) is not None:
