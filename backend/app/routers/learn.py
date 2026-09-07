@@ -423,7 +423,9 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         ask_action, ask_strategy, ask_kind, ask_label = "show_visual", "VISUAL_MODEL", "visual", "Watch"
     elif "example" in lowered:
         ask_action, ask_strategy, ask_kind, ask_label = "give_example", "CONCRETE_EXAMPLE", "example", "Example"
-    elif any(term in lowered for term in ("another way", "different", "simpler", "explain")):
+    elif "simpler" in lowered and "question" in lowered:
+        ask_action, ask_strategy, ask_kind, ask_label = "simplify_explanation", "GUIDED_REASONING", "explanation", "Let's simplify it"
+    elif any(term in lowered for term in ("another way", "different", "explain")):
         ask_action, ask_strategy, ask_kind, ask_label = "give_analogy", "ANALOGY", "analogy", "Another way to see it"
     else:
         ask_action, ask_strategy, ask_kind, ask_label = "clarify_definition", "CONCEPTUAL_EXPLANATION", "explanation", "Clarify"
@@ -599,7 +601,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # A request for another question is a scene re-composition, not another
     # chat paragraph. Choose an unanswered practice asset from the active
     # objective and replace only the practice block in the same scene.
-    if any(term in lowered for term in ("another question", "different question", "ask me a different")):
+    if any(term in lowered for term in ("another question", "different question", "ask me a different", "simpler question")):
         answered = set(ask_state.get("answeredInteractionIds") or [])
         active_id = str((load_current_scene(session).response_interaction_id if load_current_scene(session) else "") or getattr(current_step, "id", ""))
         alternatives = [candidate for candidate in (_parse_step(raw) for raw in objective.get("steps", [])) if candidate and candidate.id not in answered and candidate.id != active_id and candidate.type not in {"teach", "walkthrough"}]
