@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, get_args
 from uuid import UUID
 
-from app.database import SessionLocal
+from conftest import TestSessionLocal as SessionLocal
 from app.models.learn import LearnSession
 from app.routers.learn import _concept_for, _parse_step, _tutor_observation
 from app.schemas.learn import TutorToolName
