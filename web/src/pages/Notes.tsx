@@ -218,6 +218,21 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start this learning session.") }
     finally { setLoading(false) }
   }
+  async function startFresh() {
+    if (!documentId) return
+    setLoading(true); setError(null)
+    try {
+      const created = await api.createLearnSession(documentId, { goal, familiarity, restart: true })
+      sessionRef.current = created
+      setSession(created)
+      setFocusMode(true)
+      setAskOpen(false); setAskAnswer(null); setAskMessage("")
+      setAnswer(""); setSelectedOption(null); setStructuredAnswers({}); setHint(null)
+      const active = created.scene?.responseInteractionId
+      setOrderedIds(created.scene?.blocks.find((block) => block.kind === "practice" && block.step?.id === active)?.step?.items?.map((item) => item.id) ?? [])
+    } catch (e) { setError(e instanceof Error ? e.message : "Lucent could not start a new learning session.") }
+    finally { setLoading(false) }
+  }
   async function respond(response?: string, optionId?: string) {
     if (!session) return
     setLoading(true); setError(null)
@@ -266,7 +281,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   const step = activeInteractionId ? session.scene?.blocks.find((block) => block.kind === "practice" && block.step?.id === activeInteractionId)?.step : undefined
   const sceneTeaching = session.scene?.blocks.filter((block) => block.kind !== "practice") ?? []
   if (!step) return <section className={`learn-workspace learn-session ${focusMode ? "learn-focus-mode" : ""}`} aria-labelledby="learn-heading">
-    <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span>Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span><button className="learn-focus-toggle" type="button" onClick={() => setFocusMode((value) => !value)}>{focusMode ? "Exit focus" : "Focus learning"}</button></div>
+    <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span>Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span><button className="learn-focus-toggle" type="button" onClick={() => setFocusMode((value) => !value)}>{focusMode ? "Exit focus" : "Focus learning"}</button><button className="learn-restart" type="button" onClick={startFresh} disabled={loading}>Start over</button></div>
     <p className="note-kicker">Watch</p><h2 id="learn-heading" ref={headingRef} tabIndex={-1}>{session.scene?.objective ?? note.title}</h2>
     <div className="learn-scene-shell">
       <article className="learn-step"><LearningSceneView session={session} note={note} onVisualStageChange={setVisualStage} /><div className="learn-step-actions"><button className="btn" type="button" onClick={stop}>Stop for now</button><button className="btn btn-primary" type="button" onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button></div></article>
@@ -285,7 +300,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   const teachingOnly = step.type === "teach" || step.type === "walkthrough"
   const sceneHasFeedback = Boolean(session.scene?.blocks.some((block) => block.kind === "feedback"))
   return <section className={`learn-workspace learn-session ${focusMode ? "learn-focus-mode" : ""}`} aria-labelledby="learn-heading">{focusMode && <div className="learn-focus-backdrop" aria-hidden="true" />}
-    <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span aria-live="polite">Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span><button className="learn-focus-toggle" type="button" onClick={() => setFocusMode((value) => !value)} aria-pressed={focusMode}>{focusMode ? "Exit focus" : "Focus learning"}</button></div>
+    <div className="learn-session-top"><button className="learn-back" type="button" onClick={onBack}>← Back to notes</button><span aria-live="polite">Objective {session.objectiveIndex + 1} of {session.objectiveCount}</span><button className="learn-focus-toggle" type="button" onClick={() => setFocusMode((value) => !value)} aria-pressed={focusMode}>{focusMode ? "Exit focus" : "Focus learning"}</button><button className="learn-restart" type="button" onClick={startFresh} disabled={loading}>Start over</button></div>
     <p className="note-kicker">{session.goal === "solve" ? "Problem solving" : session.goal === "memorize" ? "Retrieval practice" : "Focused learning"}</p>
     <h2 id="learn-heading" ref={headingRef} tabIndex={-1}>{session.objectiveTitle ?? note.title}</h2>
     <div className="learn-progress" role="progressbar" aria-valuemin={0} aria-valuemax={session.objectiveCount} aria-valuenow={session.objectiveIndex + 1}><span style={{ width: `${((session.objectiveIndex + 1) / Math.max(1, session.objectiveCount)) * 100}%` }} /></div>
