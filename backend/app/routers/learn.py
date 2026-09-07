@@ -419,10 +419,16 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # an interruption in the active lesson, so requests for another view,
     # an example, or the visual become blocks in the same scene rather than
     # detached chat-only replies.
+    guided_content = None
     if any(term in lowered for term in ("show me", "show this", "visual", "diagram")):
         ask_action, ask_strategy, ask_kind, ask_label = "show_visual", "VISUAL_MODEL", "visual", "Watch"
     elif "example" in lowered:
         ask_action, ask_strategy, ask_kind, ask_label = "give_example", "CONCRETE_EXAMPLE", "example", "Example"
+    elif "walk me through" in lowered:
+        ask_action, ask_strategy, ask_kind, ask_label = "give_worked_example", "GUIDED_REASONING", "worked_example", "Step by step"
+        prompt_text = str(getattr(current_step, "prompt", "the current task") or "the current task")
+        first_hint = next(iter(getattr(current_step, "hints", []) or []), "Start with the central relationship described in the material.")
+        guided_content = f"Let's take this one step at a time. Begin with: {first_hint} Then return to the task: {prompt_text}"
     elif "simpler" in lowered and "question" in lowered:
         ask_action, ask_strategy, ask_kind, ask_label = "simplify_explanation", "SCAFFOLDED_PRACTICE", "explanation", "Let's simplify it"
     elif any(term in lowered for term in ("another way", "different", "explain")):
@@ -524,7 +530,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     fallback_block = TutorSceneBlockPlan(
         kind=ask_kind, label=ask_label,
         title=objective.get("title"),
-        content=objective.get("outcome") or objective.get("bottleneck") or context.get("text", "")[:500],
+        content=guided_content or objective.get("outcome") or objective.get("bottleneck") or context.get("text", "")[:500],
         visualRef=(
             {"sectionId": getattr(visual_candidate, "section_id", None), "componentIndex": getattr(visual_candidate, "component_index", None), "visualSpec": visual_candidate.visual_spec.model_dump(by_alias=True) if getattr(visual_candidate, "visual_spec", None) else None}
             if ask_kind == "visual" and visual_candidate and (getattr(visual_candidate, "visual_ref", None) or getattr(visual_candidate, "type", None) == "walkthrough")
@@ -557,6 +563,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             "give_analogy": ("analogy", "Another way to see it"),
             "clarify_definition": ("explanation", "Clarify"),
             "simplify_explanation": ("explanation", "Let's simplify it"),
+            "give_worked_example": ("worked_example", "Step by step"),
             "show_visual": ("visual", "Watch"),
             "show_animation": ("animation", "Watch"),
         }
