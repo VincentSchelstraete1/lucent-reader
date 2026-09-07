@@ -103,7 +103,12 @@ export function NoteView({ notes, depth = "balanced" }: { notes: SectionNote[]; 
 }
 
 function LearningSceneView({ session, note, onVisualStageChange }: { session: LearnSession; note: SectionNote; onVisualStageChange?: (stage: number) => void }) {
-  const blocks = (session.scene?.blocks ?? []).filter((block) => block.kind !== "practice")
+  const rawBlocks = (session.scene?.blocks ?? []).filter((block) => block.kind !== "practice")
+  // Keep the teaching surface focused: repeated tutor status cards are
+  // orchestration history, not separate lessons. Preserve the latest natural
+  // intervention alongside explanation/visual/feedback blocks.
+  const latestTutorId = [...rawBlocks].reverse().find((block) => block.kind === "tutor_message")?.id
+  const blocks = rawBlocks.filter((block) => block.kind !== "tutor_message" || block.id === latestTutorId)
   if (!blocks.length) return null
   const fallbackBlocks = blocks
   const learnerTutorText = (content: string) => {
@@ -129,7 +134,7 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
 
 function AskLucentInline({ askOpen, setAskOpen, askMessage, setAskMessage, askLoading, askAnswer, onAsk }: { askOpen: boolean; setAskOpen: (value: boolean) => void; askMessage: string; setAskMessage: (value: string) => void; askLoading: boolean; askAnswer: any; onAsk: (message?: string) => void }) {
   const quickActions = ["Explain differently", "Show me visually", "Give me an example", "Why does this matter?"]
-  return <div className="learn-ask-lucent"><button type="button" className="learn-ask-toggle" onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen}>Ask Lucent</button>{askOpen && <div className="learn-ask-panel"><p className="learn-ask-context">Ask the tutor about what you are seeing.</p><div className="learn-ask-quick-actions">{quickActions.map((action) => <button key={action} type="button" className="learn-ask-quick" onClick={() => onAsk(action)}>{action}</button>)}</div><div className="learn-ask-row"><input aria-label="Ask Lucent a question" value={askMessage} onChange={(event) => setAskMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onAsk() }} placeholder="Ask about this idea…" /><button className="btn btn-primary" type="button" onClick={() => onAsk()} disabled={askLoading || !askMessage.trim()}>{askLoading ? "Thinking…" : "Ask"}</button></div>{askAnswer && <div className="learn-ask-answer" role="status"><p>{askAnswer.answer}</p></div>}</div>}</div>
+  return <div className="learn-ask-lucent"><button type="button" className="learn-ask-toggle" onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen}>Ask Lucent</button>{askOpen && <div className="learn-ask-panel"><p className="learn-ask-context">Ask the tutor about what you are seeing.</p><div className="learn-ask-quick-actions">{quickActions.map((action) => <button key={action} type="button" className="learn-ask-quick" onClick={() => onAsk(action)}>{action}</button>)}</div><div className="learn-ask-row"><input aria-label="Ask Lucent a question" value={askMessage} onChange={(event) => setAskMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onAsk() }} placeholder="Ask about this idea…" /><button className="btn btn-primary" type="button" onClick={() => onAsk()} disabled={askLoading || !askMessage.trim()}>{askLoading ? "Thinking…" : "Ask"}</button></div>{askLoading && <div className="learn-ask-loading" role="status" aria-label="Lucent is thinking"><span /><span /><span /></div>}{askAnswer && <div className="learn-ask-answer" role="status"><p>{askAnswer.answer}</p></div>}</div>}</div>
 }
 
 export function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId: number | null | undefined; onBack: () => void }) {
@@ -151,9 +156,16 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   const [restartRequested, setRestartRequested] = useState(false)
   const sessionRef = useRef<LearnSession | null>(null)
   const headingRef = useRef<HTMLHeadingElement | null>(null)
+  const focusedSceneId = useRef<string | null>(null)
 
   useEffect(() => {
-    if (session?.status === "active" && session.scene) headingRef.current?.focus()
+    // Focus the heading when entering a new scene, but not when Ask Lucent
+    // mutates the current scene in place. Refocusing on every revision reset
+    // the learner's scroll position to the top after each Ask response.
+    if (session?.status === "active" && session.scene && focusedSceneId.current !== session.scene.id) {
+      focusedSceneId.current = session.scene.id
+      headingRef.current?.focus()
+    }
   }, [session?.scene?.id, session?.scene?.revision])
 
   useEffect(() => {
