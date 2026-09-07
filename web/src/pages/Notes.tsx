@@ -108,7 +108,15 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   // orchestration history, not separate lessons. Preserve the latest natural
   // intervention alongside explanation/visual/feedback blocks.
   const latestTutorId = [...rawBlocks].reverse().find((block) => block.kind === "tutor_message")?.id
-  const blocks = rawBlocks.filter((block) => block.kind !== "tutor_message" || block.id === latestTutorId)
+  const latestExplanationId = [...rawBlocks].reverse().find((block) => block.kind === "explanation")?.id
+  const latestReframeId = [...rawBlocks].reverse().find((block) =>
+    ["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(String(block.label ?? "")),
+  )?.id
+  const blocks = rawBlocks.filter((block) =>
+    (block.kind !== "tutor_message" || block.id === latestTutorId) &&
+    (block.kind !== "explanation" || block.id === latestExplanationId) &&
+    (!(["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(String(block.label ?? ""))) || block.id === latestReframeId),
+  )
   const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
   const primaryVisual = visualBlocks.at(-1)
   let visualRendered = false
