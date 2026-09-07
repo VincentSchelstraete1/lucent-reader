@@ -62,6 +62,10 @@ def test_exact_retrieval_is_document_scoped_ranked_and_provenanced(client):
     assert context.blocks[0].block_ids == ["b2"]
     assert context.blocks[0].source["page_start"] == 2
     assert context.blocks[0].selection == "semantic"
+    assert context.raw_ranked_block_ids[0] == "b2"
+    assert len(context.raw_ranked_scores) == 3
+    assert len(context.omitted_block_ids) == 1
+    assert context.omitted_block_ids[0] not in {block.block_ids[0] for block in context.blocks}
     assert context.observation_blocks()[0]["text"].startswith("At the lowest point")
     assert context.timings_ms["total"] >= context.timings_ms["search"]
 
@@ -78,6 +82,7 @@ def test_anchors_are_bounded_first_and_missing_anchor_marks_incomplete(client):
         set_embedding_provider(None)
     assert [block.block_ids[0] for block in context.blocks[:2]] == ["b1", "b3"]
     assert [block.selection for block in context.blocks] == ["anchor", "anchor", "semantic"]
+    assert set(context.raw_ranked_block_ids) == {"b1", "b2", "b3"}
     assert context.coverage_incomplete is True
 
 

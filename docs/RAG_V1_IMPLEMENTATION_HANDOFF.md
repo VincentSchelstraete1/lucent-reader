@@ -11,7 +11,8 @@ Branch: `feature/public-auth-flow`
 - `c34e904` — primary Learn and Ask runtime retrieval integration using original source text and persisted source generations.
 - `b041e4b` — Ask support/provenance validation, attachment-aware prompt serialization, valid JSON truncation, and the first reproducible retrieval-evaluation harness.
 - `84f542d` — complete indexed-session Ask/quiz convergence and learner-facing source-index readiness handling.
-- Current checkpoint — locked, redistributable Stage 1/Stage 2 benchmark manifests with strict source/gold validation and expanded metrics.
+- `462155a` — locked, redistributable Stage 1/Stage 2 benchmark manifests with strict source/gold validation and expanded metrics.
+- Current checkpoint — reproducible local fixture seeding, raw/final retriever instrumentation, and the complete evaluation CLI/artifact contract.
 
 ## Plan status
 
@@ -26,12 +27,12 @@ Branch: `feature/public-auth-flow`
 
 ### Current phase
 
-Phase 6, partially complete. The repository now contains an original CC0 fixture corpus spanning physics/PDF, humanities/DOCX, and computer architecture/PPTX. Stage 1 has 24 queries across two domains; Stage 2 extends it to 50 queries across three domains with a locked 38-development/12-holdout split. Every supported gold evidence set has validated source block IDs and exact quotation offsets (plus pages for PDF evidence), including conjunctive multi-block requirements. The evaluator reports raw and final Recall/Hit@1/3/5, MRR, complete evidence, abstention/refusal, per-document/category macros, and embedding/search/total latency. The explicit live runner and measured Voyage artifacts are not yet complete.
+Phase 6 is complete for offline/reproducibility mechanics and pending its external live-provider gate. The repository contains an original CC0 fixture corpus spanning physics/PDF, humanities/DOCX, and computer architecture/PPTX. Stage 1 has 24 queries across two domains; Stage 2 extends it to 50 queries across three domains with a locked 38-development/12-holdout split. Every supported gold evidence set has validated source block IDs and exact quotation offsets (plus pages for PDF evidence), including conjunctive multi-block requirements. An explicitly non-production seeder creates isolated owned documents and a hash-locked config. The CLI now requires dataset/split/config/provider/output, supports retained-baseline comparison, and emits JSON plus Markdown with raw/final rankings, excerpts, omissions, failure IDs, metadata, macros, and embedding/search/total latency. The measured Voyage baseline remains pending because no credential is configured.
 
 ### Remaining work from `docs/RAG_V1_TECHNICAL_PLAN.md`
 
-1. Finish Phase 6: tighten `scripts/evaluate_retrieval.py` to the required `--config` and retained baseline/artifact contract; add deterministic local fixture seeding; run the fake reproducibility check; then run the explicit Voyage smoke/baseline when credentials are available. Do not label fake-vector results as semantic quality.
-2. Phase 7: run one-variable retrieval experiments, record keep/revert decisions, freeze configuration/thresholds, and evaluate the locked holdout once at the candidate gate.
+1. Close the Phase 6 external gate: configure an approved `VOYAGE_API_KEY`, seed Stage 2 with `--provider voyage`, run the explicit development baseline, manually inspect retained failures, and preserve the artifact. Do not use the fake metrics as semantic quality.
+2. Phase 7: from that live baseline, run one-variable retrieval experiments, record keep/revert decisions, freeze configuration/answerability policy, and evaluate the locked holdout once at the candidate gate.
 3. Phase 8: execute both fresh uploaded-source browser journeys, verify visible claims and unsupported behavior against original pages, and capture refresh/auth/provenance evidence.
 4. Phase 9: delete only retrieval paths made obsolete by RAG (including the temporary generated-note fallback after legacy migration), update operations/configuration docs, run disposable-database migration smoke, full backend/frontend validation, and final browser regression.
 
@@ -52,6 +53,8 @@ Phase 6, partially complete. The repository now contains an original CC0 fixture
 - Phase 6 evaluator/manifest tests: `5 passed, 7 warnings`.
 - Retrieval/index regression slice (`test_retrieval_evaluation`, `test_retrieval`, `test_embeddings`, `test_source_index`, `test_learning_block`, `test_route_learning_block`): `17 passed`.
 - Direct manifest integrity check: Stage 1 loaded 24 examples (20 development/4 holdout); Stage 2 loaded 50 examples (38 development/12 holdout) across all three declared domains/types.
+- Current Phase 6 retrieval/index slice: `19 passed`.
+- Explicit fake-provider mechanics baselines completed locally under `.tmp/rag-eval/` (gitignored because artifacts contain excerpts and database IDs). Stage 1 development: Recall@1/3/5 `0.583/0.917/1.000`, MRR `0.789`; Stage 2 development: Recall@1/3/5 `0.629/0.900/1.000`, MRR `0.796`. Both correctly report false-support `1.000` and semantic-quality `false`; deterministic hash vectors are not a support/answerability model.
 - Frontend: `124 passed`; TypeScript and production build passed.
 - Python compilation: `venv/bin/python -m compileall -q app scripts` passed.
 - Migration heads/current: both `0010_persist_learning_blocks (head)` on PostgreSQL.
@@ -59,4 +62,4 @@ Phase 6, partially complete. The repository now contains an original CC0 fixture
 
 ## Recommended next action
 
-Resume Phase 6 by tightening `backend/scripts/evaluate_retrieval.py` to require `--config`, retain complete per-query ranks/context/timings and fixed/regressed IDs, and record reproducible metadata. Add the smallest deterministic local fixture-seeding path, then produce the fake-provider mechanics baseline. The first live semantic action is the explicit Voyage smoke/baseline once `VOYAGE_API_KEY` and processing approval are available; only then begin Phase 7 tuning.
+The exact next action is the explicit live-provider gate: after an approved `VOYAGE_API_KEY` is available, run `scripts/seed_retrieval_eval.py` for Stage 2 with `--provider voyage`, then `scripts/evaluate_retrieval.py` on the development split with the emitted config. Inspect and classify every retained failure before changing one retrieval variable. Do not inspect the locked holdout until a candidate configuration and answerability policy are frozen.

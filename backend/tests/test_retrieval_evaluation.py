@@ -1,10 +1,14 @@
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
-from app.retrieval_eval.dataset import fixture_corpus_hash, load_retrieval_dataset
+from app.retrieval_eval.dataset import fixture_corpus_hash, load_retrieval_dataset, load_retrieval_dataset_bundle
 from app.retrieval_eval.evaluation import RetrievalResult, compare_failures, evaluate_retrieval
+from app.retrieval_eval.seeding import seed_retrieval_dataset
+from app.services.embeddings import DeterministicEmbeddingProvider
+from tests.conftest import TestSessionLocal
 
 
 def _manifest(tmp_path):
@@ -13,7 +17,9 @@ def _manifest(tmp_path):
         {"blockId": "b2", "text": "At the bottom, kinetic energy is greatest.", "source": {"page_start": 1}},
     ]
     fixture = tmp_path / "pendulum.json"
-    fixture.write_text(json.dumps({"blocks": blocks}))
+    fixture.write_text(json.dumps({
+        "title": "Pendulum test fixture", "license": "CC0-1.0", "blocks": blocks,
+    }))
     corpus_hash = fixture_corpus_hash(blocks)
     return {"version": "rag-v1-test", "documents": [{
         "alias": "pendulum", "sourceFixture": "pendulum.json", "corpusHash": corpus_hash,
@@ -119,3 +125,57 @@ def test_failure_comparison_reports_fixed_and_regressed(tmp_path):
     changes = compare_failures(baseline, candidate)
     assert "supported-one" in changes["fixed"]
     assert changes["regressions"] == ["unsupported"]
+
+
+def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkeypatch):
+    from scripts import evaluate_retrieval as cli
+
+    dataset_path = Path(__file__).parent / "fixtures" / "rag_v1" / "stage1.json"
+    dataset = load_retrieval_dataset_bundle(dataset_path)
+    provider = DeterministicEmbeddingProvider()
+    with TestSessionLocal.begin() as db:
+        first = seed_retrieval_dataset(db, dataset=dataset, provider=provider)
+    with TestSessionLocal.begin() as db:
+        second = seed_retrieval_dataset(db, dataset=dataset, provider=provider)
+    assert first == second
+
+    config_path = tmp_path / "config.json"
+    output_path = tmp_path / "development.json"
+    config_path.write_text(json.dumps(first))
+    monkeypatch.setattr(sys, "argv", [
+        "evaluate_retrieval.py",
+        "--dataset", str(dataset_path),
+        "--split", "development",
+        "--config", str(config_path),
+        "--provider", "fake",
+        "--output", str(output_path),
+    ])
+    assert cli.main() == 0
+
+    artifact = json.loads(output_path.read_text())
+    assert artifact["version"] == "rag-eval-run-v1"
+    assert artifact["metadata"]["semanticQuality"] is False
+    assert artifact["metadata"]["corpusSizeBlocks"] == 16
+    assert artifact["summary"]["total"] == 20
+    assert len(artifact["rows"]) == 20
+    assert all(row["rawRankedBlockIds"] and row["selectedBlocks"] for row in artifact["rows"])
+    assert all("excerpt" in block for row in artifact["rows"] for block in row["selectedBlocks"])
+    assert "do not measure semantic quality" in output_path.with_suffix(".md").read_text()
+
+    candidate_path = tmp_path / "candidate.json"
+    monkeypatch.setattr(sys, "argv", [
+        "evaluate_retrieval.py",
+        "--dataset", str(dataset_path),
+        "--split", "development",
+        "--config", str(config_path),
+        "--provider", "fake",
+        "--output", str(candidate_path),
+        "--baseline", str(output_path),
+    ])
+    assert cli.main() == 0
+    assert json.loads(candidate_path.read_text())["comparison"] == {"fixed": [], "regressions": []}
+
+    tampered = {**first, "retrieval": {**first["retrieval"], "topK": 4}}
+    config_path.write_text(json.dumps(tampered))
+    with pytest.raises(ValueError, match="config hash"):
+        cli._load_config(str(config_path), dataset_hash_value=first["datasetHash"], provider=provider)

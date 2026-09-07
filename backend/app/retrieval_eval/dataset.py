@@ -17,6 +17,8 @@ class RetrievalFixture:
     corpus_hash: str
     domain: str
     source_type: str
+    title: str
+    license: str
     blocks: tuple[dict[str, Any], ...]
 
 
@@ -53,6 +55,14 @@ class RetrievalEvalExample:
     objective_context: str | None = None
 
 
+@dataclass(frozen=True)
+class RetrievalDataset:
+    version: str
+    path: Path
+    fixtures: dict[str, RetrievalFixture]
+    examples: tuple[RetrievalEvalExample, ...]
+
+
 def fixture_corpus_hash(blocks: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> str:
     canonical = json.dumps(list(blocks), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -85,8 +95,12 @@ def _load_fixtures(manifest_path: Path, payload: dict[str, Any]) -> dict[str, Re
         declared_hash = str(raw.get("corpusHash") or "")
         if declared_hash != actual_hash:
             raise ValueError(f"Corpus hash mismatch for source fixture {alias}")
+        title = str(fixture_payload.get("title") or "").strip()
+        license_name = str(fixture_payload.get("license") or "").strip()
+        if not title or not license_name:
+            raise ValueError(f"Source fixture for {alias} needs title and license metadata")
         fixtures[alias] = RetrievalFixture(alias=alias, path=fixture_path, corpus_hash=actual_hash,
-            domain=domain, source_type=source_type, blocks=tuple(blocks))
+            domain=domain, source_type=source_type, title=title, license=license_name, blocks=tuple(blocks))
     return fixtures
 
 
@@ -147,7 +161,7 @@ def _load_manifest(path: Path, seen: set[Path] | None = None) -> dict[str, Any]:
     }
 
 
-def load_retrieval_dataset(path: str | Path) -> list[RetrievalEvalExample]:
+def load_retrieval_dataset_bundle(path: str | Path) -> RetrievalDataset:
     manifest_path = Path(path).resolve()
     payload = _load_manifest(manifest_path)
     if not isinstance(payload, dict) or not isinstance(payload.get("examples"), list):
@@ -200,7 +214,13 @@ def load_retrieval_dataset(path: str | Path) -> list[RetrievalEvalExample]:
             learner_context=str(raw.get("learnerContext")) if raw.get("learnerContext") else None,
             objective_context=str(raw.get("objectiveContext")) if raw.get("objectiveContext") else None,
         ))
-    return examples
+    return RetrievalDataset(
+        version=str(payload["version"]), path=manifest_path, fixtures=fixtures, examples=tuple(examples)
+    )
+
+
+def load_retrieval_dataset(path: str | Path) -> list[RetrievalEvalExample]:
+    return list(load_retrieval_dataset_bundle(path).examples)
 
 
 def dataset_hash(examples: list[RetrievalEvalExample]) -> str:

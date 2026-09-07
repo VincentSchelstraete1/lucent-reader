@@ -73,6 +73,9 @@ class RetrievedSourceContext:
     model: str | None = None
     dimensions: int | None = None
     blocks: list[RetrievedSourceBlock] = field(default_factory=list)
+    raw_ranked_block_ids: list[str] = field(default_factory=list)
+    raw_ranked_scores: list[float] = field(default_factory=list)
+    omitted_block_ids: list[str] = field(default_factory=list)
     coverage_incomplete: bool = False
     truncated: bool = False
     timings_ms: dict[str, float] = field(default_factory=dict)
@@ -184,15 +187,20 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     search_started = time.perf_counter()
     scored: list[tuple[float, PersistedLearningBlock]] = []
     for row in rows:
-        if row.block_id in seen or not isinstance(row.embedding, list):
+        if not isinstance(row.embedding, list):
             continue
         try:
             scored.append((exact_cosine(query_vector, row.embedding), row))
         except (TypeError, ValueError):
             continue
     scored.sort(key=lambda item: (-item[0], item[1].ordinal, item[1].block_id))
+    raw_ranked_block_ids = [row.block_id for _, row in scored]
+    raw_ranked_scores = [score for score, _ in scored]
     semantic_limit = max(0, min(int(top_k), 8) - len(selected))
-    selected.extend((row, score, "semantic") for score, row in scored[:semantic_limit])
+    selected.extend(
+        (row, score, "semantic")
+        for score, row in [(score, row) for score, row in scored if row.block_id not in seen][:semantic_limit]
+    )
     search_ms = (time.perf_counter() - search_started) * 1000
 
     output: list[RetrievedSourceBlock] = []
@@ -224,9 +232,13 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     status = RetrievalStatus.SUPPORTED if output else RetrievalStatus.WEAK
     if threshold is not None and semantic_scores and max(semantic_scores) < threshold and not any(block.selection == "anchor" for block in output):
         status = RetrievalStatus.WEAK
+    selected_ids = {block_id for block in output for block_id in block.block_ids}
     return RetrievedSourceContext(status=status, document_id=document_id, generation_id=source_index.generation_id,
         query_fingerprint=fingerprint, provider=source_index.provider, model=source_index.model,
-        dimensions=source_index.dimensions, blocks=output, coverage_incomplete=missing_anchor,
+        dimensions=source_index.dimensions, blocks=output, raw_ranked_block_ids=raw_ranked_block_ids,
+        raw_ranked_scores=raw_ranked_scores,
+        omitted_block_ids=[block_id for block_id in raw_ranked_block_ids if block_id not in selected_ids],
+        coverage_incomplete=missing_anchor,
         truncated=truncated, timings_ms={"query_embedding": embedding_ms, "search": search_ms,
                                         "total": (time.perf_counter() - started) * 1000})
 

@@ -15,6 +15,10 @@ class RetrievalResult:
     raw_ranked_block_ids: tuple[str, ...] | None = None
     embedding_latency_ms: float = 0.0
     search_latency_ms: float = 0.0
+    status: str = "UNKNOWN"
+    selected_blocks: tuple[dict, ...] = ()
+    omitted_block_ids: tuple[str, ...] = ()
+    failure_code: str | None = None
 
 
 Strategy = Callable[[RetrievalEvalExample], RetrievalResult]
