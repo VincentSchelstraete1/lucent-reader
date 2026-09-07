@@ -667,27 +667,16 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
 @router.post("/learn-sessions/{session_id}/ask-interactions/{interaction_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_ask_interaction(session_id: UUID, interaction_id: str, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     """Evaluate an Ask Lucent inline question without replacing primary practice."""
-    from app.services.learn_engine import evaluate_step
     session = _get_owned_session(db, session_id, user)
     _ensure_session_runtime(db, session)
     scene = load_current_scene(session)
     inline = scene.inline_interaction if scene else None
     if inline is None or str(inline.id) != str(interaction_id):
         raise HTTPException(status_code=409, detail="That Ask Lucent interaction is no longer active")
-    objective = _objective(session.plan or {}, scene.objective_id) if scene else None
-    if objective is None:
-        raise HTTPException(status_code=409, detail="The learning objective is no longer active")
-    step = _parse_step(inline.model_dump(by_alias=True))
-    response = request.response
-    response_text = response.get("response") if isinstance(response, dict) else response
-    option_id = response.get("optionId") if isinstance(response, dict) else request.option_id
-    ordered_ids = response.get("orderedIds") if isinstance(response, dict) else request.ordered_ids
-    evaluation = evaluate_step(step, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
-    feedback = "That’s right—your answer matches the idea we’re practicing." if evaluation.result == "correct" else "Not quite. Recheck the explanation above and look for the relationship it emphasizes."
-    feedback_block = LearningSceneBlock(id=_bounded_id("ask-feedback", session.id, interaction_id, scene.revision), kind="feedback", label="Feedback", content=feedback, sourceSectionIds=list(scene.source_section_ids), sourceBlockIds=list(scene.source_block_ids))
-    updated = scene.model_copy(update={"inline_interaction": None, "blocks": [*scene.blocks, feedback_block][-6:]})
-    private = (session.state or {}).get("currentScenePrivate")
-    persist_scene_revision(session, updated, private, event_id=_bounded_id("ask-response", session.id, interaction_id), db=db)
+    try:
+        process_tutor_event(session, {"type": "ASK_INTERACTION_RESPONSE", "interactionId": interaction_id, "response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}, db=db)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()
     return _session_payload(session)
 

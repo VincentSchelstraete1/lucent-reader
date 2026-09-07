@@ -610,6 +610,30 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if scene.visual_state is not None:
         state["visualState"] = scene.visual_state.model_dump(by_alias=True)
     event_type = getattr(event, "type", None) or (event.get("type") if isinstance(event, dict) else "CONTINUE")
+    if event_type == "ASK_INTERACTION_RESPONSE":
+        payload = event if isinstance(event, dict) else {}
+        inline = scene.inline_interaction
+        interaction_id = str(payload.get("interactionId") or "")
+        if inline is None or str(inline.id) != interaction_id:
+            raise ValueError("That Ask Lucent interaction is no longer active")
+        objective = _objective(session.plan or {}, scene.objective_id)
+        if objective is None:
+            raise ValueError("The learning objective is no longer active")
+        from app.services.learn_engine import evaluate_step
+        private_inline = state.get("askInlinePrivate") or {}
+        step = _coerce_step(private_inline, objective) if str(private_inline.get("id")) == interaction_id else _coerce_step(inline.model_dump(by_alias=True), objective)
+        response = payload.get("response")
+        response_text = response.get("response") if isinstance(response, dict) else response
+        option_id = response.get("optionId") if isinstance(response, dict) else payload.get("optionId")
+        ordered_ids = response.get("orderedIds") if isinstance(response, dict) else payload.get("orderedIds")
+        evaluation = evaluate_step(step, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
+        feedback = "That’s right—your answer matches the idea we’re practicing." if evaluation.result == "correct" else "Not quite. Recheck the explanation above and look for the relationship it emphasizes."
+        feedback_block = LearningSceneBlock(id=bounded_id("ask-feedback", session.id, interaction_id, scene.revision), kind="feedback", label="Feedback", content=feedback, sourceSectionIds=list(scene.source_section_ids), sourceBlockIds=list(scene.source_block_ids))
+        updated = scene.model_copy(update={"inline_interaction": None, "blocks": [*scene.blocks, feedback_block][-6:]})
+        state.pop("askInlinePrivate", None)
+        session.state = state
+        private = state.get("currentScenePrivate")
+        return persist_scene_revision(session, updated, private, event_id=bounded_id("ask-response", session.id, interaction_id), db=db), private
     if event_type == "ASK_LUCENT":
         # Ask Lucent is an interruption in the same tutor runtime. The route
         # performs auth, retrieval, and provider validation, then supplies the
@@ -631,6 +655,8 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             try:
                 inline = _coerce_step(inline_raw, _objective(session.plan or {}, updated.objective_id) or {})
                 updated = updated.model_copy(update={"inline_interaction": public_step(inline)})
+                state["askInlinePrivate"] = inline.model_dump(by_alias=True)
+                session.state = state
                 # Keep the primary private interaction untouched.  The inline
                 # Ask question is an interruption, not a second progression
                 # cursor; its answer is evaluated by the dedicated Ask
