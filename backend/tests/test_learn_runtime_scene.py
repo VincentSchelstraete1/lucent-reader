@@ -183,6 +183,17 @@ def test_ask_event_uses_authoritative_runtime_scene_executor():
     assert private is not None
 
 
+def test_ask_teaching_messages_refine_one_scene_block_instead_of_accumulating():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    apply_scene_message(session, message="Explain differently", answer="First explanation.", block_kind="explanation", block_label="Another way")
+    scene = apply_scene_message(session, message="Explain differently again", answer="A clearer explanation.", block_kind="explanation", block_label="Another way")
+    assert scene is not None
+    explanation_blocks = [block for block in scene.blocks if block.kind == "explanation"]
+    assert len(explanation_blocks) == 1
+    assert explanation_blocks[0].content == "A clearer explanation."
+
+
 def test_ask_event_replacement_step_is_executed_by_runtime():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

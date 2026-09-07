@@ -449,11 +449,12 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         return None
     blocks = list(scene.blocks)
     block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
-    # Repeated interruptions should refine one teaching block, not stack
-    # visually identical paragraphs in the active scene.
-    duplicate = next((index for index, existing in enumerate(blocks) if existing.kind == block_kind and existing.content == block.content), None)
-    if duplicate is not None:
-        blocks[duplicate] = block
+    # Ask/tutor interruptions refine the current teaching surface. Keep one
+    # learner-facing block for a given role instead of stacking every prior
+    # explanation/analogy into a long column of competing text boxes.
+    existing_message = next((index for index in range(len(blocks) - 1, -1, -1) if blocks[index].kind == block_kind), None)
+    if existing_message is not None:
+        blocks[existing_message] = block
     else:
         blocks.append(block)
     visual_state = scene.visual_state
