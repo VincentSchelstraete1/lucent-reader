@@ -16,6 +16,8 @@ Branch: `feature/public-auth-flow`
 - `d680a27` — live Voyage/Anthropic Stage 2 development gate, calibrated retrieval policy, bounded free-tier rate-limit handling, and retained support-decision failures.
 - `5686d4a` — locked holdout recorded and obsolete generated-note retrieval authority removed.
 - `c08d12b` — scenario harness migrated to indexed original-source fixtures.
+- `8c08f82` — RAG operations/configuration documentation and evidence-based convergence handoff.
+- `cd12540` — source-grounded visual Ask requests no longer false-refuse on weak imperative-query similarity; visual provenance is objective-scoped and the authoritative visual survives response replanning.
 
 ## Plan status
 
@@ -32,16 +34,17 @@ Branch: `feature/public-auth-flow`
 
 Phases 6 and 7 are complete. The authorized checked-in CC0 Stage 2 corpus was indexed with Voyage `voyage-3-lite` at 512 dimensions and evaluated with Anthropic support decisions. The frozen development candidate (top-k 5, minimum similarity `0.50556`) achieved Recall@5 `1.000`, MRR `0.936`, complete evidence@5 `1.000`, and zero false support. The locked holdout was then evaluated once without tuning: Recall@5 `1.000`, MRR `0.905`, complete evidence@5 `1.000`, and zero false support. Three of seven supported holdout queries were conservatively refused and remain retained limitations.
 
-Phase 8 has concrete real-browser evidence on both substantive CC0 domains. Pendulum visibly completed wrong-answer teaching, uncertainty support, tutor-directed visual stage/highlight adaptation, reduced-support independent application, transfer, and evidence-based completion. A fresh Satire session visibly completed wrong-answer teaching, explicit uncertainty support, intervening learning, scaffold fading, independent application, transfer, delayed review in a different representation, and an evidence-based `needs review` completion. Separate fresh Satire browser evidence shows Ask replacing the main visual while preserving the primary interaction and the exact revision/visual surviving refresh; a near-topic unsupported Ask was refused without scene mutation. Evidence is gitignored under `.tmp/learn-golden/rag-v1/`.
+Phase 8 has concrete real-browser evidence on both substantive CC0 domains. Pendulum visibly completed wrong-answer teaching, uncertainty support, tutor-directed visual stage/highlight adaptation, reduced-support independent application, transfer, and evidence-based completion. One fresh Satire session now contains Ask replacing the main visual, exact refresh persistence, the Ask-selected visual surviving the next learner response, wrong-answer teaching, explicit uncertainty support, intervening learning, scaffold fading, independent application, transfer, delayed review in a different representation, and an evidence-based outcome that leaves the repeatedly weak concept under `Next focus` instead of falsely claiming mastery. A near-topic unsupported Ask was separately refused without scene mutation. Evidence is gitignored under `.tmp/learn-golden/rag-v1/`.
 
 Phase 9 convergence is implemented: generated SectionNote retrieval is no longer reachable from Ask, legacy unindexed sessions return a safe re-upload/restart response, stale tests now build indexed source fixtures, and operations/configuration are documented.
 
 ### Remaining work from `docs/RAG_V1_TECHNICAL_PLAN.md`
 
-1. Complete the strict Phase 8 uninterrupted-journey bar: the Pendulum path is complete, while the Satire checkpoints were observed across fresh runs rather than one single run containing Ask plus the full tutoring sequence. The latest Satire run also did not autonomously advance its visual on the wrong-answer turn; do not call the two-domain golden bar complete from the current artifacts.
-2. Before external rollout, confirm provider retention/processing terms for real student content; current authorization covers only the checked-in CC0 benchmark fixtures.
-3. Improve the conservative support-decision false-refusal rate only through a new development experiment and a new untouched holdout; do not tune against the consumed Stage 2 holdout.
-4. Run the disposable-database Alembic upgrade/downgrade smoke if release policy requires downgrade proof. The active PostgreSQL database is at `0010_persist_learning_blocks (head)`.
+1. Complete the remaining strict golden bar for prerequisite repair. The uploaded Pendulum/Satire plans contain no authorized prerequisite IDs, so neither real-source browser journey can currently demonstrate branch → repair → return. Use a source-backed objective graph/fixture through the production runtime; do not hardcode a subject-specific branch or append steps to the plan.
+2. The Satire wrong-answer turn preserved the grounded Ask-selected visual but did not autonomously advance/highlight it. Pendulum has real-browser autonomous visual-remediation evidence; if the acceptance policy requires that behavior independently in both domains, the Satire path remains to be demonstrated without forcing a visual when the tutor judges another modality more useful.
+3. Before external rollout, confirm provider retention/processing terms for real student content; current authorization covers only the checked-in CC0 benchmark fixtures.
+4. Improve the conservative support-decision false-refusal rate only through a new development experiment and a new untouched holdout; do not tune against the consumed Stage 2 holdout.
+5. Run the disposable-database Alembic upgrade/downgrade smoke if release policy requires downgrade proof. The active PostgreSQL database is at `0010_persist_learning_blocks (head)`.
 
 ## Known limitations and blockers
 
@@ -52,7 +55,7 @@ Phase 9 convergence is implemented: generated SectionNote retrieval is no longer
 
 ## Validation at this checkpoint
 
-- Final full backend checkpoint: `403 passed, 7 warnings`.
+- Final full backend checkpoint: `404 passed, 7 warnings`.
 - Phase 5 focused backend group: `29 passed, 7 warnings`.
 - Indexed quiz/inline Ask focused group: `8 passed, 7 warnings`.
 - Phase 6 evaluator/manifest tests: `5 passed, 7 warnings`.
@@ -69,4 +72,4 @@ Phase 9 convergence is implemented: generated SectionNote retrieval is no longer
 
 ## Recommended next action
 
-Run one fresh Satire journey that includes Ask mutation/refresh and the complete tutoring sequence, and capture a tutor-selected visual mutation before calling Phase 8 complete. Then complete the external retention/processing review before sending real student material to providers. Any attempt to reduce conservative false refusals must begin as a new one-variable development experiment with a newly reserved holdout.
+Create one bounded, source-backed prerequisite graph exercised through the production browser runtime and prove branch → targeted teaching/practice → return. Then decide whether the two-domain policy requires a separate autonomous Satire visual mutation or accepts Pendulum's tutor-directed visual proof plus Satire's grounded Ask visual proof. Before sending real student material to providers, complete the external retention/processing review. Any false-refusal experiment must use a new development set and untouched holdout.
