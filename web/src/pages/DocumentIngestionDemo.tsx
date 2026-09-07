@@ -3,6 +3,7 @@ import { api, ingestionEndpointFor, type DocumentIngestionResult, type LearningB
 import { LearningObjectRenderer } from "../learning/renderers/LearningObjectRenderer"
 import styles from "./documentIngestionDemo.module.css"
 import { GeneratedNoteRenderer } from "../learning/components/GeneratedNoteRenderer"
+import { pollProgressiveJob } from "../progressivePolling"
 
 type IngestionState =
   | { status: "idle" }
@@ -139,13 +140,11 @@ export function DocumentIngestionDemo() {
       if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
         const start = await api.startProgressiveDocument(file)
         setState({ status: "processing", filename: start.filename, sections: start.sections })
-        let poll = await api.pollProgressiveDocument(start.job_id)
-        while (poll.status === "processing") {
-          setState({ status: "processing", filename: poll.filename, sections: poll.sections })
-          await new Promise(resolve => window.setTimeout(resolve, 250))
-          poll = await api.pollProgressiveDocument(start.job_id)
-        }
-        if (!poll.result) throw new Error("Document generation failed")
+        const poll = await pollProgressiveJob(
+          () => api.pollProgressiveDocument(start.job_id),
+          { onProgress: (next) => setState({ status: "processing", filename: next.filename, sections: next.sections }) },
+        )
+        if (!poll?.result) throw new Error("Document generation failed")
         setState({ status: "success", result: poll.result })
       } else {
         setState({ status: "success", result: await api.ingestDocument(file) })

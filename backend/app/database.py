@@ -8,7 +8,14 @@ from app.config import settings
 
 DATABASE_URL = settings.database_url
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    pool_recycle=settings.database_pool_recycle_seconds,
+    pool_timeout=settings.database_pool_timeout_seconds,
+)
 
 SessionLocal = sessionmaker(autocommit=False, 
                             autoflush=False, 

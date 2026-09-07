@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote, type SourceIndexStatus } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 import { StructuredVisual } from "../learning/visuals/StructuredVisual"
+import { pollProgressiveJob } from "../progressivePolling"
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
@@ -489,8 +490,14 @@ export function Notes() {
         const start = await api.startProgressiveDocument(file, depth)
         if (run !== runRef.current) return
         setState({ status: "processing", filename: start.filename, sections: start.sections })
-        let poll = await api.pollProgressiveDocument(start.job_id)
-        while (poll.status === "processing") { if (run !== runRef.current) return; setState({ status: "processing", filename: poll.filename, sections: poll.sections }); await new Promise((resolve) => window.setTimeout(resolve, 500)); poll = await api.pollProgressiveDocument(start.job_id) }
+        const poll = await pollProgressiveJob(
+          () => api.pollProgressiveDocument(start.job_id),
+          {
+            shouldContinue: () => run === runRef.current,
+            onProgress: (next) => setState({ status: "processing", filename: next.filename, sections: next.sections }),
+          },
+        )
+        if (!poll) return
         if (!poll.result) throw new Error("Lucent could not finish this document")
         saveResult(poll.result, run)
       } else {

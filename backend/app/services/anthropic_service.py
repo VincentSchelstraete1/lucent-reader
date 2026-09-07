@@ -6,10 +6,32 @@ from pydantic import ValidationError
 
 from app.schemas.generated_note import GeneratedNote
 from app.schemas.quiz import GeneratedQuizQuestions
+from app.config import settings
 
 
-client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+client = Anthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    timeout=settings.anthropic_timeout_seconds,
+    max_retries=settings.anthropic_max_retries,
+)
 logger = logging.getLogger(__name__)
+
+# Document note and quiz generation share a deterministic, approximately
+# 12k-token input budget (using the conservative four-characters-per-token
+# estimate). Keeping both the beginning and end retains introductions,
+# conclusions, and late source sections without an unbounded prompt path.
+DOCUMENT_PROMPT_MAX_CHARS = 48_000
+DOCUMENT_PROMPT_OMISSION = "\n\n[Middle of source omitted to fit the generation context budget.]\n\n"
+
+
+def _bounded_document_content(content: str, *, max_chars: int = DOCUMENT_PROMPT_MAX_CHARS) -> str:
+    normalized = str(content or "").strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    available = max_chars - len(DOCUMENT_PROMPT_OMISSION)
+    head_chars = int(available * 0.7)
+    tail_chars = available - head_chars
+    return f"{normalized[:head_chars].rstrip()}{DOCUMENT_PROMPT_OMISSION}{normalized[-tail_chars:].lstrip()}"
 
 
 @dataclass(frozen=True)
@@ -259,6 +281,7 @@ def _run_structured_tool(
 
 
 def generate_structured_note(title: str, content: str) -> GeneratedNote:
+    bounded_content = _bounded_document_content(content)
     prompt = (
         "You are turning ingested learning material into a clear, well-organized "
         "study note - not a plain summary. Read the document below and produce:\n"
@@ -269,7 +292,7 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
         "- sections: break the material into a few logical sections, each with a short "
         "heading and a clear explanation of that part in plain language\n\n"
         f"Document title: {title}\n\n"
-        f"Document content:\n{content}"
+        f"Document content:\n{bounded_content}"
     )
 
     raw = _run_structured_tool(prompt, "generated_note", GENERATED_NOTE_SCHEMA, max_tokens=1500)
@@ -281,6 +304,7 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
 
 
 def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *, section_ids: list[str] | None = None) -> GeneratedQuizQuestions:
+    bounded_content = _bounded_document_content(content)
     section_instruction = (
         "Each source section begins with a [section:<id>] marker. Set section_id to the exact id for the section that supports the answer. "
         if section_ids else
@@ -295,7 +319,7 @@ def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *,
         "Do not invent facts, add background knowledge, or fabricate quotations. Do not write phrases such as 'the document explicitly states' unless the supplied text contains those exact words. "
         "Keep explanations to 1–2 concise sentences that explain the reasoning, not a restatement of the entire source.\n\n"
         f"Document title: {title}\n\n"
-        f"Document content:\n{content}"
+        f"Document content:\n{bounded_content}"
     )
 
     raw = _run_structured_tool(prompt, "quiz_questions", QUIZ_QUESTIONS_SCHEMA, max_tokens=2000)

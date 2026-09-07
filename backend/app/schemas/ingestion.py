@@ -341,6 +341,7 @@ class ProgressivePollResponse(BaseModel):
     status: Literal["processing", "complete", "failed"]
     sections: list[ProgressiveSectionResponse]
     result: PdfIngestionResponse | None = None
+    error: str | None = None
 
 
 class SourceIndexStatusResponse(BaseModel):

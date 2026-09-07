@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import PurePosixPath
 import json
+import logging
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
@@ -35,6 +36,7 @@ from sqlalchemy import select
 
 
 router = APIRouter(prefix="/ingestion")
+logger = logging.getLogger(__name__)
 _PROGRESSIVE_JOBS: dict[str, dict] = {}
 PDF_MEDIA_TYPES = {"application/pdf", "application/x-pdf"}
 DOCX_MEDIA_TYPES = {DOCX_MIME_TYPE}
@@ -271,23 +273,43 @@ async def ingest_pdf(
 
 async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
     job = _PROGRESSIVE_JOBS[job_id]
-    objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
-    async def on_complete(index, note, error):
-        state = job["sections"][index]
-        state["status"] = "complete" if error is None else "failed"
-        state["section_note"] = SectionNote.model_validate(note)
-        state["error"] = "Section used deterministic fallback" if error else None
-    sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
-    await generate_sections_progressively(sections, objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=job.get("depth", "balanced"))
-    result = PdfIngestionResponse.model_validate({
-        **job["base"].model_dump(by_alias=True),
-        "section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]],
-    })
-    with SessionLocal() as db:
-        result = _persist_learning_note(db, user_id=job["user_id"], response=result)
-    await run_in_threadpool(index_document, result.document_id, result.source_generation)
-    job["result"] = result
-    job["status"] = "complete"
+    try:
+        objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
+
+        async def on_complete(index, note, error):
+            state = job["sections"][index]
+            state["status"] = "complete" if error is None else "failed"
+            state["section_note"] = SectionNote.model_validate(note)
+            state["error"] = "Section used deterministic fallback" if error else None
+
+        sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
+        await generate_sections_progressively(sections, objects, on_complete, concurrency=3, use_model=getattr(semantic_generator, "model_generator", None) is not None, depth=job.get("depth", "balanced"))
+        result = PdfIngestionResponse.model_validate({
+            **job["base"].model_dump(by_alias=True),
+            "section_notes": [state["section_note"] for state in job["sections"] if state["section_note"]],
+        })
+        with SessionLocal() as db:
+            result = _persist_learning_note(db, user_id=job["user_id"], response=result)
+        await run_in_threadpool(index_document, result.document_id, result.source_generation)
+        job["result"] = result
+        job["status"] = "complete"
+        job["error"] = None
+    except Exception as exc:
+        # Do not attach the exception traceback/message: provider and parser
+        # errors can echo source fragments. The class and operation are enough
+        # to correlate this terminal job outcome without logging document text.
+        logger.error(
+            "progressive_ingestion_failed job_id=%s exception_type=%s",
+            job_id,
+            type(exc).__name__,
+        )
+        for state in job["sections"]:
+            if state["status"] in {"pending", "generating"}:
+                state["status"] = "failed"
+                state["error"] = "Document processing stopped before this section completed."
+        job["result"] = None
+        job["status"] = "failed"
+        job["error"] = "Lucent could not finish processing this document. Please try again."
 
 @router.post("/progressive", response_model=ProgressiveStartResponse, dependencies=[Depends(require_csrf)])
 async def start_progressive_pdf(
@@ -318,7 +340,7 @@ async def start_progressive_pdf(
     base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [], teaching_depth=depth)
     sections = [section for section in group_learning_blocks(blocks) if not is_low_value_section(section)]
     job_id = uuid4().hex
-    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "user_id": user.id, "depth": depth, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
+    _PROGRESSIVE_JOBS[job_id] = {"status": "processing", "filename": filename, "base": base, "result": None, "error": None, "user_id": user.id, "depth": depth, "sections": [{"id": section.id, "title": section.title, "learning_block_ids": section.learning_block_ids, "status": "pending", "section_note": None, "error": None} for section in sections]}
     for state in _PROGRESSIVE_JOBS[job_id]["sections"]: state["status"] = "generating"
     background_tasks.add_task(_run_progressive_job, job_id, extracted, blocks, decisions, semantic_generator)
     return ProgressiveStartResponse(job_id=job_id, filename=filename, sections=[ProgressiveSectionResponse(**state) for state in _PROGRESSIVE_JOBS[job_id]["sections"]])
@@ -330,7 +352,7 @@ async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_us
         raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
     if job["user_id"] != _user.id:
         raise _error(status.HTTP_404_NOT_FOUND, "job_not_found", "The ingestion job was not found")
-    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=job["result"])
+    return ProgressivePollResponse(job_id=job_id, filename=job["filename"], status=job["status"], sections=[ProgressiveSectionResponse(**state) for state in job["sections"]], result=job["result"], error=job.get("error"))
 
 
 @router.post(
