@@ -580,7 +580,9 @@ explainCardSave.addEventListener("click", async () => {
   explainCardSave.style.opacity = "0.7"
   explainCardSave.textContent = "Saving..."
   try {
-    const result = await saveNote(activeExplainTab === "summary" ? "summary" : "explanation", text)
+    const result = await saveNote(activeExplainTab === "summary" ? "summary" : "explanation", text, {
+      sourcePassage: activeExplainTab === "explain" ? explainSelectedText : undefined
+    })
     explainCardSave.textContent = result.ok ? "Saved" : "Error"
     styleSaveFeedback(explainCardSave, result.ok ? "saved" : "error")
   } catch {
@@ -1160,7 +1162,9 @@ function addParagraphControls(paragraph: HTMLElement) {
     saveBtn.style.opacity = "0.6"
     saveBtn.innerHTML = ICONS.loading
     try {
-      const result = await saveNote("simplification", text)
+      const result = await saveNote("simplification", text, {
+        sourcePassage: pristineByParagraph.get(paragraph)?.text || explainSelectedText
+      })
       saveBtn.innerHTML = result.ok ? ICONS.done : ICONS.error
       styleSaveFeedback(saveBtn, result.ok ? "saved" : "error")
     } catch {
@@ -1330,18 +1334,22 @@ async function ensureDocumentId(): Promise<number | null> {
 async function saveNote(
   contentType: SaveContentType,
   content: string,
-  options?: { title?: string; tags?: string[] }
+  options?: { title?: string; tags?: string[]; sourcePassage?: string }
 ): Promise<SaveNoteResponse> {
   const documentId = await ensureDocumentId()
+  if (!documentId) {
+    return { ok: false, error: "Could not save the source page. Nothing was saved." }
+  }
   const title = options?.title ?? (content.length > 80 ? `${content.slice(0, 80)}…` : content)
 
   const message: SaveNoteMessage = {
     type: SAVE_NOTE_MESSAGE_TYPE,
     title,
     content,
+    sourcePassage: options?.sourcePassage,
     contentType,
     sourceUrl: location.href,
-    documentId: documentId ?? undefined,
+    documentId,
     tags: options?.tags
   }
 

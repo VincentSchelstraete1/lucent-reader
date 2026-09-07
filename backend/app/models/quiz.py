@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -18,6 +19,7 @@ class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     quiz_id: Mapped[int] = mapped_column(ForeignKey("quizzes.id"))
     score: Mapped[int] = mapped_column(Integer)
     total: Mapped[int] = mapped_column(Integer)

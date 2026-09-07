@@ -34,3 +34,25 @@ def test_delete_document(client):
 
 def test_get_missing_document_404(client):
     assert client.get("/documents/999999").status_code == 404
+
+def test_reuses_document_for_repeated_website_save(client):
+    source = _make_source(client)
+    first = client.post("/documents", json={
+        "source_id": source["id"], "title": "First title", "content": "First snapshot"
+    }).json()
+    repeated = client.post("/documents", json={
+        "source_id": source["id"], "title": "Current title", "content": "Current snapshot"
+    }).json()
+    assert repeated["id"] == first["id"]
+    assert repeated["title"] == "Current title"
+    assert repeated["content"] == "Current snapshot"
+    assert len(client.get("/documents").json()) == 1
+
+def test_non_website_source_can_contain_multiple_documents(client):
+    source = client.post("/sources", json={"type": "pdf", "url": None}).json()
+    for title in ("Chapter one", "Chapter two"):
+        response = client.post("/documents", json={
+            "source_id": source["id"], "title": title, "content": title
+        })
+        assert response.status_code == 200
+    assert len(client.get("/documents").json()) == 2

@@ -32,6 +32,10 @@ import {
   type EnsureDocumentMessage,
   type EnsureDocumentResponse,
   SAVE_NOTE_MESSAGE_TYPE,
+  AUTH_STATUS_MESSAGE_TYPE,
+  AUTH_LOGIN_MESSAGE_TYPE,
+  AUTH_LOGOUT_MESSAGE_TYPE,
+  type AuthStatusResponse,
   type SaveNoteMessage,
   type SaveNoteResponse
 } from "~lib/messages"
@@ -130,6 +134,12 @@ async function getSelectionFromPage(): Promise<GetSelectionResponse | null> {
 }
 
 type QuickAction = "simplify" | "explain" | "summarize"
+type SelectionSnapshot = {
+  text: string
+  context: string
+  pageTitle: string
+  url: string
+}
 
 const QUICK_ACTION_LABELS: Record<QuickAction, string> = {
   simplify: "Simplify",
@@ -139,16 +149,19 @@ const QUICK_ACTION_LABELS: Record<QuickAction, string> = {
 
 function SidePanel() {
   const [tab, setTab] = useState<Tab>("assist")
+  const [auth, setAuth] = useState<{ loading: boolean; authenticated: boolean; displayName?: string; error?: string }>({ loading: true, authenticated: false })
 
   // Assist tab state
   const [level, setLevel] = useState(DEFAULT_GRADE_LEVEL)
   const [targetLength, setTargetLengthState] = useState<TextLength>(DEFAULT_TEXT_LENGTH)
   const [activeAction, setActiveAction] = useState<QuickAction>("simplify")
   const [resultText, setResultText] = useState("")
+  const [resultSelection, setResultSelection] = useState<SelectionSnapshot | null>(null)
   const [resultError, setResultError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [replaceStatus, setReplaceStatus] = useState<string | null>(null)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Settings tab state
   const [fontOverrideEnabled, setFontOverrideEnabledState] = useState(DEFAULT_FONT_OVERRIDE_ENABLED)
@@ -161,7 +174,18 @@ function SidePanel() {
     getTargetLength().then(setTargetLengthState)
     getFontOverrideEnabled().then(setFontOverrideEnabledState)
     getAutoActivateEnabled().then(setAutoActivateEnabledState)
+    chrome.runtime.sendMessage({ type: AUTH_STATUS_MESSAGE_TYPE }).then((response: AuthStatusResponse) => {
+      if (response.ok === false) setAuth({ loading: false, authenticated: false, error: response.error })
+      else setAuth({ loading: false, authenticated: response.authenticated, displayName: response.displayName })
+    })
   }, [])
+
+  async function handleAuth() {
+    setAuth((current) => ({ ...current, loading: true, error: undefined }))
+    const response = await chrome.runtime.sendMessage({ type: auth.authenticated ? AUTH_LOGOUT_MESSAGE_TYPE : AUTH_LOGIN_MESSAGE_TYPE }) as AuthStatusResponse
+    if (response.ok === false) setAuth({ loading: false, authenticated: false, error: response.error })
+    else setAuth({ loading: false, authenticated: response.authenticated, displayName: response.displayName })
+  }
 
   async function handleLevelChange(next: number) {
     setLevel(next)
@@ -172,13 +196,21 @@ function SidePanel() {
     setWorking(true)
     setActiveAction(action)
     setResultText("")
+    setResultSelection(null)
     setResultError(null)
     setReplaceStatus(null)
     setSaveStatus("idle")
+    setSaveError(null)
 
     const selection = await getSelectionFromPage()
     if (!selection || selection.ok === false) {
       setResultError("Highlight some text on the page first.")
+      setWorking(false)
+      return
+    }
+    const activeTab = await getActiveTab()
+    if (!activeTab?.url) {
+      setResultError("Lucent couldn't identify this page.")
       setWorking(false)
       return
     }
@@ -220,6 +252,7 @@ function SidePanel() {
         if (response.ok === false) throw new Error(response.error)
         setResultText(response.summary)
       }
+      setResultSelection({ ...selection, url: activeTab.url })
     } catch (err) {
       setResultError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
@@ -247,34 +280,45 @@ function SidePanel() {
 
   async function handleSaveToLucent() {
     setSaveStatus("saving")
-    const tab = await getActiveTab()
-    const selection = await getSelectionFromPage()
-    if (!tab?.url || !selection || selection.ok === false) {
-      setSaveStatus("error")
-      return
-    }
-
+    setSaveError(null)
     try {
+      const currentTab = await getActiveTab()
+      const currentSelection = await getSelectionFromPage()
+      const selection = resultText && resultSelection
+        ? resultSelection
+        : currentTab?.url && currentSelection?.ok
+          ? { ...currentSelection, url: currentTab.url }
+          : null
+      if (!selection) throw new Error("Highlight some text on the page first.")
+
       const ensureMessage: EnsureDocumentMessage = {
         type: ENSURE_DOCUMENT_MESSAGE_TYPE,
-        url: tab.url,
+        url: selection.url,
         title: selection.pageTitle,
         content: selection.context
       }
       const ensureResponse = (await chrome.runtime.sendMessage(ensureMessage)) as EnsureDocumentResponse
+      if (ensureResponse.ok === false) {
+        throw new Error(ensureResponse.error)
+      }
 
       const saveMessage: SaveNoteMessage = {
         type: SAVE_NOTE_MESSAGE_TYPE,
         title: selection.text.length > 80 ? `${selection.text.slice(0, 80)}…` : selection.text,
-        content: selection.text,
-        contentType: "highlight",
-        sourceUrl: tab.url,
-        documentId: ensureResponse.ok ? ensureResponse.documentId : undefined
+        content: resultText || selection.text,
+        contentType: resultText
+          ? activeAction === "explain" ? "explanation" : activeAction === "simplify" ? "simplification" : "summary"
+          : "highlight",
+        sourcePassage: resultText && activeAction !== "summarize" ? selection.text : undefined,
+        sourceUrl: selection.url,
+        documentId: ensureResponse.documentId
       }
       const saveResponse = (await chrome.runtime.sendMessage(saveMessage)) as SaveNoteResponse
-      setSaveStatus(saveResponse.ok ? "saved" : "error")
-    } catch {
+      if (saveResponse.ok === false) throw new Error(saveResponse.error)
+      setSaveStatus("saved")
+    } catch (error) {
       setSaveStatus("error")
+      setSaveError(error instanceof Error ? error.message : "Save failed. Try again.")
     }
   }
 
@@ -357,6 +401,12 @@ function SidePanel() {
         </button>
       </div>
 
+      <div style={{ margin: "10px 16px 0", padding: "8px 10px", border: `1px solid ${tokens.captionText}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 12, color: tokens.captionText }}>{auth.authenticated ? auth.displayName || "Signed in" : "Sign in to use Lucent"}</span>
+        <button onClick={handleAuth} disabled={auth.loading} style={{ ...secondaryButtonStyle, padding: "6px 10px" }}>{auth.loading ? "Checking…" : auth.authenticated ? "Sign out" : "Sign in"}</button>
+      </div>
+      {auth.error && <p role="alert" style={{ margin: "6px 16px 0", color: tokens.errorText, fontSize: 12 }}>{auth.error}</p>}
+
       <div style={{ display: "flex", padding: "12px 16px 0", gap: 8 }}>
         <TabButton label="Assist" active={tab === "assist"} onClick={() => setTab("assist")} />
         <TabButton label="Notes" active={tab === "notes"} onClick={() => setTab("notes")} />
@@ -394,6 +444,7 @@ function SidePanel() {
                 ))}
               </select>
             </div>
+            {saveError && <p style={{ fontSize: 12, color: tokens.errorText, margin: "-8px 0 12px" }}>{saveError}</p>}
 
             <div
               style={{
@@ -453,7 +504,7 @@ function SidePanel() {
                 disabled={working}
               />
               <QuickActionButton
-                label={saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Save failed" : "Save to Lucent"}
+                label={saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Save failed" : resultText ? `Save ${activeAction}` : "Save highlight"}
                 onClick={handleSaveToLucent}
                 disabled={saveStatus === "saving"}
               />
@@ -476,7 +527,7 @@ function SidePanel() {
               your Library.
             </p>
             <button
-              onClick={() => chrome.tabs.create({ url: WEB_APP_URL })}
+              onClick={() => chrome.tabs.create({ url: `${WEB_APP_URL}/app` })}
               style={{ ...primaryButtonStyle(false), width: "100%" }}>
               Open Library
             </button>

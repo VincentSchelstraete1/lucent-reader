@@ -1,0 +1,353 @@
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+from app.ingestion import RawDocument, SourceLocation
+from app.normalization import NormalizedDocument
+from app.routing import RepresentationDecision
+from app.segmentation import LearningBlock
+from app.semantic.section_notes import SectionNote
+from app.semantic.assembler import GeneratedNote
+
+
+class SourceLocationResponse(BaseModel):
+    kind: Literal["page", "slide", "document"]
+    index: int | None
+    sequence_id: str | None
+
+
+def _location(location: SourceLocation | None) -> SourceLocationResponse | None:
+    if location is None:
+        return None
+    return SourceLocationResponse(kind=location.kind, index=location.index, sequence_id=location.sequence_id)
+
+
+class RawContentBlockResponse(BaseModel):
+    id: str
+    page_number: int | None
+    type: Literal["text", "image", "table", "unknown"]
+    text: str | None
+    bbox: tuple[float, float, float, float] | None
+    reading_order: int
+    image_id: str | None
+    location: SourceLocationResponse | None
+
+
+class RawImageResponse(BaseModel):
+    id: str
+    page_number: int | None
+    bbox: tuple[float, float, float, float] | None
+    width: int | None
+    height: int | None
+    mime_type: str | None
+    caption: str | None
+    asset_reference: str
+    location: SourceLocationResponse | None
+
+
+class RawPageResponse(BaseModel):
+    page_number: int | None
+    text: str
+    blocks: list[RawContentBlockResponse]
+    extraction_errors: list[str]
+    location: SourceLocationResponse | None
+
+
+class SourceReferenceResponse(BaseModel):
+    page_start: int | None
+    page_end: int | None
+    raw_block_ids: list[str]
+    bboxes: list[tuple[float, float, float, float]]
+    locations: list[SourceLocationResponse]
+
+
+class NormalizedBlockResponse(BaseModel):
+    id: str
+    type: Literal["heading", "paragraph", "list", "table", "caption", "image", "unknown"]
+    text: str | None
+    source: SourceReferenceResponse
+    source_image_id: str | None
+
+
+class NormalizedPageResponse(BaseModel):
+    page_number: int | None
+    text: str
+    blocks: list[NormalizedBlockResponse]
+    transformation_ids: list[str]
+    suppressed_artifact_ids: list[str]
+    location: SourceLocationResponse | None
+
+
+class NormalizedImageResponse(BaseModel):
+    id: str
+    source_page: int | None
+    source_bbox: tuple[float, float, float, float] | None
+    width: int | None
+    height: int | None
+    mime_type: str | None
+    caption: str | None
+    asset_reference: str
+    source_image_ids: list[str]
+    location: SourceLocationResponse | None
+
+
+class SuppressedArtifactResponse(BaseModel):
+    id: str
+    type: Literal["header", "footer", "page_number"]
+    text: str
+    page_numbers: list[int]
+    raw_block_ids: list[str]
+
+
+class NormalizationEventResponse(BaseModel):
+    id: str
+    stage: str
+    page_number: int | None
+    raw_block_ids: list[str]
+    description: str
+    before: str | None
+    after: str | None
+
+
+class UnresolvedArtifactResponse(BaseModel):
+    id: str
+    type: str
+    page_number: int | None
+    raw_block_ids: list[str]
+    text: str
+    reason: str
+
+
+class NormalizationMetadataResponse(BaseModel):
+    version: str
+    suppressed_artifacts: list[SuppressedArtifactResponse]
+    events: list[NormalizationEventResponse]
+    unresolved_artifacts: list[UnresolvedArtifactResponse]
+    counters: dict[str, int]
+
+
+class NormalizedDocumentResponse(BaseModel):
+    source_type: str
+    filename: str
+    page_count: int
+    pages: list[NormalizedPageResponse]
+    images: list[NormalizedImageResponse]
+    normalization_metadata: NormalizationMetadataResponse
+
+    @classmethod
+    def from_normalized_document(cls, document: NormalizedDocument) -> "NormalizedDocumentResponse":
+        metadata = document.normalization_metadata
+        return cls(
+            source_type=document.source_type,
+            filename=document.filename,
+            page_count=document.page_count,
+            pages=[
+                NormalizedPageResponse(
+                    page_number=page.page_number,
+                    text=page.text,
+                    blocks=[
+                        NormalizedBlockResponse(
+                            id=block.id,
+                            type=block.type,
+                            text=block.text,
+                            source=SourceReferenceResponse(
+                                **{
+                                    **vars(block.source),
+                                    "locations": [_location(item) for item in block.source.locations],
+                                }
+                            ),
+                            source_image_id=block.source_image_id,
+                        )
+                        for block in page.blocks
+                    ],
+                    transformation_ids=page.transformation_ids,
+                    suppressed_artifact_ids=page.suppressed_artifact_ids,
+                    location=_location(page.location),
+                )
+                for page in document.pages
+            ],
+            images=[
+                NormalizedImageResponse(**{**vars(image), "location": _location(image.location)})
+                for image in document.images
+            ],
+            normalization_metadata=NormalizationMetadataResponse(
+                version=metadata.version,
+                suppressed_artifacts=[SuppressedArtifactResponse(**vars(item)) for item in metadata.suppressed_artifacts],
+                events=[NormalizationEventResponse(**vars(item)) for item in metadata.events],
+                unresolved_artifacts=[UnresolvedArtifactResponse(**vars(item)) for item in metadata.unresolved_artifacts],
+                counters=metadata.counters,
+            ),
+        )
+
+
+class RepresentationDecisionResponse(BaseModel):
+    learning_block_id: str
+    type: str
+    confidence: float | None
+    method: Literal["deterministic", "fallback_classifier"]
+    scores: dict[str, float]
+    fallback_used: bool
+
+    @classmethod
+    def from_decision(cls, decision: RepresentationDecision) -> "RepresentationDecisionResponse":
+        return cls(**vars(decision))
+
+
+class LearningBlockResponse(BaseModel):
+    id: str
+    block_type: str
+    title: str | None
+    text: str
+    character_count: int
+    normalized_block_ids: list[str]
+    source: SourceReferenceResponse
+    heading_ancestry: list[str]
+    attached_table_ids: list[str]
+    attached_image_ids: list[str]
+    token_count: int | None
+    segmentation_method: str
+    segmentation_boundary_reason: str
+    segmentation_confidence: float | None
+    representation: RepresentationDecisionResponse
+
+    @classmethod
+    def from_block(cls, block: LearningBlock, decision: RepresentationDecision) -> "LearningBlockResponse":
+        return cls(
+            id=block.id,
+            block_type=block.block_type,
+            title=block.title,
+            text=block.text,
+            character_count=block.character_count,
+            normalized_block_ids=block.normalized_block_ids,
+            source=SourceReferenceResponse(
+                **{**vars(block.source), "locations": [_location(item) for item in block.source.locations]}
+            ),
+            heading_ancestry=block.heading_ancestry,
+            attached_table_ids=block.attached_table_ids,
+            attached_image_ids=block.attached_image_ids,
+            token_count=block.token_count,
+            segmentation_method=block.segmentation.method,
+            segmentation_boundary_reason=block.segmentation.boundary_reason,
+            segmentation_confidence=block.segmentation.confidence,
+            representation=RepresentationDecisionResponse.from_decision(decision),
+        )
+
+
+class PdfIngestionResponse(BaseModel):
+    """Shared ingestion response shape for every supported format (PDF/DOCX/PPTX) -
+    the name is legacy from when only PDF was supported. New callers should use
+    the format-neutral `DocumentIngestionResponse` alias below.
+    """
+
+    status: Literal["success"]
+    filename: str
+    source_type: Literal["pdf", "docx", "pptx"]
+    page_count: int
+    markdown: str
+    extracted_character_count: int
+    pages: list[RawPageResponse]
+    images: list[RawImageResponse]
+    extraction_metadata: dict[str, str | int | bool | None]
+    normalized: NormalizedDocumentResponse
+    # Empty for from_documents() (raw + normalized only, e.g. the plain
+    # ingestion endpoints); populated by from_pipeline() for the end-to-end
+    # dev inspector, which also runs segmentation and routing.
+    learning_blocks: list[LearningBlockResponse] = []
+    generated_note: GeneratedNote | None = None
+    section_notes: list[SectionNote] = []
+    # Existing library records created for the completed learning note. These
+    # make ingestion output reusable by the product Notes/quiz loop without
+    # coupling the semantic pipeline to a second storage model.
+    source_id: int | None = None
+    document_id: int | None = None
+    note_id: int | None = None
+    source_generation: UUID | None = None
+    source_index_status: Literal["PENDING", "INDEXING", "READY", "FAILED"] | None = None
+    teaching_depth: Literal["concise", "balanced", "detailed"] = Field(default="balanced", alias="teachingDepth")
+
+    @classmethod
+    def from_documents(cls, document: RawDocument, normalized: NormalizedDocument) -> "PdfIngestionResponse":
+        return cls(
+            status="success",
+            filename=document.filename,
+            source_type=document.source_type,
+            page_count=document.page_count,
+            markdown=document.markdown,
+            extracted_character_count=len(document.markdown),
+            pages=[
+                RawPageResponse(
+                    page_number=page.page_number,
+                    text=page.text,
+                    blocks=[
+                        RawContentBlockResponse(**{**vars(block), "location": _location(block.location)})
+                        for block in page.blocks
+                    ],
+                    extraction_errors=page.extraction_errors,
+                    location=_location(page.location),
+                )
+                for page in document.pages
+            ],
+            images=[
+                RawImageResponse(**{**vars(image), "location": _location(image.location)})
+                for image in document.images
+            ],
+            extraction_metadata=document.extraction_metadata,
+            normalized=NormalizedDocumentResponse.from_normalized_document(normalized),
+        )
+
+    @classmethod
+    def from_pipeline(
+        cls,
+        document: RawDocument,
+        normalized: NormalizedDocument,
+        learning_blocks: list[LearningBlock],
+        decisions: dict[str, RepresentationDecision],
+        generated_note: GeneratedNote | None = None,
+        section_notes: list[SectionNote] | None = None,
+        teaching_depth: Literal["concise", "balanced", "detailed"] = "balanced",
+    ) -> "PdfIngestionResponse":
+        response = cls.from_documents(document, normalized)
+        return response.model_copy(
+            update={
+                "learning_blocks": [
+                    LearningBlockResponse.from_block(block, decisions[block.id]) for block in learning_blocks
+                ],
+                "generated_note": generated_note,
+                "section_notes": section_notes or [],
+                "teaching_depth": teaching_depth,
+            }
+        )
+
+
+DocumentIngestionResponse = PdfIngestionResponse
+
+class ProgressiveSectionResponse(BaseModel):
+    id: str
+    title: str | None
+    learning_block_ids: list[str]
+    status: Literal["pending", "generating", "complete", "failed"]
+    section_note: SectionNote | None = None
+    error: str | None = None
+
+class ProgressiveStartResponse(BaseModel):
+    job_id: str
+    filename: str
+    sections: list[ProgressiveSectionResponse]
+
+class ProgressivePollResponse(BaseModel):
+    job_id: str
+    filename: str
+    status: Literal["processing", "complete", "failed"]
+    sections: list[ProgressiveSectionResponse]
+    result: PdfIngestionResponse | None = None
+
+
+class SourceIndexStatusResponse(BaseModel):
+    document_id: int
+    generation_id: UUID | None = None
+    status: Literal["NOT_INDEXED", "PENDING", "INDEXING", "READY", "FAILED"]
+    block_count: int
+    embedded_count: int
+    coverage_warnings: list[str] = Field(default_factory=list)
+    retryable: bool

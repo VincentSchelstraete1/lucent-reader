@@ -1,0 +1,968 @@
+[
+  {
+    "id": "process-01",
+    "expected": "process",
+    "text": "First the operating system loads the program into memory. Next it initializes the process, and finally it transfers control to the entry point.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "process-02",
+    "expected": "process",
+    "text": "1. Copy the DNA segment.\n2. Separate the strands.\n3. Extend each strand with complementary nucleotides.",
+    "subject": "biology",
+    "style": "list"
+  },
+  {
+    "id": "process-03",
+    "expected": "process",
+    "text": "A star forms when a cloud collapses. After the core heats, fusion begins; afterward radiation pressure stabilizes the star.",
+    "subject": "physics",
+    "style": "paragraph"
+  },
+  {
+    "id": "process-04",
+    "expected": "process",
+    "text": "Differentiate the function, substitute the boundary value, then solve for the integration constant.",
+    "subject": "mathematics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "process-05",
+    "expected": "process",
+    "text": "Households first reduce discretionary spending. Firms then cut production, and finally unemployment rises.",
+    "subject": "economics",
+    "style": "paragraph"
+  },
+  {
+    "id": "process-06",
+    "expected": "process",
+    "text": "The bill passed the lower chamber → moved to the senate → received executive approval.",
+    "subject": "history",
+    "style": "highlight"
+  },
+  {
+    "id": "process-07",
+    "expected": "process",
+    "text": "Encoding is followed by storage, which is followed by retrieval when the memory is needed.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "process-08",
+    "expected": "process",
+    "text": "Before the CPU executes an instruction, it fetches and decodes it. Once decoding is complete, execution begins.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "process-09",
+    "expected": "process",
+    "text": "Step 1: establish a baseline\nStep 2: apply the treatment\nStep 3: measure the response",
+    "subject": "biology",
+    "style": "list"
+  },
+  {
+    "id": "process-10",
+    "expected": "process",
+    "text": "The process begins with observation and ends after the hypothesis has been tested against evidence.",
+    "subject": "physics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "process-11",
+    "expected": "process",
+    "text": "Start with the recurrence relation. Subsequently expand two terms, collect like factors, and report the closed form.",
+    "subject": "mathematics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "process-12",
+    "expected": "process",
+    "text": "During mitosis, chromosomes condense, align at the equator, separate toward opposite poles, and the cell divides.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "process-13",
+    "expected": "process",
+    "text": "An action potential rises as sodium channels open. It peaks, repolarizes as potassium exits, and returns to resting potential.",
+    "subject": "biology",
+    "style": "paragraph"
+  },
+  {
+    "id": "process-14",
+    "expected": "process",
+    "text": "To train the model: shuffle the observations; divide them into batches; update the parameters for each batch; repeat until convergence.",
+    "subject": "computer_science",
+    "style": "lecture_note"
+  },
+  {
+    "id": "process-15",
+    "expected": "process",
+    "text": "The historian gathers primary sources, checks their provenance, places them in context, and constructs an interpretation.",
+    "subject": "history",
+    "style": "textbook"
+  },
+  {
+    "id": "process-16",
+    "expected": "process",
+    "text": "Registration, sensory storage, short-term maintenance, and long-term consolidation describe the path of remembered information.",
+    "subject": "psychology",
+    "style": "highlight"
+  },
+  {
+    "id": "comparison-01",
+    "expected": "comparison",
+    "text": "A direct-mapped cache permits one location per block, whereas a four-way cache permits four possible locations.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "comparison-02",
+    "expected": "comparison",
+    "text": "Unlike prokaryotic cells, eukaryotic cells enclose their DNA inside a nucleus.",
+    "subject": "biology",
+    "style": "highlight"
+  },
+  {
+    "id": "comparison-03",
+    "expected": "comparison",
+    "text": "Mass is invariant, while weight changes with the local gravitational field.",
+    "subject": "physics",
+    "style": "definition"
+  },
+  {
+    "id": "comparison-04",
+    "expected": "comparison",
+    "text": "Both permutations and combinations count selections, but only permutations treat order as significant.",
+    "subject": "mathematics",
+    "style": "textbook"
+  },
+  {
+    "id": "comparison-05",
+    "expected": "comparison",
+    "text": "Compared with a monopoly, perfect competition has more sellers and less pricing power.",
+    "subject": "economics",
+    "style": "paragraph"
+  },
+  {
+    "id": "comparison-06",
+    "expected": "comparison",
+    "text": "The northern colonies developed around commerce; the southern colonies relied more heavily on plantation agriculture.",
+    "subject": "history",
+    "style": "textbook"
+  },
+  {
+    "id": "comparison-07",
+    "expected": "comparison",
+    "text": "Working memory has lower capacity than long-term memory but provides faster access to active information.",
+    "subject": "psychology",
+    "style": "paragraph"
+  },
+  {
+    "id": "comparison-08",
+    "expected": "comparison",
+    "text": "TCP emphasizes reliable ordered delivery. UDP favors low overhead and tolerates missing packets.",
+    "subject": "computer_science",
+    "style": "lecture_note"
+  },
+  {
+    "id": "comparison-09",
+    "expected": "comparison",
+    "text": "Mitosis: two genetically similar cells. Meiosis: four genetically varied cells.",
+    "subject": "biology",
+    "style": "lecture_note"
+  },
+  {
+    "id": "comparison-10",
+    "expected": "comparison",
+    "text": "Series circuits share current across components; parallel circuits instead share voltage across branches.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "comparison-11",
+    "expected": "comparison",
+    "text": "The median resists extreme values better than the mean.",
+    "subject": "mathematics",
+    "style": "highlight"
+  },
+  {
+    "id": "comparison-12",
+    "expected": "comparison",
+    "text": "Expansionary fiscal policy increases public spending, in contrast to contractionary policy, which reduces it.",
+    "subject": "economics",
+    "style": "textbook"
+  },
+  {
+    "id": "comparison-13",
+    "expected": "comparison",
+    "text": "Classical conditioning links two stimuli, while operant conditioning links behavior with consequences.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "comparison-14",
+    "expected": "comparison",
+    "text": "Primary sources provide direct contemporary evidence. Secondary sources interpret that evidence later.",
+    "subject": "history",
+    "style": "lecture_note"
+  },
+  {
+    "id": "comparison-15",
+    "expected": "comparison",
+    "text": "Binary search needs sorted input and grows logarithmically; linear search accepts unsorted input and grows linearly.",
+    "subject": "computer_science",
+    "style": "paragraph"
+  },
+  {
+    "id": "comparison-16",
+    "expected": "comparison",
+    "text": "Similarities include membrane-bound organelles and DNA; differences include cell walls, chloroplasts, and vacuole size.",
+    "subject": "biology",
+    "style": "lecture_note"
+  },
+  {
+    "id": "causal-01",
+    "expected": "causal",
+    "text": "A buffer overflow overwrites adjacent memory, causing the program to crash or transfer control unexpectedly.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-02",
+    "expected": "causal",
+    "text": "Smoking damages lung tissue, which leads to reduced lung function.",
+    "subject": "biology",
+    "style": "paragraph"
+  },
+  {
+    "id": "causal-03",
+    "expected": "causal",
+    "text": "Because the net force is nonzero, the object accelerates in the direction of that force.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-04",
+    "expected": "causal",
+    "text": "Multiplying both sides by a negative number reverses the inequality sign.",
+    "subject": "mathematics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "causal-05",
+    "expected": "causal",
+    "text": "Demand increased while supply stayed fixed, so the market price rose.",
+    "subject": "economics",
+    "style": "paragraph"
+  },
+  {
+    "id": "causal-06",
+    "expected": "causal",
+    "text": "Crop failures intensified food shortages; consequently, bread prices climbed and public unrest spread.",
+    "subject": "history",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-07",
+    "expected": "causal",
+    "text": "Repeated retrieval strengthens access to a memory, making later recall more likely.",
+    "subject": "psychology",
+    "style": "paragraph"
+  },
+  {
+    "id": "causal-08",
+    "expected": "causal",
+    "text": "Packet loss triggers retransmission and therefore increases latency.",
+    "subject": "computer_science",
+    "style": "highlight"
+  },
+  {
+    "id": "causal-09",
+    "expected": "causal",
+    "text": "The antibiotic kills susceptible bacteria. Resistant individuals survive and leave more offspring, producing a resistant population.",
+    "subject": "biology",
+    "style": "paragraph"
+  },
+  {
+    "id": "causal-10",
+    "expected": "causal",
+    "text": "Heating the gas raises molecular speed. The more frequent wall collisions create greater pressure.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-11",
+    "expected": "causal",
+    "text": "An increase in the interest rate discourages borrowing and results in lower investment spending.",
+    "subject": "economics",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-12",
+    "expected": "causal",
+    "text": "The printing press lowered the cost of reproducing texts, enabling ideas to circulate more widely.",
+    "subject": "history",
+    "style": "paragraph"
+  },
+  {
+    "id": "causal-13",
+    "expected": "causal",
+    "text": "Sleep deprivation impairs attention because neural systems have insufficient time to recover.",
+    "subject": "psychology",
+    "style": "textbook"
+  },
+  {
+    "id": "causal-14",
+    "expected": "causal",
+    "text": "Removing the base case makes the recursive function call itself indefinitely.",
+    "subject": "computer_science",
+    "style": "highlight"
+  },
+  {
+    "id": "causal-15",
+    "expected": "causal",
+    "text": "Water enters the guard cells, so they swell and the stomatal pore opens.",
+    "subject": "biology",
+    "style": "lecture_note"
+  },
+  {
+    "id": "causal-16",
+    "expected": "causal",
+    "text": "A larger sample reduces sampling variability; as a result, the estimate is usually more precise.",
+    "subject": "mathematics",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-01",
+    "expected": "concept_map",
+    "text": "An operating system coordinates processes, memory, files, and devices; scheduling connects process demand with processor time.",
+    "subject": "computer_science",
+    "style": "paragraph"
+  },
+  {
+    "id": "concept_map-02",
+    "expected": "concept_map",
+    "text": "Photosynthesis involves chlorophyll, sunlight, carbon dioxide, water, glucose, and oxygen, all linked through energy conversion.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-03",
+    "expected": "concept_map",
+    "text": "Electric fields interact with charges, while voltage relates potential energy to charge and connects to current through resistance.",
+    "subject": "physics",
+    "style": "paragraph"
+  },
+  {
+    "id": "concept_map-04",
+    "expected": "concept_map",
+    "text": "A derivative links slope, rate of change, tangent lines, and local approximation.",
+    "subject": "mathematics",
+    "style": "definition"
+  },
+  {
+    "id": "concept_map-05",
+    "expected": "concept_map",
+    "text": "Inflation is associated with purchasing power, interest rates, wages, and expectations, and each relationship influences the others.",
+    "subject": "economics",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-06",
+    "expected": "concept_map",
+    "text": "Industrialization connected urbanization, factory labor, transportation, capital, and changing family life.",
+    "subject": "history",
+    "style": "paragraph"
+  },
+  {
+    "id": "concept_map-07",
+    "expected": "concept_map",
+    "text": "Attention interacts with perception and working memory, while executive control coordinates these systems around a goal.",
+    "subject": "psychology",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-08",
+    "expected": "concept_map",
+    "text": "Authentication depends on identity, credentials, sessions, and authorization; these concepts are related but perform distinct roles.",
+    "subject": "computer_science",
+    "style": "lecture_note"
+  },
+  {
+    "id": "concept_map-09",
+    "expected": "concept_map",
+    "text": "The immune response links antigens to antibodies, B cells, T cells, and memory cells through signaling pathways.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-10",
+    "expected": "concept_map",
+    "text": "Momentum connects mass and velocity and is related to impulse through change over time.",
+    "subject": "physics",
+    "style": "definition"
+  },
+  {
+    "id": "concept_map-11",
+    "expected": "concept_map",
+    "text": "Functions, limits, continuity, and derivatives form an interconnected foundation for calculus.",
+    "subject": "mathematics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "concept_map-12",
+    "expected": "concept_map",
+    "text": "Markets bring together buyers, sellers, prices, information, and incentives.",
+    "subject": "economics",
+    "style": "definition"
+  },
+  {
+    "id": "concept_map-13",
+    "expected": "concept_map",
+    "text": "The Cold War involved ideology, nuclear deterrence, proxy conflicts, alliances, and economic competition.",
+    "subject": "history",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-14",
+    "expected": "concept_map",
+    "text": "A schema organizes concepts and is associated with expectations, memory retrieval, and interpretation.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "concept_map-15",
+    "expected": "concept_map",
+    "text": "In a graph, vertices connect through edges; paths, cycles, and components describe relationships across the network.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "concept_map-16",
+    "expected": "concept_map",
+    "text": "Homeostasis emerges from receptors, control centers, effectors, feedback, and changing internal conditions working together.",
+    "subject": "biology",
+    "style": "paragraph"
+  },
+  {
+    "id": "hierarchy-01",
+    "expected": "hierarchy",
+    "text": "Computer memory consists of registers, cache, main memory, and secondary storage.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "hierarchy-02",
+    "expected": "hierarchy",
+    "text": "Animals are divided into vertebrates and invertebrates; vertebrates include mammals, birds, reptiles, amphibians, and fish.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "hierarchy-03",
+    "expected": "hierarchy",
+    "text": "The electromagnetic spectrum contains radio waves, microwaves, infrared, visible light, ultraviolet, X-rays, and gamma rays.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "hierarchy-04",
+    "expected": "hierarchy",
+    "text": "Numbers can be classified as natural, integer, rational, irrational, real, or complex.",
+    "subject": "mathematics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "hierarchy-05",
+    "expected": "hierarchy",
+    "text": "There are three broad market structures: competitive markets, oligopolies, and monopolies.",
+    "subject": "economics",
+    "style": "textbook"
+  },
+  {
+    "id": "hierarchy-06",
+    "expected": "hierarchy",
+    "text": "The estate system placed clergy in the First Estate, nobility in the Second, and commoners in the Third.",
+    "subject": "history",
+    "style": "paragraph"
+  },
+  {
+    "id": "hierarchy-07",
+    "expected": "hierarchy",
+    "text": "Long-term memory has two main divisions: explicit memory and implicit memory.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "hierarchy-08",
+    "expected": "hierarchy",
+    "text": "Network protocols occupy layers: application, transport, internet, and link.",
+    "subject": "computer_science",
+    "style": "lecture_note"
+  },
+  {
+    "id": "hierarchy-09",
+    "expected": "hierarchy",
+    "text": "Cellular organization:\n- tissue\n  - epithelial\n  - connective\n- organ\n- organ system",
+    "subject": "biology",
+    "style": "list"
+  },
+  {
+    "id": "hierarchy-10",
+    "expected": "hierarchy",
+    "text": "Matter is composed of atoms; atoms contain a nucleus and electrons; the nucleus contains protons and neutrons.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "hierarchy-11",
+    "expected": "hierarchy",
+    "text": "Quadrilaterals include parallelograms, trapezoids, and kites. Parallelograms include rectangles, rhombi, and squares.",
+    "subject": "mathematics",
+    "style": "paragraph"
+  },
+  {
+    "id": "hierarchy-12",
+    "expected": "hierarchy",
+    "text": "Government spending includes defense, infrastructure, education, health, and transfers.",
+    "subject": "economics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "hierarchy-13",
+    "expected": "hierarchy",
+    "text": "Sources:\n- primary\n- secondary\n- tertiary",
+    "subject": "history",
+    "style": "list"
+  },
+  {
+    "id": "hierarchy-14",
+    "expected": "hierarchy",
+    "text": "Motivation theories fall into biological, behavioral, cognitive, and humanistic categories.",
+    "subject": "psychology",
+    "style": "lecture_note"
+  },
+  {
+    "id": "hierarchy-15",
+    "expected": "hierarchy",
+    "text": "A compiler pipeline has major components: lexer, parser, semantic analyzer, optimizer, and code generator.",
+    "subject": "computer_science",
+    "style": "definition"
+  },
+  {
+    "id": "hierarchy-16",
+    "expected": "hierarchy",
+    "text": "The nervous system comprises the central and peripheral systems, with the peripheral system branching into somatic and autonomic divisions.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "quantitative-01",
+    "expected": "quantitative",
+    "text": "Average memory access time = hit time + miss rate × miss penalty.",
+    "subject": "computer_science",
+    "style": "equation"
+  },
+  {
+    "id": "quantitative-02",
+    "expected": "quantitative",
+    "text": "Population growth rate equals births minus deaths, divided by the starting population.",
+    "subject": "biology",
+    "style": "definition"
+  },
+  {
+    "id": "quantitative-03",
+    "expected": "quantitative",
+    "text": "Velocity is distance divided by time.",
+    "subject": "physics",
+    "style": "definition"
+  },
+  {
+    "id": "quantitative-04",
+    "expected": "quantitative",
+    "text": "For a circle, A = πr², so doubling r multiplies the area by four.",
+    "subject": "mathematics",
+    "style": "equation"
+  },
+  {
+    "id": "quantitative-05",
+    "expected": "quantitative",
+    "text": "Real interest rate ≈ nominal interest rate − inflation rate.",
+    "subject": "economics",
+    "style": "equation"
+  },
+  {
+    "id": "quantitative-06",
+    "expected": "quantitative",
+    "text": "The urban population grew from 2 million to 5 million, a 150% increase.",
+    "subject": "history",
+    "style": "paragraph"
+  },
+  {
+    "id": "quantitative-07",
+    "expected": "quantitative",
+    "text": "A z-score is the observation minus the mean, divided by the standard deviation.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "quantitative-08",
+    "expected": "quantitative",
+    "text": "The algorithm performs n(n − 1) / 2 comparisons.",
+    "subject": "computer_science",
+    "style": "equation"
+  },
+  {
+    "id": "quantitative-09",
+    "expected": "quantitative",
+    "text": "Heart rate was 72 beats per minute before exercise and 128 beats per minute afterward.",
+    "subject": "biology",
+    "style": "paragraph"
+  },
+  {
+    "id": "quantitative-10",
+    "expected": "quantitative",
+    "text": "Kinetic energy equals one half times mass times velocity squared.",
+    "subject": "physics",
+    "style": "definition"
+  },
+  {
+    "id": "quantitative-11",
+    "expected": "quantitative",
+    "text": "The slope between (2, 3) and (6, 11) is (11 − 3) / (6 − 2) = 2.",
+    "subject": "mathematics",
+    "style": "equation"
+  },
+  {
+    "id": "quantitative-12",
+    "expected": "quantitative",
+    "text": "If price rises by 10% and quantity demanded falls by 20%, elasticity has magnitude 2.",
+    "subject": "economics",
+    "style": "paragraph"
+  },
+  {
+    "id": "quantitative-13",
+    "expected": "quantitative",
+    "text": "The army expanded from 40,000 soldiers in 1800 to 75,000 in 1810.",
+    "subject": "history",
+    "style": "paragraph"
+  },
+  {
+    "id": "quantitative-14",
+    "expected": "quantitative",
+    "text": "Participants recalled 18 of 24 words, giving an accuracy of 75%.",
+    "subject": "psychology",
+    "style": "paragraph"
+  },
+  {
+    "id": "quantitative-15",
+    "expected": "quantitative",
+    "text": "Throughput is completed requests per second; 600 requests over 20 seconds gives 30 requests per second.",
+    "subject": "computer_science",
+    "style": "definition"
+  },
+  {
+    "id": "quantitative-16",
+    "expected": "quantitative",
+    "text": "The probability of two independent events is P(A and B) = P(A) × P(B).",
+    "subject": "mathematics",
+    "style": "equation"
+  },
+  {
+    "id": "plain_text-01",
+    "expected": "plain_text",
+    "text": "Cache memory is a small, fast memory located close to the processor.",
+    "subject": "computer_science",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-02",
+    "expected": "plain_text",
+    "text": "The hippocampus is a curved structure in the medial temporal lobe.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-03",
+    "expected": "plain_text",
+    "text": "Chlorophyll is the green pigment found in plant chloroplasts.",
+    "subject": "biology",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-04",
+    "expected": "plain_text",
+    "text": "Inertia describes an object's resistance to changes in motion.",
+    "subject": "physics",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-05",
+    "expected": "plain_text",
+    "text": "A prime number has exactly two positive divisors.",
+    "subject": "mathematics",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-06",
+    "expected": "plain_text",
+    "text": "Scarcity means that available resources cannot satisfy every possible want.",
+    "subject": "economics",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-07",
+    "expected": "plain_text",
+    "text": "The Renaissance was a period of cultural activity in Europe.",
+    "subject": "history",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-08",
+    "expected": "plain_text",
+    "text": "A pointer stores the address of another location in memory.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "plain_text-09",
+    "expected": "plain_text",
+    "text": "Mitochondria have an inner membrane folded into structures called cristae.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "plain_text-10",
+    "expected": "plain_text",
+    "text": "Light behaves as electromagnetic radiation.",
+    "subject": "physics",
+    "style": "highlight"
+  },
+  {
+    "id": "plain_text-11",
+    "expected": "plain_text",
+    "text": "An axiom is a statement accepted without proof.",
+    "subject": "mathematics",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-12",
+    "expected": "plain_text",
+    "text": "Opportunity cost is the value of the best alternative forgone.",
+    "subject": "economics",
+    "style": "definition"
+  },
+  {
+    "id": "plain_text-13",
+    "expected": "plain_text",
+    "text": "The treaty was signed in Paris in 1783.",
+    "subject": "history",
+    "style": "highlight"
+  },
+  {
+    "id": "plain_text-14",
+    "expected": "plain_text",
+    "text": "The amygdala participates in emotional processing.",
+    "subject": "psychology",
+    "style": "highlight"
+  },
+  {
+    "id": "plain_text-15",
+    "expected": "plain_text",
+    "text": "Python uses indentation to delimit blocks of code.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "plain_text-16",
+    "expected": "plain_text",
+    "text": "Most neurons have a cell body, dendrites, and an axon.",
+    "subject": "psychology",
+    "style": "textbook"
+  },
+  {
+    "id": "ambiguous-process-1",
+    "expected": "process",
+    "acceptableTypes": [
+      "process",
+      "causal"
+    ],
+    "ambiguityNote": "A causal chain is also narrated as a sequence.",
+    "ambiguous": true,
+    "text": "A cache miss occurs, so the processor accesses memory, then waits for the block before resuming execution.",
+    "subject": "computer_science",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-process-2",
+    "expected": "process",
+    "acceptableTypes": [
+      "process",
+      "comparison"
+    ],
+    "ambiguityNote": "The contrast is expressed through ordered behavior.",
+    "ambiguous": true,
+    "text": "Unlike main memory, cache first checks its tags and then returns the matching block.",
+    "subject": "computer_science",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-comparison-1",
+    "expected": "comparison",
+    "acceptableTypes": [
+      "comparison",
+      "quantitative"
+    ],
+    "ambiguityNote": "The main point is a numeric comparison.",
+    "ambiguous": true,
+    "text": "Method A solves 80% of cases in 2 seconds, whereas method B solves 95% in 5 seconds.",
+    "subject": "mathematics",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-comparison-2",
+    "expected": "comparison",
+    "acceptableTypes": [
+      "comparison",
+      "hierarchy"
+    ],
+    "ambiguityNote": "Two categories are contrasted after being named.",
+    "ambiguous": true,
+    "text": "Memory has volatile and nonvolatile forms: volatile memory loses data, while nonvolatile memory retains it.",
+    "subject": "computer_science",
+    "style": "textbook"
+  },
+  {
+    "id": "ambiguous-causal-1",
+    "expected": "causal",
+    "acceptableTypes": [
+      "causal",
+      "concept_map"
+    ],
+    "ambiguityNote": "A concept relationship is explicitly causal.",
+    "ambiguous": true,
+    "text": "Stress is connected to sleep because elevated arousal delays sleep onset.",
+    "subject": "psychology",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-causal-2",
+    "expected": "causal",
+    "acceptableTypes": [
+      "causal",
+      "quantitative"
+    ],
+    "ambiguityNote": "An equation and its causal interpretation are equally useful.",
+    "ambiguous": true,
+    "text": "Since F = ma, increasing force while mass stays fixed produces greater acceleration.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "ambiguous-concept_map-1",
+    "expected": "concept_map",
+    "acceptableTypes": [
+      "concept_map",
+      "hierarchy"
+    ],
+    "ambiguityNote": "A system of parts also forms a relationship network.",
+    "ambiguous": true,
+    "text": "An ecosystem contains producers, consumers, and decomposers linked by flows of matter and energy.",
+    "subject": "biology",
+    "style": "textbook"
+  },
+  {
+    "id": "ambiguous-concept_map-2",
+    "expected": "concept_map",
+    "acceptableTypes": [
+      "concept_map",
+      "plain_text"
+    ],
+    "ambiguityNote": "This short definition states one meaningful relation but may not warrant a map.",
+    "ambiguous": true,
+    "text": "Syntax is related to sentence structure.",
+    "subject": "psychology",
+    "style": "definition"
+  },
+  {
+    "id": "ambiguous-hierarchy-1",
+    "expected": "hierarchy",
+    "acceptableTypes": [
+      "hierarchy",
+      "quantitative"
+    ],
+    "ambiguityNote": "Categories are distinguished primarily by numeric ranges.",
+    "ambiguous": true,
+    "text": "Earthquakes are grouped as minor below magnitude 4, moderate from 4 to 6, and major above 6.",
+    "subject": "physics",
+    "style": "textbook"
+  },
+  {
+    "id": "ambiguous-hierarchy-2",
+    "expected": "hierarchy",
+    "acceptableTypes": [
+      "hierarchy",
+      "concept_map"
+    ],
+    "ambiguityNote": "Nested concepts and cross-links both matter.",
+    "ambiguous": true,
+    "text": "Memory includes sensory, working, and long-term systems, and attention connects sensory input with working memory.",
+    "subject": "psychology",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-quantitative-1",
+    "expected": "quantitative",
+    "acceptableTypes": [
+      "quantitative",
+      "causal"
+    ],
+    "ambiguityNote": "Quantities express a causal economic response.",
+    "ambiguous": true,
+    "text": "A 1% rise in interest rates leads to a 3% fall in investment in this model.",
+    "subject": "economics",
+    "style": "paragraph"
+  },
+  {
+    "id": "ambiguous-quantitative-2",
+    "expected": "quantitative",
+    "acceptableTypes": [
+      "quantitative",
+      "process"
+    ],
+    "ambiguityNote": "Measurements are embedded in an experimental sequence.",
+    "ambiguous": true,
+    "text": "First heat the sample to 80 °C, then cool it to 20 °C over 5 minutes.",
+    "subject": "physics",
+    "style": "lecture_note"
+  },
+  {
+    "id": "ambiguous-plain_text-1",
+    "expected": "plain_text",
+    "acceptableTypes": [
+      "plain_text",
+      "hierarchy"
+    ],
+    "ambiguityNote": "A definition names several anatomical parts without explaining a taxonomy.",
+    "ambiguous": true,
+    "text": "A neuron has a soma, dendrites, and an axon.",
+    "subject": "biology",
+    "style": "definition"
+  },
+  {
+    "id": "ambiguous-plain_text-2",
+    "expected": "plain_text",
+    "acceptableTypes": [
+      "plain_text",
+      "quantitative"
+    ],
+    "ambiguityNote": "A date is factual context rather than a numeric relationship.",
+    "ambiguous": true,
+    "text": "The constitution took effect in 1789.",
+    "subject": "history",
+    "style": "highlight"
+  }
+]

@@ -1,4 +1,6 @@
 import os
+import logging
+from dataclasses import dataclass
 from anthropic import Anthropic
 from pydantic import ValidationError
 
@@ -7,6 +9,28 @@ from app.schemas.quiz import GeneratedQuizQuestions
 
 
 client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StructuredToolResult:
+    data: dict
+    model: str
+    stop_reason: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+
+
+class StructuredToolTruncatedError(ValueError):
+    """Raised when a structured tool response exhausts its output budget."""
+
+    def __init__(self, *, input_tokens: int | None, output_tokens: int | None, max_tokens: int, top_level_keys: list[str] | None = None):
+        super().__init__("Structured tool output was truncated at max_tokens")
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.max_tokens = max_tokens
+        self.stop_reason = "max_tokens"
+        self.top_level_keys = top_level_keys or []
 
 
 LENGTH_INSTRUCTIONS = {
@@ -164,9 +188,10 @@ QUIZ_QUESTIONS_SCHEMA = {
                     "question": {"type": "string"},
                     "choices": {"type": "array", "items": {"type": "string"}},
                     "correct_index": {"type": "integer"},
-                    "explanation": {"type": "string"}
+                    "explanation": {"type": "string"},
+                    "section_id": {"type": ["string", "null"]}
                 },
-                "required": ["question", "choices", "correct_index", "explanation"]
+                "required": ["question", "choices", "correct_index", "explanation", "section_id"]
             }
         }
     },
@@ -174,8 +199,17 @@ QUIZ_QUESTIONS_SCHEMA = {
 }
 
 
-def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: int) -> dict:
-    message = client.messages.create(
+def _run_structured_tool(
+    prompt: str,
+    tool_name: str,
+    schema: dict,
+    max_tokens: int,
+    timeout: float | None = None,
+    max_retries: int | None = None,
+    include_metadata: bool = False,
+) -> dict | StructuredToolResult:
+    request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
+    message = request_client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=max_tokens,
         tools=[
@@ -186,12 +220,40 @@ def _run_structured_tool(prompt: str, tool_name: str, schema: dict, max_tokens: 
             }
         ],
         tool_choice={"type": "tool", "name": tool_name},
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        **({"timeout": timeout} if timeout is not None else {})
     )
 
-    for block in message.content:
-        if block.type == "tool_use":
-            return block.input
+    usage = getattr(message, "usage", None)
+    logger.info(
+        "structured_generation_response tool=%s model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
+        tool_name,
+        getattr(message, "model", "unknown"),
+        getattr(message, "stop_reason", "unknown"),
+        getattr(usage, "input_tokens", "unknown"),
+        getattr(usage, "output_tokens", "unknown"),
+        max_tokens,
+    )
+
+    tool_input = next((block.input for block in message.content if block.type == "tool_use"), None)
+    if getattr(message, "stop_reason", None) == "max_tokens":
+        raise StructuredToolTruncatedError(
+            input_tokens=getattr(usage, "input_tokens", None),
+            output_tokens=getattr(usage, "output_tokens", None),
+            max_tokens=max_tokens,
+            top_level_keys=sorted(tool_input) if isinstance(tool_input, dict) else [],
+        )
+
+    if isinstance(tool_input, dict):
+        if include_metadata:
+            return StructuredToolResult(
+                data=tool_input,
+                model=getattr(message, "model", "unknown"),
+                stop_reason=getattr(message, "stop_reason", None),
+                input_tokens=getattr(usage, "input_tokens", None),
+                output_tokens=getattr(usage, "output_tokens", None),
+            )
+        return tool_input
 
     raise ValueError("Model did not return structured tool output")
 
@@ -218,12 +280,20 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
         raise ValueError(f"Model returned an invalid structured note: {e}") from e
 
 
-def generate_quiz_questions(title: str, content: str, num_questions: int = 5) -> GeneratedQuizQuestions:
+def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *, section_ids: list[str] | None = None) -> GeneratedQuizQuestions:
+    section_instruction = (
+        "Each source section begins with a [section:<id>] marker. Set section_id to the exact id for the section that supports the answer. "
+        if section_ids else
+        "Set section_id to null because no note-section markers are available. "
+    )
     prompt = (
         f"Write {num_questions} multiple-choice quiz questions that test understanding "
-        "of the document below. Each question needs exactly 4 answer choices, the "
+        "of the document below. Prefer central concepts, mechanisms, relationships, and application over wording trivia. "
+        "Each question needs exactly 4 answer choices, the "
         "0-based index of the correct choice, and a short explanation of why that "
-        "answer is correct. Base every question only on the document's content.\n\n"
+        f"answer is correct. {section_instruction}Base every question and explanation only on the document's content. "
+        "Do not invent facts, add background knowledge, or fabricate quotations. Do not write phrases such as 'the document explicitly states' unless the supplied text contains those exact words. "
+        "Keep explanations to 1–2 concise sentences that explain the reasoning, not a restatement of the entire source.\n\n"
         f"Document title: {title}\n\n"
         f"Document content:\n{content}"
     )

@@ -33,3 +33,9 @@ dist/
 # typescript
 .tsbuildinfo
 /web/tsconfig.tsbuildinfo
+
+# Development-only model replay fixtures stay local; they may contain source-derived content.
+/backend/app/dev_fixtures/step_through/*.json
+
+# Retrieval evaluation runs can retain local source excerpts and database IDs.
+/.tmp/rag-eval/

@@ -9,6 +9,11 @@
 // regardless of which site the content script is running on.
 import type { TextLength } from "./text-length"
 
+export const AUTH_STATUS_MESSAGE_TYPE = "auth_status" as const
+export const AUTH_LOGIN_MESSAGE_TYPE = "auth_login" as const
+export const AUTH_LOGOUT_MESSAGE_TYPE = "auth_logout" as const
+export type AuthStatusResponse = { ok: true; authenticated: boolean; displayName?: string } | { ok: false; error: string }
+
 export const SIMPLIFY_MESSAGE_TYPE = "simplify" as const
 
 export type SimplifyMessage = {
@@ -41,20 +46,20 @@ export type ManualActivateResponse =
   | { ok: false; reason: "sensitive_page" }
 
 
-  export const EXPLAIN_MESSAGE_TYPE = "explain" as const 
+export const EXPLAIN_MESSAGE_TYPE = "explain" as const
 
-  export type ExplainMessage = {
-    type: typeof EXPLAIN_MESSAGE_TYPE
-    text: string 
-    context: string 
-    targetGradeLevel: number
-    targetLength: TextLength
-    installId: string
-  }
+export type ExplainMessage = {
+  type: typeof EXPLAIN_MESSAGE_TYPE
+  text: string
+  context: string
+  targetGradeLevel: number
+  targetLength: TextLength
+  installId: string
+}
 
-  export type ExplainResponse =
-    | {ok: true; explanation: string}
-    | {ok: false; error: string}
+export type ExplainResponse =
+  | { ok: true; explanation: string }
+  | { ok: false; error: string }
 
 export const SUMMARIZE_MESSAGE_TYPE = "summarize" as const
 
@@ -97,9 +102,10 @@ export type SaveNoteMessage = {
   type: typeof SAVE_NOTE_MESSAGE_TYPE
   title: string
   content: string
+  sourcePassage?: string
   contentType: SaveContentType
   sourceUrl: string
-  documentId?: number
+  documentId: number
   tags?: string[]
 }
 
@@ -142,4 +148,3 @@ export const OPEN_SIDE_PANEL_MESSAGE_TYPE = "open_side_panel" as const
 export type OpenSidePanelMessage = {
   type: typeof OPEN_SIDE_PANEL_MESSAGE_TYPE
 }
-

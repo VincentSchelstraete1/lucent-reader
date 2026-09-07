@@ -1,11 +1,18 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 
 class QuizQuestion(BaseModel):
     question: str
-    choices: list[str]
+    choices: list[str] = Field(min_length=2, max_length=4)
     correct_index: int
     explanation: str
+    section_id: str | None = None
+
+    @model_validator(mode="after")
+    def correct_answer_exists(self):
+        if not 0 <= self.correct_index < len(self.choices):
+            raise ValueError("correct_index must reference an answer choice")
+        return self
 
 class GeneratedQuizQuestions(BaseModel):
     questions: list[QuizQuestion]

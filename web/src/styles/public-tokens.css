@@ -1,0 +1,41 @@
+:root {
+  /* Figma: 01 Foundations. Public marketing/auth/onboarding semantics only;
+     the existing --lucent-* application tokens remain unchanged. */
+  --lucent-color-bg-canvas: #f5f1e8;
+  --lucent-color-bg-surface: #fbf9f4;
+  --lucent-color-bg-white: #ffffff;
+  --lucent-color-bg-accent: #58735d;
+
+  --lucent-color-text-primary: #22221f;
+  --lucent-color-text-muted: #706d64;
+  --lucent-color-text-on-accent: #fbf9f4;
+
+  --lucent-color-accent-moss: #58735d;
+  --lucent-color-accent-sage: #a5a78c;
+  --lucent-color-accent-blush: #e5c3ba;
+  --lucent-color-accent-terracotta: #c67d62;
+  --lucent-color-border-default: #ddd8cd;
+
+  --lucent-font-editorial: "Instrument Serif", Georgia, serif;
+  --lucent-font-ui: Inter, system-ui, sans-serif;
+
+  --lucent-space-1: 4px;
+  --lucent-space-2: 8px;
+  --lucent-space-3: 16px;
+  --lucent-space-4: 24px;
+  --lucent-space-5: 32px;
+  --lucent-space-6: 48px;
+  --lucent-space-7: 64px;
+  --lucent-space-8: 96px;
+
+  --lucent-radius-control: 12px;
+  --lucent-radius-surface: 18px;
+  --lucent-radius-scene: 28px;
+  --lucent-radius-pill: 999px;
+  --lucent-shadow-subtle: 0 8px 28px rgba(33, 33, 31, 0.08);
+
+  --lucent-motion-fast: 180ms;
+  --lucent-motion-medium: 280ms;
+  --lucent-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+

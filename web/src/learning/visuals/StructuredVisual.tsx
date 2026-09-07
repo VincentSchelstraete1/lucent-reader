@@ -1,0 +1,75 @@
+import { useEffect, useMemo, useState } from "react"
+
+export type StructuredVisualSpec = { type: string; title: string; purpose: string; nodes: Array<{ id: string; label: string; detail?: string | null; group?: string | null; role?: string | null }>; edges: Array<{ source: string; target: string; label?: string | null }>; stages: Array<{ title?: string; explanation?: string; activeNodeIds?: string[] }>; animations?: Array<{ operation: string; targetIds: string[]; durationMs?: number; explanation?: string | null }>; answerId?: string | null }
+type Metric = { node: StructuredVisualSpec["nodes"][number]; width: number; height: number; labels: string[]; details: string[]; x: number; y: number }
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
+function wrap(value: string, max: number) { const lines: string[] = []; let line = ""; for (const word of value.trim().split(/\s+/).filter(Boolean)) { if (line && `${line} ${word}`.length > max) { lines.push(line); line = word } else line = line ? `${line} ${word}` : word } if (line) lines.push(line); return lines.length ? lines : [""] }
+function rankNodes(nodes: StructuredVisualSpec["nodes"], edges: StructuredVisualSpec["edges"]) { const rank = new Map(nodes.map((n) => [n.id, 0])); const incoming = new Map(nodes.map((n) => [n.id, 0])); edges.forEach((e) => incoming.has(e.target) && incoming.set(e.target, (incoming.get(e.target) || 0) + 1)); const queue = nodes.filter((n) => !(incoming.get(n.id) || 0)).map((n) => n.id); for (let i = 0; i < nodes.length * 2 && queue.length; i++) { const id = queue.shift()!; edges.filter((e) => e.source === id).forEach((e) => { rank.set(e.target, Math.max(rank.get(e.target) || 0, (rank.get(id) || 0) + 1)); const left = (incoming.get(e.target) || 1) - 1; incoming.set(e.target, left); if (left <= 0) queue.push(e.target) }) } return rank }
+function edgePath(a: Metric, b: Metric, preferHorizontal = false) {
+  // Flow nodes share a logical row even when wrapping gives them different
+  // heights. Classifying rows by top-edge alignment otherwise creates
+  // diagonal connectors that run through labels.
+  const same = preferHorizontal ? b.x >= a.x + a.width - 8 : Math.abs(a.y - b.y) < 8
+  if (same) {
+    // Keep same-row relationships orthogonal even when node heights differ;
+    // a direct center-to-center line would appear as an unintended diagonal
+    // through the connector label.
+    const ay = a.y + a.height / 2
+    const by = b.y + b.height / 2
+    const midX = (a.x + a.width + b.x) / 2
+    return `M ${a.x + a.width} ${ay} L ${midX} ${ay} L ${midX} ${by} L ${b.x} ${by}`
+  }
+  const midY = (a.y + a.height + b.y) / 2
+  return `M ${a.x + a.width / 2} ${a.y + a.height} L ${a.x + a.width / 2} ${midY} L ${b.x + b.width / 2} ${midY} L ${b.x + b.width / 2} ${b.y}`
+}
+function edgeLabelPosition(a: Metric, b: Metric, lines: string[], preferHorizontal = false) {
+  const same = preferHorizontal ? b.x >= a.x + a.width - 8 : Math.abs(a.y - b.y) < 8
+  if (same) {
+    const ay = a.y + a.height / 2
+    const midX = (a.x + a.width + b.x) / 2
+    // Place labels above the first horizontal segment, away from both node
+    // rectangles and the vertical elbow. This keeps long labels readable.
+    return { x: midX, y: ay - 9 - (lines.length - 1) * 5 }
+  }
+  const x = (a.x + a.width / 2 + b.x + b.width / 2) / 2
+  const y = (a.y + a.height + b.y) / 2 - (lines.length - 1) * 5
+  return { x, y }
+}
+
+/** Deterministic semantic renderer: content is wrapped/measured, layout varies by visual family, and motion follows real relationships. */
+export function StructuredVisual({ spec, initialStage = 0, onStageChange }: { spec: StructuredVisualSpec; initialStage?: number; onStageChange?: (stage: number) => void }) {
+  const [selected, setSelected] = useState<string | null>(null); const [stage, setStage] = useState(initialStage); const [expanded, setExpanded] = useState(false); const nodes = spec.nodes.slice(0, 16); const current = spec.stages?.[stage]; const active = useMemo(() => new Set(current?.activeNodeIds || []), [current])
+  useEffect(() => { setStage(clamp(initialStage, 0, Math.max(0, (spec.stages?.length || 1) - 1))) }, [initialStage, spec.stages?.length])
+  useEffect(() => { if (!expanded) return; const onKey = (event: KeyboardEvent) => event.key === "Escape" && setExpanded(false); document.addEventListener("keydown", onKey); const previous = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previous } }, [expanded])
+  const comparison = spec.type === "comparison"; const cycle = spec.type === "cycle"; const hierarchy = spec.type === "hierarchy" || spec.type === "spatial_structure"; const flow = ["process_flow", "causal_chain", "sequence", "state_transition", "timeline"].includes(spec.type)
+  const metrics = useMemo(() => { const rank = rankNodes(nodes, spec.edges); const vertical = flow && (nodes.length > 5 || Math.max(0, ...rank.values()) > 3); const list = nodes.map((node) => { const labels = wrap(node.label, comparison ? 27 : 20); const details = (node.detail || "").split(/;\s*/).flatMap((part) => wrap(part, comparison ? 30 : 22)).slice(0, 4); return { node, width: comparison ? 250 : clamp(Math.max(148, Math.max(...labels.map((x) => x.length)) * 7.2 + 28), 148, 248), height: 30 + labels.length * 15 + (details.length ? 8 + details.length * 11 : 0), labels, details, x: 0, y: 0 } }) as Metric[]; if (comparison) { ["left", "right"].forEach((side) => { const group = list.filter((e) => (e.node.group === "right" ? "right" : "left") === side); group.forEach((e, i) => { e.x = side === "right" ? 410 : 30; e.y = 58 + group.slice(0, i).reduce((sum, item) => sum + item.height + 18, 0) }) }) } else if (cycle) list.forEach((e, i) => { const a = i / Math.max(1, list.length) * Math.PI * 2 - Math.PI / 2; e.x = 350 + Math.cos(a) * 190 - e.width / 2; e.y = 210 + Math.sin(a) * 140 - e.height / 2 })
+    else if (hierarchy || flow) { const groups = new Map<number, Metric[]>(); list.forEach((e) => { const key = rank.get(e.node.id) || 0; if (!groups.has(key)) groups.set(key, []); groups.get(key)!.push(e) }); groups.forEach((group, key) => group.forEach((e, i) => { if (vertical) { e.x = 35 + i * 235; e.y = 55 + key * 125 } else { e.x = 35 + key * 225; e.y = 55 + i * 115 } })) } else list.forEach((e, i) => { e.x = 35 + (i % 3) * 225; e.y = 55 + Math.floor(i / 3) * 115 }); return list }, [nodes, spec.edges, comparison, cycle, hierarchy, flow])
+  const byId = new Map(metrics.map((m) => [m.node.id, m])); const selectedNode = nodes.find((n) => n.id === selected); const maxX = Math.max(760, ...metrics.map((m) => m.x + m.width + 35)); const maxY = Math.max(240, ...metrics.map((m) => m.y + m.height + 45));
+  // A motion declaration is only meaningful when it names a real semantic
+  // edge.  Previously the renderer drew a second, independent dashed path
+  // (and animated dot), which could cross node labels at an unrelated angle.
+  // Motion now highlights the existing edge geometry so arrows and labels
+  // always remain connected to the objects they describe.
+  const motion = spec.animations?.find((a) => a.operation === "flow");
+  const motionEdgeKey = motion && spec.edges.some((edge) => edge.source === motion.targetIds[0] && edge.target === motion.targetIds[1])
+    ? `${motion.targetIds[0]}-${motion.targetIds[1]}`
+    : null
+  const visual = <>
+    <svg viewBox={`0 0 ${maxX} ${maxY}`} role="img" aria-label={spec.purpose}>
+      <defs><marker id="lucent-semantic-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="currentColor" /></marker></defs>
+      {comparison && <><line className="structured-visual-divider" x1="380" y1="25" x2="380" y2={maxY - 25} /><text className="structured-visual-column-label" x="155" y="25">First mechanism</text><text className="structured-visual-column-label" x="535" y="25">Contrasting mechanism</text></>}
+      {spec.edges.slice(0, 24).map((edge) => {
+        const a = byId.get(edge.source); const b = byId.get(edge.target); if (!a || !b) return null
+        const d = edgePath(a, b, flow)
+        const edgeLabelLines = wrap(edge.label || "", 18).slice(0, 2)
+        const label = edgeLabelPosition(a, b, edgeLabelLines, flow)
+        const edgeKey = `${edge.source}-${edge.target}`
+        return <g key={edgeKey} className={`structured-visual-edge${edgeKey === motionEdgeKey ? " motion" : ""}`}><path d={d} fill="none" markerEnd="url(#lucent-semantic-arrow)" /><text x={label.x} y={label.y}>{edgeLabelLines.map((line, index) => <tspan key={index} x={label.x} dy={index ? 10 : 0}>{line}</tspan>)}</text></g>
+      })}
+      {metrics.map((m) => { const hasIncoming = spec.edges.some((edge) => edge.target === m.node.id); const hasOutgoing = spec.edges.some((edge) => edge.source === m.node.id); const inferredRole = !hasIncoming ? "input" : !hasOutgoing ? "outcome" : "mechanism"; const suppliedRole = String(m.node.role || m.node.group || "").toLowerCase(); const semanticRoles = new Set(["input", "start", "mechanism", "process", "outcome", "consequence", "interpretation", "audience", "warning", "misconception", "contradiction"]); const role = (semanticRoles.has(suppliedRole) ? suppliedRole : inferredRole).replace(/[^a-z0-9_-]/g, "-"); return <g key={m.node.id} className={`structured-visual-node semantic-${role} ${active.has(m.node.id) ? "active" : ""}`} tabIndex={0} role="button" aria-label={`Learn about ${m.node.label}`} onClick={() => setSelected(m.node.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(m.node.id) } }}><rect x={m.x} y={m.y} width={m.width} height={m.height} rx="7" /><text x={m.x + m.width / 2} y={m.y + 20} textAnchor="middle">{m.labels.map((line, i) => <tspan key={i} x={m.x + m.width / 2} dy={i ? 15 : 0}>{line}</tspan>)}</text>{m.details.map((line, i) => <text key={i} className="structured-visual-node-detail" x={m.x + m.width / 2} y={m.y + 34 + m.labels.length * 15 + i * 11} textAnchor="middle">{line}</text>)}</g>})}
+    </svg>
+    {selectedNode && <p className="structured-visual-detail" role="status"><strong>{selectedNode.label}:</strong> {selectedNode.detail || spec.purpose}</p>}
+    {spec.stages?.length > 0 && <div className="structured-visual-controls"><span>Stage {stage + 1} of {spec.stages.length}</span><button type="button" onClick={() => { const next = Math.max(0, stage - 1); setStage(next); onStageChange?.(next) }} disabled={stage === 0}>Previous</button>{stage < spec.stages.length - 1 && <button type="button" onClick={() => { const next = Math.min(spec.stages.length - 1, stage + 1); setStage(next); onStageChange?.(next) }}>Next</button>}<span>{current?.explanation || current?.title || spec.purpose}</span></div>}
+  </>
+  return <><section className={`structured-visual structured-visual-${spec.type}`} aria-label={spec.title}><div className="structured-visual-heading"><strong>{spec.title}</strong><span>{spec.purpose}</span><button type="button" className="structured-visual-expand" onClick={() => setExpanded(true)} aria-label={`Expand ${spec.title}`}>Expand</button></div>{visual}</section>{expanded && <div className="structured-visual-modal" role="dialog" aria-modal="true" aria-label={`${spec.title} expanded`}><div className="structured-visual-modal-panel"><div className="structured-visual-heading"><strong>{spec.title}</strong><button type="button" className="structured-visual-close" onClick={() => setExpanded(false)}>Close</button></div>{visual}</div></div>}</>
+}

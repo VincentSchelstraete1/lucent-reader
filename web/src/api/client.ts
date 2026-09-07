@@ -1,7 +1,10 @@
+import type { LearningObject } from "../learning/schema/learningObject"
 // Single place the backend's base URL is defined, mirroring lib/config.ts
 // in the Chrome extension - one line to change instead of scattering
 // backend URLs through components.
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+let csrfToken: string | null = null
+export function setCsrfToken(token: string | null) { csrfToken = token }
 
 export type Source = {
   id: number
@@ -23,6 +26,7 @@ export type Note = {
   id: number
   title: string
   content: string
+  source_passage: string | null
   content_type: string
   source_url: string | null
   document_id: number | null
@@ -48,6 +52,7 @@ export type QuizQuestion = {
   choices: string[]
   correct_index: number
   explanation: string
+  section_id?: string | null
 }
 
 export type Quiz = {
@@ -66,32 +71,335 @@ export type QuizAttempt = {
   created_at: string
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
-  constructor(path: string, status: number) {
-    super(`${path} failed: ${status}`)
+  code: string | null
+  details: Array<{ location: string; message: string; type: string }>
+  diagnostics: GenerationDiagnostics | null
+  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = [], diagnostics: GenerationDiagnostics | null = null) {
+    super(message || `${path} failed: ${status}`)
     this.status = status
+    this.code = code ?? null
+    this.details = details
+    this.diagnostics = diagnostics
   }
 }
 
+export type GenerationDiagnostics = { stop_reason?: string | null; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; parsed?: boolean; truncated?: boolean; top_level_keys?: string[] }
+
+async function apiError(path: string, response: Response): Promise<ApiError> {
+  try {
+    const payload = await response.json() as { detail?: string | { code?: string; message?: string; validation_errors?: Array<{ location: string; message: string; type: string }>; diagnostics?: GenerationDiagnostics } }
+    if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail)
+    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors, payload.detail.diagnostics ?? null)
+  } catch {
+    // Some existing endpoints intentionally return no JSON error body.
+  }
+  return new ApiError(path, response.status)
+}
+
 async function get<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`)
+  const response = await fetch(`${API_URL}${path}`, { credentials: "include" })
   if (!response.ok) {
-    throw new ApiError(path, response.status)
+    throw await apiError(path, response)
   }
   return response.json()
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const request = () => fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    credentials: "include",
+    headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}) },
     body: body ? JSON.stringify(body) : undefined
   })
+  let response = await request()
+  // A Google session can be resumed in another tab with a rotated CSRF
+  // token. Refresh the authoritative token once before surfacing the write
+  // failure; the backend still validates both cookie and header.
+  if (response.status === 403) {
+    try {
+      const auth = await fetch(`${API_URL}/auth/me`, { credentials: "include" })
+      if (auth.ok) {
+        const session = await auth.json() as { csrf_token?: string }
+        if (session.csrf_token) {
+          csrfToken = session.csrf_token
+          response = await request()
+        }
+      }
+    } catch {
+      // Preserve the original server response below.
+    }
+  }
   if (!response.ok) {
-    throw new ApiError(path, response.status)
+    throw await apiError(path, response)
   }
   return response.json()
+}
+
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "PATCH", credentials: "include",
+    headers: { "Content-Type": "application/json", ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}) },
+    body: JSON.stringify(body)
+  })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
+async function del<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, { method: "DELETE", credentials: "include", headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {} })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
+async function postForm<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
+    body
+  })
+  if (!response.ok) throw await apiError(path, response)
+  return response.json()
+}
+
+// Format-neutral provenance pointer, mirroring backend SourceLocation.
+// kind="page" (PDF): index is the physical page number.
+// kind="slide" (PPTX): index is the slide number - never page_number, which
+// stays a PDF-only legacy field so "page" never silently means "slide".
+// kind="document" (DOCX): index is null; sequence_id identifies position
+// within the document's ordered structure (DOCX has no physical pages).
+export type SourceLocation = {
+  kind: "page" | "slide" | "document"
+  index: number | null
+  sequence_id: string | null
+}
+
+export type RawContentBlock = {
+  id: string
+  page_number: number | null
+  type: "text" | "image" | "table" | "unknown"
+  text: string | null
+  bbox: [number, number, number, number] | null
+  reading_order: number
+  image_id: string | null
+  location: SourceLocation | null
+}
+
+export type RawImage = {
+  id: string
+  page_number: number | null
+  bbox: [number, number, number, number] | null
+  width: number | null
+  height: number | null
+  mime_type: string | null
+  caption: string | null
+  asset_reference: string
+  location: SourceLocation | null
+}
+
+export type RawPage = {
+  page_number: number | null
+  text: string
+  blocks: RawContentBlock[]
+  extraction_errors: string[]
+  location: SourceLocation | null
+}
+
+export type SourceReference = {
+  page_start: number | null
+  page_end: number | null
+  raw_block_ids: string[]
+  bboxes: [number, number, number, number][]
+  locations: SourceLocation[]
+}
+
+export type NormalizedBlock = {
+  id: string
+  type: "heading" | "paragraph" | "list" | "table" | "caption" | "image" | "unknown"
+  text: string | null
+  source: SourceReference
+  source_image_id: string | null
+}
+
+export type NormalizedPage = {
+  page_number: number | null
+  text: string
+  blocks: NormalizedBlock[]
+  transformation_ids: string[]
+  suppressed_artifact_ids: string[]
+  location: SourceLocation | null
+}
+
+export type NormalizationEvent = {
+  id: string
+  stage: string
+  page_number: number | null
+  raw_block_ids: string[]
+  description: string
+  before: string | null
+  after: string | null
+}
+
+export type SuppressedArtifact = {
+  id: string
+  type: "header" | "footer" | "page_number"
+  text: string
+  page_numbers: number[]
+  raw_block_ids: string[]
+}
+
+export type UnresolvedArtifact = {
+  id: string
+  type: string
+  page_number: number | null
+  raw_block_ids: string[]
+  text: string
+  reason: string
+}
+
+export type NormalizedDocument = {
+  source_type: string
+  filename: string
+  page_count: number
+  pages: NormalizedPage[]
+  images: Array<{
+    id: string
+    source_page: number | null
+    source_bbox: [number, number, number, number] | null
+    width: number | null
+    height: number | null
+    mime_type: string | null
+    caption: string | null
+    asset_reference: string
+    source_image_ids: string[]
+    location: SourceLocation | null
+  }>
+  normalization_metadata: {
+    version: string
+    suppressed_artifacts: SuppressedArtifact[]
+    events: NormalizationEvent[]
+    unresolved_artifacts: UnresolvedArtifact[]
+    counters: Record<string, number>
+  }
+}
+
+export type DocumentSourceType = "pdf" | "docx" | "pptx"
+
+export type RepresentationType = "plain_text" | "process" | "comparison" | "causal" | "concept_map" | "hierarchy" | "quantitative"
+
+export type RepresentationDecision = {
+  learning_block_id: string
+  type: RepresentationType
+  confidence: number | null
+  method: "deterministic" | "fallback_classifier"
+  scores: Record<string, number>
+  fallback_used: boolean
+}
+
+export type LearningCanvasResult = { decision: RepresentationDecision; learning_object: LearningObject; teaching_plan: TeachingPlan }
+
+export type LearningBlockType = "section" | "list" | "table" | "figure" | "mixed"
+
+export type LearningBlock = {
+  id: string
+  block_type: LearningBlockType
+  title: string | null
+  text: string
+  character_count: number
+  normalized_block_ids: string[]
+  source: SourceReference
+  heading_ancestry: string[]
+  attached_table_ids: string[]
+  attached_image_ids: string[]
+  token_count: number | null
+  segmentation_method: string
+  segmentation_boundary_reason: string
+  segmentation_confidence: number | null
+  representation: RepresentationDecision
+}
+
+export type DocumentIngestionResult = {
+  status: "success"
+  filename: string
+  source_type: DocumentSourceType
+  page_count: number
+  markdown: string
+  extracted_character_count: number
+  pages: RawPage[]
+  images: RawImage[]
+  extraction_metadata: Record<string, string | number | boolean | null>
+  normalized: NormalizedDocument
+  learning_blocks: LearningBlock[]
+  generated_note: GeneratedLearningNote | null
+  section_notes?: SectionNote[]
+  source_id?: number | null
+  document_id?: number | null
+  note_id?: number | null
+  source_generation?: string | null
+  source_index_status?: "PENDING" | "INDEXING" | "READY" | "FAILED" | null
+  teaching_depth?: "concise" | "balanced" | "detailed"
+}
+
+export type SourceIndexStatus = {
+  document_id: number
+  generation_id?: string | null
+  status: "NOT_INDEXED" | "PENDING" | "INDEXING" | "READY" | "FAILED"
+  block_count: number
+  embedded_count: number
+  coverage_warnings: string[]
+  retryable: boolean
+}
+
+export type TeachingPlan = { learningGoal: string; recommendedRepresentation: RepresentationType; finalRepresentation: RepresentationType; rationale: string; coreIdeas: string[]; usefulContext: string[]; omittedNoise: string[]; representationPlan: string[]; contextPacket: Record<string, unknown> | null; override: boolean }
+export type GeneratedLearningNote = { sourceDocument: { filename: string; sourceType: string; pageCount: number }; title: string; sections: Array<{ learningBlockId: string; title: string | null; source: Record<string, unknown>; representationDecision: RepresentationDecision; teachingPlan: TeachingPlan | null; learningObject: LearningObject; generationFallback: boolean }> }
+export type SectionNote = { id: string; title: string; bigIdea: string; learningGoals: string[]; components: Array<{ kind: string; title: string; text?: string; sourceBlockIds: string[]; learningObject?: LearningObject | null; term?: string | null; definition?: string | null; nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>>; root?: Record<string, unknown> | null; items: Array<Record<string, unknown>>; dimensions: string[]; problem?: string | null; steps: Array<Record<string, unknown>>; result?: string | null; interpretation?: string | null; equation?: string | null; takeaway?: string | null }>; keyTakeaways: string[]; sourceBlockIds: string[]; omittedNoise: string[] }
+export type ProgressiveSection = { id: string; title: string | null; learning_block_ids: string[]; status: "pending" | "generating" | "complete" | "failed"; section_note: SectionNote | null; error: string | null }
+export type ProgressiveStart = { job_id: string; filename: string; sections: ProgressiveSection[] }
+export type ProgressivePoll = { job_id: string; filename: string; status: "processing" | "complete" | "failed"; sections: ProgressiveSection[]; result: DocumentIngestionResult | null }
+
+export type StepThroughMechanism = {
+  type: "step_through_mechanism"
+  sceneType: "vector_scene" | "sequence_exchange_scene" | "ordered_items_scene"
+  title: string
+  learningGoal: string
+  entities: Array<{ id: string; kind: "item" | "actor" | "vector" | "node" | "quantity"; label: string; description?: string | null }>
+  stages: Array<{ title: string; explanation: string; stateChanges: Array<{ entityId: string; change: string; why?: string | null }>; equation?: string | null; activeEntityIds: string[]; notice?: string | null; insight?: string | null; visual?: unknown }>
+  prediction?: { prompt: string; options: string[]; answer: number; reveal: string } | null
+  conclusion: string
+}
+export type StepThroughFixture = { name: string; source_text: string; source_hash: string; replay_available: boolean }
+export type StepThroughMetadata = { fixture_name: string; source_hash: string; mode: "replay" | "live"; fixture_kind: "golden_manual" | "sample_manual" | "recorded_live"; cache_hit: boolean; model_call_count: 0 | 1; model?: string | null; latency_ms: number; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; stop_reason?: string | null; parsed: boolean; truncated: boolean; validation: "passed" | "failed"; error?: string | null }
+export type StepThroughResponse = { mechanism: StepThroughMechanism; metadata: StepThroughMetadata }
+
+export type LearnGoal = "understand" | "solve" | "memorize" | "exam"
+export type LearnFamiliarity = "new" | "somewhat_familiar" | "reviewing"
+export type LearnOption = { id: string; label: string }
+export type LearnVisualSpec = { type: "diagram" | "process" | "process_flow" | "hierarchy" | "causal_chain" | "labeled_diagram" | "relationship_map" | "comparison" | "sequence" | "cycle" | "spatial_structure" | "state_transition" | "timeline" | "quantitative" | "worked_derivation" | "labeling" | "ordering" | "prediction" | "staged_visual" | "step_through"; title: string; purpose: string; nodes: Array<{ id: string; label: string; detail?: string | null; group?: string | null }>; edges: Array<{ source: string; target: string; label?: string | null }>; stages: Array<{ title?: string; explanation?: string; activeNodeIds?: string[] }>; animations?: Array<{ operation: string; targetIds: string[]; durationMs?: number; explanation?: string | null }>; answerId?: string | null; sourceSectionIds?: string[]; sourceBlockIds?: string[] }
+export type LearnStepView = { id: string; type: string; title: string; prompt?: string | null; content?: string | null; options: LearnOption[]; items: LearnOption[]; visualSpec?: LearnVisualSpec | null; visualRef?: { sectionId?: string; componentIndex?: number } | null; sectionId?: string | null; componentIndex?: number | null; hintsAvailable: number; sourceSectionIds?: string[]; sourceBlockIds?: string[] }
+export type LearnEvaluation = { result: "correct" | "partially_correct" | "incorrect" | "insufficient_evidence"; confidence: number; misconception?: string | null; evidence: string; remediationCategory: string }
+export type LearnConceptState = { conceptId: string; title: string; state: string; attempts: number; correct: number; partiallyCorrect: number; incorrect: number; insufficientEvidence: number; hintsUsed: number; interactionTypes: string[]; misconceptions: string[]; immediateSuccess: boolean; delayedSuccess: boolean; scaffold: "FULL" | "GUIDED" | "PARTIAL" | "INDEPENDENT" | "TRANSFER"; scaffoldingLevel?: "FULL" | "GUIDED" | "PARTIAL" | "INDEPENDENT" | "TRANSFER"; sourceSectionIds: string[]; sourceBlockIds: string[]; lastResult?: string | null }
+export type LearnReport = { covered: string[]; demonstrated: string[]; developing: string[]; struggles: string[]; misconceptions?: string[]; needsReview: string[]; notCovered: string[]; nextFocus: string[]; stopped: boolean }
+export type LearnVisualState = { visualKey?: string | null; renderer?: string | null; stage: number; highlightedElementIds: string[]; revealedElementIds: string[]; parameters: Record<string, string | number | boolean>; playback: "idle" | "playing" | "paused" | "complete"; interactionMode: "watch" | "predict" | "label" | "manipulate" | "compare" | "explain" }
+export type LearnSceneBlock = { id: string; kind: "explanation" | "visual" | "animation" | "example" | "counterexample" | "analogy" | "comparison" | "worked_example" | "guided_step" | "practice" | "feedback" | "reflection" | "tutor_message"; label: string; title?: string | null; content?: string | null; step?: LearnStepView | null; visualSpec?: LearnVisualSpec | null; visualRef?: { sectionId?: string; componentIndex?: number } | null; sourceSectionIds: string[]; sourceBlockIds: string[] }
+export type LearnScene = { id: string; revision: number; objectiveId: string; objective: string; targetConcepts: string[]; blocks: LearnSceneBlock[]; sourceSectionIds: string[]; sourceBlockIds: string[]; visualState: LearnVisualState; responseInteractionId?: string | null; inlineInteraction?: LearnStepView | null; progress: Record<string, string | number | boolean> }
+export type LearnSession = { id: string; documentId: number; goal: LearnGoal; familiarity: LearnFamiliarity; status: "active" | "completed" | "stopped" | "abandoned"; objectiveIndex: number; objectiveCount: number; objectiveTitle?: string | null; step?: LearnStepView | null; feedback?: string | null; feedbackKind?: "correct" | "incorrect" | "info" | null; hintsUsed: number; completedObjectives: number; weakObjectives: string[]; action?: { id: string; type: string; conceptId: string; stepId?: string | null; rationale: string; strategy?: string } | null; evaluation?: LearnEvaluation | null; conceptStates: LearnConceptState[]; report?: LearnReport | null; endedReason?: string | null; scene?: LearnScene | null }
+export type LearnTutorEvent = { id: string; type: "START" | "CONTINUE" | "RESPONSE" | "HINT" | "ASK_LUCENT" | "VISUAL_RESPONSE" | "PREREQUISITE_RETURN" | "DELAYED_REVIEW"; sceneId?: string; sceneRevision?: number; interactionId?: string; response?: Record<string, unknown>; message?: string; visualEvent?: { visualKey: string; eventType: "SET_STAGE" | "REVEAL" | "HIGHLIGHT" | "PREDICT" | "LABEL" | "MANIPULATE" | "REPLAY_COMPLETE"; elementId?: string; stage?: number; value?: string | number | boolean } }
+export type AskLucentResponse = { answer: string; scope: "IN_SCOPE_SOURCE" | "IN_SCOPE_CURRENT_CONCEPT" | "IN_SCOPE_PREREQUISITE" | "OUT_OF_SCOPE"; sourceSectionIds: string[]; sourceBlockIds: string[]; tool: string; visualAction?: { type: string; stepId?: string; stage?: number; nodeId?: string } | null; inlineInteraction?: LearnStepView | null; scene?: LearnScene | null }
+
+// Legacy alias kept because it was the original (PDF-only) name for this shape.
+export type PdfIngestionResult = DocumentIngestionResult
+
+const INGESTION_ENDPOINT_BY_EXTENSION: Record<string, string> = {
+  pdf: "/ingestion/pdf",
+  docx: "/ingestion/docx",
+  pptx: "/ingestion/pptx"
+}
+
+export function ingestionEndpointFor(filename: string): string | null {
+  const extension = filename.split(".").pop()?.toLowerCase()
+  return extension ? INGESTION_ENDPOINT_BY_EXTENSION[extension] ?? null : null
 }
 
 export const api = {
@@ -99,11 +407,44 @@ export const api = {
   getSource: (id: number) => get<Source>(`/sources/${id}`),
   getDocuments: () => get<Document[]>("/documents"),
   getDocument: (id: number) => get<Document>(`/documents/${id}`),
+  getSourceIndex: (id: number) => get<SourceIndexStatus>(`/documents/${id}/source-index`),
+  updateDocument: (id: number, updates: { title?: string }) => patch<Document>(`/documents/${id}`, updates),
+  deleteDocument: (id: number) => del<Document>(`/documents/${id}`),
   getNotes: () => get<Note[]>("/notes"),
+  getNote: (id: number) => get<Note>(`/notes/${id}`),
   generateNote: (documentId: number) => post<Note>(`/documents/${documentId}/generate-note`),
   generateQuiz: (documentId: number) => post<Quiz>(`/documents/${documentId}/quizzes`),
   getQuizzesForDocument: (documentId: number) => get<Quiz[]>(`/documents/${documentId}/quizzes`),
   getQuiz: (id: number) => get<Quiz>(`/quizzes/${id}`),
   submitQuizAttempt: (quizId: number, attempt: { score: number; total: number }) =>
-    post<QuizAttempt>(`/quizzes/${quizId}/attempts`, attempt)
+    post<QuizAttempt>(`/quizzes/${quizId}/attempts`, attempt),
+  ingestPdf: (file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return postForm<DocumentIngestionResult>("/ingestion/pdf", form)
+  },
+  ingestDocument: (file: File, depth: "concise" | "balanced" | "detailed" = "balanced") => {
+    const endpoint = ingestionEndpointFor(file.name)
+    if (!endpoint) return Promise.reject(new Error(`Unsupported file type: ${file.name}`))
+    const form = new FormData()
+    form.append("file", file)
+    return postForm<DocumentIngestionResult>(`${endpoint}?depth=${depth}`, form)
+  },
+  startProgressiveDocument: (file: File, depth: "concise" | "balanced" | "detailed" = "balanced") => {
+    const form = new FormData(); form.append("file", file)
+    return postForm<ProgressiveStart>(`/ingestion/progressive?depth=${depth}`, form)
+  },
+  pollProgressiveDocument: (jobId: string) => get<ProgressivePoll>(`/ingestion/progressive/${jobId}`),
+  routeLearningCanvas: (text: string) => post<LearningCanvasResult>("/routing/representation", { text }),
+  getStepThroughFixtures: () => get<StepThroughFixture[]>("/dev/step-through/fixtures"),
+  generateStepThrough: (request: { fixture_name: string; source_text: string; mode: "replay" | "live"; save_fixture?: boolean }) => post<StepThroughResponse>("/dev/step-through/generate", request)
+  ,createLearnSession: (documentId: number, request: { goal: LearnGoal; familiarity: LearnFamiliarity; restart?: boolean }) => post<LearnSession>(`/documents/${documentId}/learn-sessions`, request)
+  ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
+  ,getActiveLearnSession: (documentId: number) => get<LearnSession | null>(`/documents/${documentId}/learn-sessions/active`)
+  ,submitLearnResponse: (sessionId: string, request: { sceneId?: string; sceneRevision?: number; interactionId?: string; eventType?: "RESPONSE" | "CONTINUE"; response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
+  ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
+  ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
+  ,askLucent: (sessionId: string, message: string) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message })
+  ,submitAskInteraction: (sessionId: string, interactionId: string, response: { response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/ask-interactions/${interactionId}/responses`, response)
+  ,learnVisualEvent: (sessionId: string, request: { sceneId: string; sceneRevision: number; event: "set_stage" | "highlight" | "replay"; stage?: number; elementId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/visual-events`, request)
 }

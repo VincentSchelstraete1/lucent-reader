@@ -1,0 +1,17 @@
+.page { padding-top: 4px; }
+.label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.input { width: 100%; resize: vertical; border: 1px solid var(--lucent-border); border-radius: 10px; padding: 12px; background: var(--lucent-surface); color: var(--lucent-text); font: inherit; line-height: 1.5; }
+.input:focus { outline: 2px solid var(--lucent-accent); outline-offset: 2px; }
+.grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 14px; margin-top: 18px; }
+.panel, .diagramPanel { min-width: 0; border: 1px solid var(--lucent-border); border-radius: 12px; padding: 16px; background: var(--lucent-surface); box-shadow: var(--lucent-shadow); }
+.panel h2, .diagramPanel h2 { margin-top: 0; }
+.resultList { margin: 0; }
+.resultList div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.resultList dt { color: var(--lucent-caption); }
+.resultList dd { margin: 0; font-weight: 600; }
+.scores { display: flex; flex-wrap: wrap; gap: 6px; }
+.scores span { border-radius: 999px; padding: 4px 8px; background: var(--lucent-bg); color: var(--lucent-caption); font-size: 11px; }
+.json { max-height: 360px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; background: var(--lucent-bg); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diagramPanel { margin-top: 14px; overflow-x: auto; }
+.diagramPanel svg { display: block; min-width: 520px; max-width: 100%; height: auto; margin: 0 auto; }
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .diagramPanel svg { min-width: 440px; } }
