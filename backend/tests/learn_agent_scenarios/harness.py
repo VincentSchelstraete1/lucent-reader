@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, get_args
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from conftest import TestSessionLocal as SessionLocal
 from app.models.learn import LearnSession
+from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
 from app.routers.learn import _concept_for, _parse_step, _tutor_observation
 from app.schemas.learn import TutorToolName
+from app.services.embeddings import DeterministicEmbeddingProvider, set_embedding_provider
 from app.services.learn_engine import student_facing_quality_issues
 from app.services.learn_tutor import set_tutor_provider
 
@@ -106,6 +110,29 @@ def create_source_material(client, *, title: str = "Pendulum energy", goal: str 
             }],
         }],
     }
+    generation = uuid4()
+    note["sourceGeneration"] = str(generation)
+    source_text = "As a pendulum falls, gravitational potential energy becomes kinetic energy while total mechanical energy remains conserved. Speed and kinetic energy are greatest at the bottom of the swing."
+    digest = hashlib.sha256(source_text.encode()).hexdigest()
+    provider = DeterministicEmbeddingProvider()
+    with SessionLocal() as db:
+        db.add(DocumentSourceIndex(
+            document_id=document["id"], generation_id=generation, corpus_hash=digest,
+            normalization_version="scenario-v1", segmentation_version="scenario-v1",
+            status="READY", provider=provider.metadata.provider, model=provider.metadata.model,
+            dimensions=provider.metadata.dimensions, block_count=1, embedded_count=1,
+            indexed_at=datetime.now(timezone.utc),
+        ))
+        db.add(PersistedLearningBlock(
+            document_id=document["id"], block_id="b1", generation_id=generation,
+            ordinal=0, block_type="text", title=title, text=source_text,
+            character_count=len(source_text), heading_ancestry=[], normalized_block_ids=["b1"],
+            section_ids=["s1"], source={"page_start": 1, "page_end": 1},
+            segmentation={"method": "scenario", "version": "scenario-v1"}, attachments=[],
+            content_hash=digest, embedding_input_hash=digest,
+            embedding=provider.embed_documents([source_text])[0], embedded_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
     client.post("/notes", json={"title": title, "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": goal, "familiarity": "new", "restart": True}).json()
     return document, session
@@ -233,8 +260,10 @@ def provider_context(provider: FakeTutorProvider):
     class _ProviderContext:
         def __enter__(self):
             set_tutor_provider(provider)
+            set_embedding_provider(DeterministicEmbeddingProvider())
             return provider
 
         def __exit__(self, *_args):
             set_tutor_provider(None)
+            set_embedding_provider(None)
     return _ProviderContext()
