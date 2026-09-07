@@ -116,15 +116,28 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     if (lowered.includes("related prerequisite") || lowered.includes("saved material does not fully explain")) return "Let's build the supporting idea first, then bring it back to this concept."
     if (lowered.includes("need to know which visual") || lowered.includes("what specifically you're confused")) return "Let's focus on the part of the visual that matters for this idea."
     if (lowered.includes("let me retrieve") || lowered.includes("available sources")) return "Let's use a concrete example from the material."
+    // Provider answers occasionally contain Markdown emphasis even though
+    // scene blocks render as plain learner-facing text. Strip presentation
+    // markers at this boundary so raw `**bold**`/`__bold__` never reaches the
+    // learner UI, while preserving the words themselves.
     return content
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .replace(/__(.*?)__/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim()
   }
+  const polishLearnerText = (content: string) => content
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim()
   return <div className="learn-scene-support" aria-label="Tutor teaching">
     {fallbackBlocks.map((block) => {
       const referenced = block.visualRef && typeof block.visualRef.componentIndex === "number" ? note.components[block.visualRef.componentIndex] : null
       return <section className={`learn-scene-block learn-scene-block-${block.kind}`} key={block.id}>
-        <p className="learn-scene-block-label">{block.kind === "tutor_message" ? "Tutor" : block.kind === "feedback" ? "Feedback" : block.label}</p>
+        <p className="learn-scene-block-label">{block.kind === "tutor_message" || block.label?.toLowerCase() === "try" ? (block.label?.toLowerCase() === "try" ? "Tutor prompt" : "Tutor") : block.kind === "feedback" ? "Feedback" : block.label}</p>
         {block.title && !(block.visualSpec || referenced) && <h3>{block.title}</h3>}
-        {block.content && <p className="learn-scene-block-content">{block.kind === "tutor_message" ? learnerTutorText(block.content) : block.content}</p>}
+        {block.content && <p className="learn-scene-block-content">{polishLearnerText(block.kind === "tutor_message" ? learnerTutorText(block.content) : block.content)}</p>}
         {block.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={block.visualSpec} initialStage={session.scene?.visualState?.stage ?? 0} onStageChange={onVisualStageChange} /></div>}
         {referenced && <div className="learn-teaching-visual"><ComponentView component={referenced as any} /></div>}
       </section>

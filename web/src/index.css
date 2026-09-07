@@ -302,7 +302,7 @@
 .mechanism-active circle { animation: lucent-node-focus 1.2s ease-in-out infinite alternate; }
 @keyframes mechanism-flow-dash { to { stroke-dashoffset: -22; } }
 @media (prefers-reduced-motion: reduce) { .mechanism-flow { animation: none; } .mechanism-active circle { animation: none; } }
-.structured-visual { margin: 1rem 0; padding: 1rem; border: 1px solid #d8d2c5; border-radius: 10px; background: #fbfaf6; color: #34352f; }
+.structured-visual { margin: 1rem 0; padding: 1rem; border: 1px solid #d8d2c5; border-radius: 10px; background: #fbfaf6; color: #34352f; overflow-x: auto; }
 .structured-visual-heading { display: flex; gap: .75rem; align-items: baseline; margin-bottom: .45rem; }
 .structured-visual-heading span { color: #6c7168; font-size: .82rem; }
 .structured-visual-expand, .structured-visual-close { margin-left: auto; border: 1px solid #c7cfc5; background: transparent; color: #3e624a; border-radius: 5px; padding: .3rem .55rem; font-size: .78rem; }
