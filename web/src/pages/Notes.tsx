@@ -109,13 +109,20 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   // intervention alongside explanation/visual/feedback blocks.
   const latestTutorId = [...rawBlocks].reverse().find((block) => block.kind === "tutor_message")?.id
   const latestExplanationId = [...rawBlocks].reverse().find((block) => block.kind === "explanation")?.id
+  const latestNarrativeByLabel = new Map<string, string>()
+  rawBlocks.forEach((block) => {
+    if (["tutor_message", "explanation", "analogy"].includes(block.kind)) {
+      latestNarrativeByLabel.set(String(block.label || block.kind).trim().toLowerCase(), block.id)
+    }
+  })
   const latestReframeId = [...rawBlocks].reverse().find((block) =>
-    ["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(String(block.label ?? "")),
+    ["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(`${String(block.label ?? "")} ${String(block.title ?? "")}`),
   )?.id
   const blocks = rawBlocks.filter((block) =>
     (block.kind !== "tutor_message" || block.id === latestTutorId) &&
     (block.kind !== "explanation" || block.id === latestExplanationId) &&
-    (!(["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(String(block.label ?? ""))) || block.id === latestReframeId),
+    (!["tutor_message", "explanation", "analogy"].includes(block.kind) || latestNarrativeByLabel.get(String(block.label || block.kind).trim().toLowerCase()) === block.id) &&
+    (!(["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(`${String(block.label ?? "")} ${String(block.title ?? "")}`)) || block.id === latestReframeId),
   )
   const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
   const primaryVisual = visualBlocks.at(-1)
