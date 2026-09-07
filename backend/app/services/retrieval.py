@@ -32,6 +32,12 @@ class SourceAccessDenied(LookupError):
     pass
 
 
+class SourceContextUnavailable(RuntimeError):
+    def __init__(self, status: RetrievalStatus) -> None:
+        self.status = status
+        super().__init__("Grounded source context is temporarily unavailable")
+
+
 @dataclass(frozen=True)
 class SourceQuery:
     purpose: str

@@ -23,7 +23,11 @@ from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEviden
 from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues, synthesize_visual_spec
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene, _objective
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
-from app.services.retrieval import retrieve_note_context
+from app.services.retrieval import (
+    RetrievalStatus, SourceContextUnavailable, build_source_query, retrieve_note_context, retrieve_source,
+    serialize_source_context,
+)
+from app.models.learning_block import DocumentSourceIndex
 from app.services.adaptive_policy import content_policy
 
 router = APIRouter()
@@ -363,10 +367,42 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     if note:
         try: payload = json.loads(note.content)
         except (TypeError, ValueError): payload = {}
-    context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
-    context = _objective_context(payload, objective, context)
+    source_generation = (session.state or {}).get("sourceGeneration")
+    retrieved = None
+    if source_generation:
+        ask_concept_snapshot = _concept_for(session, objective)
+        query = build_source_query(
+            purpose="ask",
+            objective_title=str(objective.get("title") or ""),
+            objective_outcome=str(objective.get("outcome") or ""),
+            active_prompt=request.message,
+            learner_text=str(((session.state or {}).get("lastAskLucent") or {}).get("question") or ""),
+            misconception=str((ask_concept_snapshot.get("misconceptions") or [""])[-1]),
+            objective_id=str(objective.get("id") or ""),
+        )
+        retrieved = retrieve_source(
+            db,
+            user_id=user.id,
+            document_id=session.document_id,
+            expected_generation=UUID(str(source_generation)),
+            query=query,
+            anchor_block_ids=list(objective.get("sourceBlockIds") or []),
+        )
+        if retrieved.status in {RetrievalStatus.INDEXING, RetrievalStatus.FAILED, RetrievalStatus.SOURCE_CHANGED, RetrievalStatus.NOT_INDEXED}:
+            db.rollback()
+            raise HTTPException(status_code=503, detail={"code": retrieved.status.value.lower(), "message": "The source is temporarily unavailable. Your learning scene is unchanged."})
+        context = retrieved.legacy_dict()
+    else:
+        # Runtime-v2 sessions created before source indexing remain readable
+        # during migration; Phase 9 removes this generated-note compatibility.
+        context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
+        context = _objective_context(payload, objective, context)
     scope = _ask_scope(request.message, objective, context)
     _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_request", metadata={"scope": scope, "sourceSectionIds": context.get("sourceSectionIds", [])})
+    if retrieved is not None and retrieved.status == RetrievalStatus.WEAK:
+        _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": "UNSUPPORTED_SOURCE", "queryFingerprint": retrieved.query_fingerprint})
+        db.commit()
+        return AskLucentResponse(answer="The uploaded material doesn’t establish that answer. I can help you work with what this source does cover.", scope="OUT_OF_SCOPE")
     if scope == "OUT_OF_SCOPE":
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_refusal", metadata={"scope": scope}); db.commit()
         return AskLucentResponse(answer="I can help with the material you’re currently learning and related prerequisite concepts.", scope=scope)
@@ -572,7 +608,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     )
     ask_observation = _tutor_observation(session, objective, ask_concept, current_step, ask_state, source_context=context, candidates=ask_candidates) if objective else None
     if ask_observation is not None:
-        ask_decision = choose_tutor_decision(observation=ask_observation, fallback=ask_fallback, allowed_step_ids={row["id"] for row in ask_candidates if row.get("id")})
+        ask_decision = choose_tutor_decision(observation=ask_observation, context={"source": serialize_source_context(retrieved) if retrieved is not None else context.get("text", "")}, fallback=ask_fallback, allowed_step_ids={row["id"] for row in ask_candidates if row.get("id")})
         ask_state["lastTutorDecision"] = ask_decision.model_dump(by_alias=True)
         ask_state["tutorHypothesis"] = ask_decision.hypothesis
         ask_state["tutorGoal"] = ask_decision.pedagogical_goal
@@ -710,7 +746,7 @@ def submit_ask_interaction(session_id: UUID, interaction_id: str, request: Learn
     db.commit()
     return _session_payload(session)
 
-def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
+def _initial_state(db, user: User, document_id: int, plan: dict, *, source_generation: str | None = None) -> dict:
     # A newly-created session (including an explicit restart) must begin with
     # fresh evidence.  Reusing the most recent session's concept counters made
     # a fresh learner journey appear mastered and could advance after a wrong
@@ -721,7 +757,10 @@ def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
         previous = {}
         concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": previous.get("attempts", 0), "correct": previous.get("correct", 0), "partiallyCorrect": previous.get("partiallyCorrect", 0), "incorrect": previous.get("incorrect", 0), "insufficientEvidence": previous.get("insufficientEvidence", 0), "hintsUsed": previous.get("hintsUsed", 0), "interactionTypes": previous.get("interactionTypes", []), "misconceptions": previous.get("misconceptions", []), "failedStrategies": previous.get("failedStrategies", []), "successfulStrategies": previous.get("successfulStrategies", []), "failedModalities": previous.get("failedModalities", []), "successfulModalities": previous.get("successfulModalities", []), "recognitionEvidence": previous.get("recognitionEvidence", 0), "recallEvidence": previous.get("recallEvidence", 0), "explanationEvidence": previous.get("explanationEvidence", 0), "applicationEvidence": previous.get("applicationEvidence", 0), "transferEvidence": previous.get("transferEvidence", 0), "scaffoldingLevel": previous.get("scaffoldingLevel", 0), "scaffold": previous.get("scaffold", "FULL"), "hintDependence": previous.get("hintDependence", 0), "scaffoldDependence": previous.get("scaffoldDependence", 0), "reviewDue": previous.get("reviewDue"), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None, "contentPolicy": content_policy(objective)})
     queue = [c["conceptId"] for c in concepts if c["state"] in {"NEEDS_REVIEW", "STRUGGLING"} or c.get("reviewDue") in {"NEXT_SESSION", "FUTURE_REVIEW"}]
-    return {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": []}
+    state = {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": []}
+    if source_generation:
+        state["sourceGeneration"] = source_generation
+    return state
 
 @router.post("/documents/{document_id}/learn-sessions", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def create_learn_session(document_id: int, request: LearnSessionCreateRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
@@ -729,6 +768,13 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     if not note: raise HTTPException(status_code=409, detail="Create notes for this material before starting Learn")
     try: payload = json.loads(note.content)
     except (TypeError, ValueError): raise HTTPException(status_code=409, detail="The notes for this material are unavailable")
+    source_generation = payload.get("sourceGeneration")
+    if source_generation:
+        source_index = db.get(DocumentSourceIndex, document_id)
+        if source_index is None or str(source_index.generation_id) != str(source_generation):
+            raise HTTPException(status_code=409, detail={"code": "source_changed", "message": "The source changed. Start again from the updated material."})
+        if source_index.status != "READY":
+            raise HTTPException(status_code=503, detail={"code": "source_index_unavailable", "message": "The source is still being prepared. Try again shortly."})
     fingerprint = plan_fingerprint(payload, request.goal, request.familiarity)
     if not request.restart:
         existing = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.plan_fingerprint == fingerprint, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
@@ -751,7 +797,7 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
         # start a session and send a recoverable, user-facing source error.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     plan_data = plan.model_dump(by_alias=True)
-    session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, state=_initial_state(db, user, document.id, plan_data), status="active", plan_fingerprint=fingerprint)
+    session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, state=_initial_state(db, user, document.id, plan_data, source_generation=source_generation), status="active", plan_fingerprint=fingerprint)
     db.add(session); db.commit(); db.refresh(session)
     _ensure_session_runtime(db, session)
     db.commit()
@@ -829,6 +875,9 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     event = {"id": f"response-{session.id}-{interaction_id or 'scene'}", "type": request.event_type or "RESPONSE", "sceneId": request.scene_id or (scene.id if scene else None), "sceneRevision": request.scene_revision or (scene.revision if scene else None), "interactionId": interaction_id, "response": {"response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}}
     try:
         rendered, _private = process_tutor_event(session, event, db=db)
+    except SourceContextUnavailable as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail={"code": exc.status.value.lower(), "message": "The source is temporarily unavailable. Your progress is unchanged; try again shortly."}) from exc
     except Exception:
         db.rollback()
         raise

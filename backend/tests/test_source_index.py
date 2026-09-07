@@ -9,6 +9,7 @@ from app.models.learning_block import DocumentSourceIndex, PersistedLearningBloc
 from app.routers.ingestion import get_document_ingestor
 from app.services.embeddings import DeterministicEmbeddingProvider, set_embedding_provider
 from app.services.source_index import index_document
+from app.services.learn_tutor import set_tutor_provider
 from tests.conftest import TestSessionLocal
 
 
@@ -168,3 +169,90 @@ def test_index_failure_is_sanitized_and_retryable(client):
         assert source_index.status == "FAILED"
         assert source_index.failure_code == "embedding_unavailable"
         assert "secret" not in source_index.failure_code
+
+
+def test_ingested_learn_response_supplies_original_source_text_to_tutor(client):
+    raw_source = (
+        "The oscillating-source-token marks the original evidence: at a pendulum turning point, speed is zero "
+        "and gravitational potential energy is greatest."
+    )
+    uploaded = _upload(client, MutableIngestor(raw_source), "runtime-grounding.pdf").json()
+    session_response = client.post(
+        f"/documents/{uploaded['document_id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new", "restart": True},
+    )
+    assert session_response.status_code == 200
+    session = session_response.json()
+    assert session["scene"]
+
+    prompts = []
+    def tutor_provider(prompt, _tool_name, _schema, **_kwargs):
+        prompts.append(prompt)
+        return {}
+
+    fake_embedding = DeterministicEmbeddingProvider()
+    set_embedding_provider(fake_embedding)
+    set_tutor_provider(tutor_provider)
+    try:
+        scene = session["scene"]
+        interaction_id = scene.get("responseInteractionId")
+        request = {
+            "sceneId": scene["id"],
+            "sceneRevision": scene["revision"],
+            "interactionId": interaction_id,
+            "eventType": "RESPONSE" if interaction_id else "CONTINUE",
+            "response": "A deliberately incomplete explanation",
+            "optionId": "not-a-valid-option",
+        }
+        response = client.post(f"/learn-sessions/{session['id']}/responses", json=request)
+    finally:
+        set_tutor_provider(None)
+        set_embedding_provider(None)
+    assert response.status_code == 200
+    assert prompts
+    assert any("oscillating-source-token" in prompt for prompt in prompts)
+    assert any("SOURCE_CONTEXT_UNTRUSTED" in prompt for prompt in prompts)
+
+
+def test_ingested_ask_uses_same_original_source_and_does_not_mutate_evidence(client):
+    raw_source = (
+        "The satire-source-token identifies the source evidence: ironic praise can expose institutional hypocrisy "
+        "by making an audience infer the criticism beneath a literal statement."
+    )
+    uploaded = _upload(client, MutableIngestor(raw_source), "ask-grounding.pdf").json()
+    session = client.post(
+        f"/documents/{uploaded['document_id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new", "restart": True},
+    ).json()
+    before_evidence = session["conceptStates"]
+    active_id = session["scene"].get("responseInteractionId")
+    source_block_id = uploaded["learning_blocks"][0]["id"]
+    prompts = []
+
+    def tutor_provider(prompt, tool_name, _schema, **_kwargs):
+        prompts.append((tool_name, prompt))
+        if tool_name == "ask_lucent":
+            return {
+                "answer": "Ironic praise exposes hypocrisy by prompting the audience to infer the criticism.",
+                "toolCalls": [{"tool": "request_explanation", "arguments": {}}],
+                "sourceSectionIds": ["section-0"],
+                "sourceBlockIds": [source_block_id],
+            }
+        return {}
+
+    set_embedding_provider(DeterministicEmbeddingProvider())
+    set_tutor_provider(tutor_provider)
+    try:
+        response = client.post(
+            f"/learn-sessions/{session['id']}/ask", json={"message": "Explain this another way"}
+        )
+    finally:
+        set_tutor_provider(None)
+        set_embedding_provider(None)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sourceBlockIds"] == [source_block_id]
+    assert any(tool == "ask_lucent" and "satire-source-token" in prompt for tool, prompt in prompts)
+    assert body["scene"]["responseInteractionId"] == active_id
+    refreshed = client.get(f"/learn-sessions/{session['id']}").json()
+    assert refreshed["conceptStates"] == before_evidence

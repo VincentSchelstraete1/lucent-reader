@@ -740,6 +740,38 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         option_id = None
         ordered_ids = None
 
+    source_context_text = ""
+    source_generation = state.get("sourceGeneration")
+    if source_blocks is None and db is not None and source_generation:
+        from uuid import UUID
+        from app.services.retrieval import (
+            RetrievalStatus, SourceContextUnavailable, build_source_query, retrieve_source, serialize_source_context,
+        )
+        concept_snapshot = next((item for item in state.get("concepts", []) if item.get("conceptId") == str(objective.get("id"))), {})
+        retrieval_query = build_source_query(
+            purpose="response" if event_type == "RESPONSE" else "continue",
+            objective_title=str(objective.get("title") or ""),
+            objective_outcome=str(objective.get("outcome") or ""),
+            active_prompt=str(getattr(current, "prompt", "") or getattr(current, "content", "") or ""),
+            learner_text=str(response_text or ""),
+            misconception=str((concept_snapshot.get("misconceptions") or [""])[-1]),
+            objective_id=str(objective.get("id")),
+        )
+        retrieved = retrieve_source(
+            db,
+            user_id=session.user_id,
+            document_id=session.document_id,
+            expected_generation=UUID(str(source_generation)),
+            query=retrieval_query,
+            anchor_block_ids=list(getattr(current, "source_block_ids", []) or objective.get("sourceBlockIds", [])),
+        )
+        if retrieved.status != RetrievalStatus.SUPPORTED:
+            raise SourceContextUnavailable(retrieved.status)
+        source_blocks = retrieved.observation_blocks()
+        source_context_text = serialize_source_context(retrieved)
+    elif source_blocks:
+        source_context_text = "\n\n".join(str(block.get("text") or "") for block in source_blocks)[:8000]
+
     evaluation = None
     concept_id = str(objective.get("id"))
     concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == concept_id), {"conceptId": concept_id, "title": objective.get("title", "Concept"), "state": "INTRODUCED"})
@@ -750,7 +782,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
             if not expected and getattr(current, "required_concepts", None):
                 expected = " ".join(str(item) for item in current.required_concepts)
-            evaluation = diagnose_response(prompt=getattr(current, "prompt", ""), expected=expected, response=str(response_text), source_context=" ".join(str(x) for x in objective.get("sourceBlockIds", [])), fallback=evaluation)
+            evaluation = diagnose_response(prompt=getattr(current, "prompt", ""), expected=expected, response=str(response_text), source_context=source_context_text, fallback=evaluation)
         now = datetime.now(timezone.utc).isoformat()
         concept = dict(concept)
         concept.update({"attempts": int(concept.get("attempts", 0)) + 1, "lastSeen": now, "lastResult": evaluation.result})
@@ -1112,7 +1144,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     fallback = TutorDecision(targetConcept=concept_id, teachingAction=fallback_action.type, pedagogicalGoal="BUILD_INTUITION" if not evaluation or evaluation.result != "correct" else "VERIFY_UNDERSTANDING", pedagogicalStrategy="CONCEPTUAL_EXPLANATION" if next_step.type in {"teach", "walkthrough"} else "RETRIEVAL_PRACTICE", scaffoldLevel=concept.get("scaffold", "FULL"), nextStepId=next_step.id, actions=[])
     observation = build_tutor_observation(session, event=event, source_blocks=source_blocks)
     try:
-        decision = choose_tutor_decision(observation=observation, fallback=fallback, allowed_step_ids={item.id for item in candidates})
+        decision = choose_tutor_decision(observation=observation, context={"source": source_context_text}, fallback=fallback, allowed_step_ids={item.id for item in candidates})
     except Exception:
         decision = fallback
     # The decision selects the next candidate; the fallback is only used when
