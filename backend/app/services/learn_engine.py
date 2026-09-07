@@ -422,7 +422,10 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
         return LearnEvaluation(result="correct" if correct else "incorrect", confidence=0.98 if correct else 0.85, evidence="Numeric result is within the accepted tolerance." if correct else "Numeric result is outside the accepted tolerance.", misconception=None if correct else "Check the operation and units before calculating again.", remediationCategory="none" if correct else "example")
     normalized = _words(answer)
     accepted = any((bool(_words(item)) and _words(item) <= normalized) or _clean(item).casefold() == answer.casefold() for item in getattr(step, "accepted_answers", []))
-    required = set(getattr(step, "required_concepts", []))
+    # Generated requirements are authored as display text and may retain
+    # capitalization. Compare normalized words so "Ideal Pendulum" and
+    # "ideal pendulum" provide the same evidence.
+    required = _words(" ".join(str(item) for item in getattr(step, "required_concepts", [])))
     # Teach-back responses are open explanations, not fill-in-the-blank
     # strings. Requiring every generated token (often five words pulled from
     # an outcome sentence) incorrectly rejects a learner who states the
@@ -454,6 +457,35 @@ def build_remediation_step(objective: dict, failed_step: LearnStep, repair_id: s
         answer_id = getattr(failed_step, "answer_id", None)
         answer = next((option.label for option in getattr(failed_step, "options", []) if option.id == answer_id), None)
         accepted = [answer] if answer else accepted
+        if answer and failed_step.type == "prediction":
+            key_words = [word for word in re.findall(r"[a-z][a-z-]{3,}", answer.casefold()) if word not in {"this", "that", "with", "from"}][:5]
+            repair = ShortAnswerStep(
+                id=repair_id,
+                type="short_answer",
+                title="Reason from what you can see",
+                prompt=f"The next result is {answer}. What in the explanation or visual makes that follow?",
+                acceptedAnswers=[answer, str(objective.get("outcome") or "")],
+                requiredConcepts=key_words,
+                feedbackIncorrect=f"Look at the highlighted relationship that leads to {answer}.",
+                sourceSectionIds=failed_step.source_section_ids,
+                sourceBlockIds=failed_step.source_block_ids,
+            )
+    elif failed_step.type == "ordering":
+        labels = {item.id: item.label for item in getattr(failed_step, "items", [])}
+        ordered = [labels.get(item_id, str(item_id)) for item_id in getattr(failed_step, "correct_order", [])]
+        if len(ordered) >= 2:
+            relationship = f"{ordered[0]} then {ordered[1]}"
+            repair = ShortAnswerStep(
+                id=repair_id,
+                type="short_answer",
+                title="Explain the first transition",
+                prompt=f"Use the sequence and visual above: why does {ordered[1]} follow {ordered[0]}?",
+                acceptedAnswers=[relationship, str(objective.get("outcome") or "")],
+                requiredConcepts=[word for word in re.findall(r"[a-z][a-z-]{3,}", relationship.casefold()) if word not in {"then", "this", "that"}][:6],
+                feedbackIncorrect=f"Begin at {ordered[0]}, then describe what causes the change into {ordered[1]}.",
+                sourceSectionIds=failed_step.source_section_ids,
+                sourceBlockIds=failed_step.source_block_ids,
+            )
     elif failed_step.type == "matching":
         matches = getattr(failed_step, "matches", {})
         accepted = [str(next(iter(matches.values()), ""))]
@@ -472,18 +504,22 @@ def build_remediation_step(objective: dict, failed_step: LearnStep, repair_id: s
             scenario = str(matches.get(pairs[0].id, "the first mechanism"))
             repair = MultipleChoiceStep(id=repair_id, type="multiple_choice", title="Apply the distinction", prompt=f"A new case shows {scenario.lower()}. Which source concept does that case resemble?", options=options, answerId=answer_id, feedbackIncorrect=f"Compare the case with the two source mechanisms: {options[0]['label']} versus {options[1]['label']}.", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
     answer = next((str(item).strip() for item in accepted if str(item).strip()), "")
+    key_concepts = [
+        word for word in re.findall(r"[a-z][a-z-]{3,}", answer.casefold())
+        if word not in {"none", "this", "that", "with", "from", "into", "what", "does"}
+    ][:6]
     title = objective.get("title", "this concept")
     if repair is None:
         if failed_step.type in {"multiple_choice", "prediction", "ordering", "matching", "labeling"} and answer:
-            repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Explain {title}", prompt=f"In one sentence, explain the key change in {title}.", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", answer)[:5]], feedbackIncorrect=f"Connect {title} to this source-supported idea: {answer[:240]}", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
+            repair = ShortAnswerStep(id=repair_id, type="short_answer", title=f"Explain {title}", prompt=f"In one sentence, explain the key change in {title}.", acceptedAnswers=[answer], requiredConcepts=key_concepts, feedbackIncorrect=f"Use this relationship in your explanation: {answer[:240]}", sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids)
         else:
             grounded_answer = answer or str(getattr(failed_step, "content", "") or objective.get("outcome") or title)
             repair = ShortAnswerStep(
                 id=repair_id, type="short_answer", title=f"Apply {title}",
                 prompt=f"In your own words, what does {title} do in this material?",
                 acceptedAnswers=[grounded_answer],
-                requiredConcepts=[word for word in re.findall(r"[A-Za-z]{4,}", grounded_answer)[:5]],
-                feedbackIncorrect=f"Use this source-supported idea to guide your answer: {grounded_answer[:240]}",
+                requiredConcepts=[word for word in re.findall(r"[a-z][a-z-]{3,}", grounded_answer.casefold()) if word not in {"none", "this", "that", "with", "from", "into", "what", "does"}][:6],
+                feedbackIncorrect=f"Use this relationship to guide your answer: {grounded_answer[:240]}",
                 sourceSectionIds=failed_step.source_section_ids, sourceBlockIds=failed_step.source_block_ids,
             )
     source_text = " ".join(str(value) for value in (

@@ -35,7 +35,16 @@ def bounded_id(prefix: str, *parts: object, max_length: int = 60) -> str:
 
 def _required_concepts(text: str) -> list[str]:
     """Return normalized concept tokens for generated teach-back grading."""
-    return list(dict.fromkeys(re.findall(r"[a-z][a-z-]{3,}", str(text).casefold())))[:5]
+    filler = {
+        "because", "continuously", "between", "through", "their", "there",
+        "which", "while", "where", "when", "each", "instant", "using",
+        "works", "result", "predicts", "described", "material", "concept",
+    }
+    words = [
+        word for word in re.findall(r"[a-z][a-z-]{3,}", str(text).casefold())
+        if word not in filler
+    ]
+    return list(dict.fromkeys(words))[:6]
 
 
 def _visual_supports_remediation(scene: LearningScene, interaction) -> bool:
@@ -705,7 +714,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if retrieved.status != RetrievalStatus.SUPPORTED:
                 raise SourceContextUnavailable(retrieved.status)
             source_context_text = serialize_source_context(retrieved, max_chars=5000)
-        if response_text and not is_explicit_uncertainty(str(response_text)) and step.type in {
+        if evaluation.result != "correct" and response_text and not is_explicit_uncertainty(str(response_text)) and step.type in {
             "short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step",
         }:
             expected = " ".join(getattr(step, "accepted_answers", []) or []) or str(getattr(step, "answer", ""))
@@ -876,7 +885,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if event_type == "RESPONSE" and current is not None:
         from app.services.adaptive_policy import next_scaffold, prerequisite_ids, review_due
         evaluation = evaluate_step(current, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
-        if response_text and not is_explicit_uncertainty(response_text) and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
+        if evaluation.result != "correct" and response_text and not is_explicit_uncertainty(response_text) and current.type in {"short_answer", "problem", "numeric", "fill_blank", "teach_back", "worked_step"}:
             expected = " ".join(getattr(current, "accepted_answers", []) or []) or str(getattr(current, "answer", ""))
             if not expected and getattr(current, "required_concepts", None):
                 expected = " ".join(str(item) for item in current.required_concepts)
