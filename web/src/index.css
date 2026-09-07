@@ -162,6 +162,10 @@
 .learn-scene-shell > .learn-step > .learn-scene-practice { order: 3; }
 .learn-scene-shell > .learn-step > .learn-step-actions { order: 4; }
 .learn-scene-practice { border: 1px solid #eadcc0; border-radius: 16px; background: #fffbf2; margin-top: 1.35rem; padding: 1.2rem 1.25rem 1.1rem; box-shadow: 0 8px 24px rgba(120, 92, 42, .06); }
+.learn-scene-practice .learn-question { max-width: none; }
+.learn-scene-practice .learn-options,
+.learn-scene-practice .learn-answer,
+.learn-scene-practice .learn-structured-response { width: 100%; max-width: none; }
 .learn-scene-practice.teaching-only { border-top: 0; margin-top: 0; padding-top: 0; }
 .learn-scene-practice.teaching-only > .learn-action-kicker,
 .learn-scene-practice.teaching-only > h3 { display: none; }
