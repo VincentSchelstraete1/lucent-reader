@@ -37,6 +37,15 @@ The progressive job registry is intentionally still process-local. Polling there
 
 These stable event fields can be aggregated by the deployment log collector to calculate per-route/provider p50/p95 latency, provider error/fallback counts, retrieval contribution, and progressive-ingestion failure rates. Phase 3 intentionally adds measurement only; it does not optimize or replace any RAG/Learn path.
 
+### Phase 4 — CI, reproducible deployment, and readiness: complete
+
+- **Continuous integration:** `.github/workflows/ci.yml` runs on pull requests, `main` pushes, and manual dispatch. The backend job installs pinned Python dependencies, starts PostgreSQL 16, applies and verifies Alembic head, and runs the complete deterministic suite with tutor-model calls disabled. The frontend job installs from `package-lock.json`, typechecks, runs the complete suite, and builds production assets. No provider credentials or live calls are required.
+- **Backend image:** `backend/Dockerfile` builds the existing FastAPI monolith on pinned Python 3.13 and starts the explicit Uvicorn production command as a non-root user. Migrations are present in the image but run as a separate release step.
+- **Frontend image:** `web/Dockerfile` builds with pinned Node 22 and serves immutable assets plus SPA fallback through pinned Nginx. `VITE_API_URL` is an explicit build argument and the static server has its own lightweight liveness endpoint.
+- **Reference deployment:** `compose.production.yml` describes only the current architecture—PostgreSQL, a one-shot migration container, one API process, and one static web process—with health-gated startup. It intentionally keeps one API replica because progressive jobs are process-local.
+- **Configuration/runbook:** `.env.production.example` enumerates required security, provider, pool, retry, logging, upload, and lifecycle settings. `docs/PRODUCTION_DEPLOYMENT.md` documents build/migrate/start, OAuth/origin constraints, probes, release verification, rollback boundaries, and the external provider privacy gate.
+- **Liveness/readiness:** `/healthz` proves process liveness without dependencies. `/readyz` executes a PostgreSQL probe and requires the database's Alembic revision set to exactly match the repository heads. Failure returns a bounded 503 reason without connection details. Readiness deliberately avoids Anthropic/Voyage calls.
+
 ## Validation evidence
 
 - Focused backend hardening/ingestion/note/quiz suite: 65 passed.
@@ -71,6 +80,18 @@ These stable event fields can be aggregated by the deployment log collector to c
 - Running backend health: HTTP 200, with the emitted event `http_request_complete method=GET route=/ status=200 outcome=success ... duration_ms=0.6` observed in the Uvicorn stream.
 - Native interactive browser smoke remains unavailable because the Mac is locked. This is an environment restriction rather than an observed application failure; no user-facing code changed in this phase.
 
+### Phase 4 validation evidence
+
+- Focused readiness and preserved production-hardening tests: 15 passed.
+- Full backend suite: 425 passed, 7 existing dependency deprecation warnings.
+- Frontend typecheck: passed.
+- Full frontend suite: 128 passed.
+- Production frontend build: passed (the existing large-chunk warning remains).
+- CI and Compose YAML parsed successfully; `docker compose config --quiet` accepted the production configuration with the checked-in example values.
+- Live local backend returned HTTP 200 from both `/healthz` and `/readyz` against PostgreSQL at migration head.
+- Alembic current and repository heads both report `0010_persist_learning_blocks (head)`.
+- Docker CLI is installed, but local image builds could not run because Docker Desktop's daemon was unavailable while the Mac remained locked. The exact build definitions and resolved Compose graph were validated; image execution remains part of Phase 5 final acceptance when the daemon is available.
+
 ## Audit/source note
 
 `AUDIT_REPORT.md` was not present in the repository, any branch history, or the supplied attachment directory at this checkpoint. Phase 1 was therefore reconciled against the explicit Tier 1 findings in the user-provided productionization objective and the current code/history. No absent-audit claim was treated as additional scope.
@@ -81,4 +102,4 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
 
 ## Next phase (do not begin without explicit instruction)
 
-Phase 4 adds CI, reproducible deployment configuration, environment/migration documentation, and meaningful liveness/readiness checks. It must preserve all Phase 1–3 boundaries and the accepted RAG/Learn behavior.
+Phase 5 is final production acceptance only: run the complete validation and authorized-fixture browser regression, classify the production audit findings, finish the handoff, and fix only concrete regressions. No new functionality or speculative infrastructure belongs in that phase.

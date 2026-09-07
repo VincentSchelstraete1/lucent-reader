@@ -1,8 +1,14 @@
 import logging
 import time
+from functools import lru_cache
+from pathlib import Path
 
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from dotenv import load_dotenv
 load_dotenv()
 from app.routers.ai import router as ai_router
@@ -16,6 +22,7 @@ from app.routers.routing import router as routing_router
 from app.routers.step_through import router as step_through_router
 from app.routers.learn import router as learn_router
 from app.config import settings
+from app.database import engine
 import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
 
@@ -91,6 +98,43 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "backend is alive"}
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Process liveness only; dependencies are intentionally not consulted."""
+    return {"status": "alive"}
+
+
+@lru_cache(maxsize=1)
+def _expected_database_revisions() -> frozenset[str]:
+    backend_root = Path(__file__).resolve().parents[1]
+    config = AlembicConfig(str(backend_root / "alembic.ini"))
+    return frozenset(ScriptDirectory.from_config(config).get_heads())
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz():
+    """Confirm PostgreSQL is reachable and its schema is at repository head."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            current = frozenset(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
+        expected = _expected_database_revisions()
+        if current != expected:
+            logger.warning(
+                "readiness_check outcome=not_ready component=database reason=migration_mismatch current_count=%s expected_count=%s",
+                len(current),
+                len(expected),
+            )
+            return JSONResponse(status_code=503, content={"status": "not_ready", "component": "database", "reason": "migration_mismatch"})
+    except Exception as exc:
+        logger.warning(
+            "readiness_check outcome=not_ready component=database reason=unavailable exception_type=%s",
+            type(exc).__name__,
+        )
+        return JSONResponse(status_code=503, content={"status": "not_ready", "component": "database", "reason": "unavailable"})
+    return {"status": "ready"}
 
 app.include_router(ai_router, tags=["AI"])
 app.include_router(notes_router, tags=["Notes"])
