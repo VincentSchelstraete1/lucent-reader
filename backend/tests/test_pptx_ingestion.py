@@ -66,17 +66,20 @@ class StubPptxIngestor:
             type="text",
             bbox=None,
             reading_order=0,
-            text="stub slide text",
+            text="Direct-mapped caches place each memory block in one cache location.",
             location=SourceLocation(kind="slide", index=1, sequence_id="shape-1"),
         )
         page = RawPage(
-            None, "stub slide text", [block], location=SourceLocation(kind="slide", index=1)
+            None,
+            "Direct-mapped caches place each memory block in one cache location.",
+            [block],
+            location=SourceLocation(kind="slide", index=1),
         )
         return RawDocument(
             source_type="pptx",
             filename=filename,
             page_count=1,
-            markdown="stub slide text",
+            markdown="Direct-mapped caches place each memory block in one cache location.",
             pages=[page],
             images=[],
         )

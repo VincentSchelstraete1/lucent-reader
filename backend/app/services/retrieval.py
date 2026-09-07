@@ -17,6 +17,7 @@ from app.models.document import Document
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
 from app.models.source import Source
 from app.services.embeddings import EmbeddingError, get_embedding_provider
+from app.services.source_index import embedding_input_for
 
 
 class RetrievalStatus(StrEnum):
@@ -198,7 +199,8 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     used = 0
     truncated = False
     for row, score, selection in selected[:8]:
-        excerpt = row.text.strip()
+        excerpt = embedding_input_for({"title": row.title, "heading_ancestry": row.heading_ancestry,
+                                       "text": row.text, "attachments": row.attachments}).strip()
         if len(excerpt) > 3000:
             excerpt = excerpt[:3000].rsplit(" ", 1)[0].strip()
             truncated = True
@@ -232,7 +234,15 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
 def serialize_source_context(context: RetrievedSourceContext, *, max_chars: int = 8000) -> str:
     payload = [{"blockIds": block.block_ids, "sectionIds": block.section_ids,
                 "source": block.source, "text": block.text} for block in context.blocks]
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))[:max_chars]
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    while len(encoded) > max_chars and len(payload) > 1:
+        payload.pop()
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded) > max_chars and payload:
+        overhead = len(json.dumps([{**payload[0], "text": ""}], ensure_ascii=False, separators=(",", ":")))
+        payload[0]["text"] = payload[0]["text"][: max(0, max_chars - overhead - 4)].rsplit(" ", 1)[0]
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return encoded
 
 
 def retrieve_note_context(note_payload: dict, query: str, limit: int = 3) -> dict:

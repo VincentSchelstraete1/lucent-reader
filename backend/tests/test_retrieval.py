@@ -13,6 +13,7 @@ from app.services.retrieval import (
     SourceQuery,
     build_source_query,
     retrieve_source,
+    serialize_source_context,
 )
 from tests.conftest import TestSessionLocal
 
@@ -116,3 +117,18 @@ def test_bounded_query_omits_empty_uncertainty_and_keeps_runtime_target():
     assert "Confuses height" in query.text
     assert query.objective_id == "energy"
     assert len(query.text) <= 1200
+
+
+def test_serialized_prompt_context_stays_valid_json_under_budget(client):
+    owner, document_id, generation, provider = _seed_index(client)
+    set_embedding_provider(provider)
+    try:
+        with TestSessionLocal() as db:
+            context = retrieve_source(db, user_id=owner, document_id=document_id,
+                expected_generation=generation, query=SourceQuery("ask", "energy"), top_k=3)
+    finally:
+        set_embedding_provider(None)
+    import json
+    serialized = serialize_source_context(context, max_chars=220)
+    assert len(serialized) <= 220
+    assert isinstance(json.loads(serialized), list)

@@ -62,15 +62,22 @@ class StubDocxIngestor:
             type="text",
             bbox=None,
             reading_order=0,
-            text="stub paragraph",
+            text="Direct-mapped caches place each memory block in one cache location.",
             location=SourceLocation(kind="document", sequence_id="paragraph-1"),
         )
         return RawDocument(
             source_type="docx",
             filename=filename,
             page_count=1,
-            markdown="stub paragraph",
-            pages=[RawPage(None, "stub paragraph", [block], location=SourceLocation(kind="document"))],
+            markdown="Direct-mapped caches place each memory block in one cache location.",
+            pages=[
+                RawPage(
+                    None,
+                    "Direct-mapped caches place each memory block in one cache location.",
+                    [block],
+                    location=SourceLocation(kind="document"),
+                )
+            ],
             images=[],
         )
 

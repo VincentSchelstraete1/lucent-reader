@@ -566,6 +566,7 @@ class AskLucentModelResponse(BaseModel):
     tool_calls: list[AskLucentToolCall] = Field(default_factory=list, alias="toolCalls", max_length=3)
     source_section_ids: list[str] = Field(default_factory=list, alias="sourceSectionIds", max_length=8)
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
+    supported: bool = True
 
 
 class LearnStepView(BaseModel):
