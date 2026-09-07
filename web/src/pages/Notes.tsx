@@ -109,6 +109,9 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   // intervention alongside explanation/visual/feedback blocks.
   const latestTutorId = [...rawBlocks].reverse().find((block) => block.kind === "tutor_message")?.id
   const blocks = rawBlocks.filter((block) => block.kind !== "tutor_message" || block.id === latestTutorId)
+  const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
+  const primaryVisual = visualBlocks.at(-1)
+  let visualRendered = false
   if (!blocks.length) return null
   const fallbackBlocks = blocks
   const learnerTutorText = (content: string) => {
@@ -121,18 +124,29 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     // markers at this boundary so raw `**bold**`/`__bold__` never reaches the
     // learner UI, while preserving the words themselves.
     return content
+      .replace(/I'd be happy to (show you|help with)[^.!?]*[.!?]\s*/i, "")
+      .replace(/Let me (display|show) (that|this|a visual)[^.!?]*[.!?]\s*/i, "")
+      .replace(/^(Great!\s*)?Let me check your understanding[^:]*:\s*/i, "")
+      .replace(/^Here's a question for you:\s*/i, "")
       .replace(/\*\*(.*?)\*\*/g, "$1")
       .replace(/__(.*?)__/g, "$1")
       .replace(/\s{2,}/g, " ")
       .trim()
   }
   const polishLearnerText = (content: string) => content
+    .replace(/^(Great!\s*)?Let me check your understanding[^:]*:\s*/i, "")
+    .replace(/^Here's a question for you:\s*/i, "")
     .replace(/\*\*(.*?)\*\*/g, "$1")
     .replace(/__(.*?)__/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim()
   return <div className="learn-scene-support" aria-label="Tutor teaching">
     {fallbackBlocks.map((block) => {
+      if (block.kind === "visual") {
+        if (visualRendered || !primaryVisual || block.id !== visualBlocks[0]?.id) return null
+        visualRendered = true
+        block = primaryVisual
+      }
       const referenced = block.visualRef && typeof block.visualRef.componentIndex === "number" ? note.components[block.visualRef.componentIndex] : null
       return <section className={`learn-scene-block learn-scene-block-${block.kind}`} key={block.id}>
         <p className="learn-scene-block-label">{block.kind === "tutor_message" || block.label?.toLowerCase() === "try" ? (block.label?.toLowerCase() === "try" ? "Tutor prompt" : "Tutor") : block.kind === "feedback" ? "Feedback" : block.label}</p>

@@ -463,12 +463,19 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         # arbitrary model-generated visual JSON is never accepted here.
         visual_spec = visual_action.get("visualSpec")
         visual_ref = visual_action.get("visualRef")
-        can_add_visual = bool(visual_action.get("newVisual")) or not any(existing.visual_spec is not None or existing.visual_ref is not None for existing in blocks)
-        if (visual_spec or visual_ref) and can_add_visual:
+        can_add_visual = bool(visual_spec or visual_ref)
+        if can_add_visual:
             try:
                 from app.schemas.learn import VisualSpec
                 visual_block = LearningSceneBlock(id=bounded_id("ask-visual", session.id, message[:80]), kind="visual", label="Watch", title=None, content="Watch the source-supported relationship change.", visualSpec=VisualSpec.model_validate(visual_spec) if visual_spec else None, visualRef=visual_ref if visual_ref else None, sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
-                blocks.append(visual_block)
+                # One authoritative visual surface: a new grounded view
+                # replaces the prior visual block in place so the scene does
+                # not grow a second competing visual card.
+                visual_index = next((index for index, existing in enumerate(blocks) if existing.visual_spec is not None or existing.visual_ref is not None), None)
+                if visual_index is None:
+                    blocks.append(visual_block)
+                else:
+                    blocks[visual_index] = visual_block
             except Exception:
                 pass
         updates: dict[str, Any] = {"stage": int(visual_action.get("stage", visual_state.stage if visual_state else 0))}

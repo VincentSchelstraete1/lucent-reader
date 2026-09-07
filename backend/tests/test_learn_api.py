@@ -166,7 +166,7 @@ def test_ask_show_visual_can_add_a_new_grounded_visual_surface(client):
     assert second.status_code == 200
     scene = second.json()["scene"]
     after_count = sum(block.get("kind") in {"visual", "animation"} for block in scene["blocks"])
-    assert after_count > before_count, {"before": first.json(), "after": second.json()}
+    assert after_count == before_count == 1, {"before": first.json(), "after": second.json()}
     assert second.json()["visualAction"]["type"] == "add_visual"
 
 
