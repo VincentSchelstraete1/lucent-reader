@@ -601,7 +601,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # A request for another question is a scene re-composition, not another
     # chat paragraph. Choose an unanswered practice asset from the active
     # objective and replace only the practice block in the same scene.
-    if any(term in lowered for term in ("another question", "different question", "ask me a different", "simpler question")):
+    if any(term in lowered for term in ("another question", "different question", "ask me a different", "simpler question", "harder question")):
         answered = set(ask_state.get("answeredInteractionIds") or [])
         active_id = str((load_current_scene(session).response_interaction_id if load_current_scene(session) else "") or getattr(current_step, "id", ""))
         alternatives = [candidate for candidate in (_parse_step(raw) for raw in objective.get("steps", [])) if candidate and candidate.id not in answered and candidate.id != active_id and candidate.type not in {"teach", "walkthrough"}]
@@ -611,7 +611,13 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         # authored candidates remain available to ordinary tutor planning; Ask
         # must reliably produce a new active interaction in the same scene.
         outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-        alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=f"Apply {objective.get('title', 'this idea')}", prompt=f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?", acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
+        harder = "harder question" in lowered
+        simpler = "simpler question" in lowered
+        prompt = (f"Apply {objective.get('title', 'this concept')} in a new situation. Explain what would happen and why." if harder else f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?" if not simpler else f"Which statement best captures the central idea of {objective.get('title', 'this concept')}?")
+        if simpler:
+            alternatives = [MultipleChoiceStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="multiple_choice", title=f"Start with the central idea", prompt=prompt, options=[{"id": "correct", "label": outcome[:160]}, {"id": "other", "label": "The concept is unrelated to the material."}], answerId="correct", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
+        else:
+            alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=(f"Transfer {objective.get('title', 'this idea')}" if harder else f"Apply {objective.get('title', 'this idea')}"), prompt=prompt, acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
         if alternatives:
             replacement = alternatives[0]
             replacement_step = replacement
