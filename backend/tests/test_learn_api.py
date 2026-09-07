@@ -131,6 +131,9 @@ def test_ask_question_difficulty_intents_shape_grounded_followups(client):
     simpler = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me a simpler question"}).json()
     simple = next(block["step"] for block in simpler["scene"]["blocks"] if block["kind"] == "practice")
     assert simple["type"] == "multiple_choice"
+    assert len(simple["options"]) == 3
+    assert not simple["options"][0]["label"].casefold().startswith(("explain ", "apply ", "recall "))
+    assert simple["options"][0]["label"] == "A source-grounded idea."
     harder = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me a harder question"}).json()
     hard = harder["scene"]["inlineInteraction"]
     assert hard["type"] == "short_answer"

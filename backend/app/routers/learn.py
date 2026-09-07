@@ -111,6 +111,31 @@ def _grounded_example(payload: dict, objective: dict, context: dict) -> str | No
             return f"For example, {big_idea}"
     return None
 
+
+def _grounded_central_statement(objective: dict, context: dict) -> str:
+    """Return a learner-facing claim for a simpler multiple-choice check.
+
+    Objective ``outcome`` values are intentionally phrased as actions (for
+    example, ``Explain how ... works``).  They are useful for tutor planning
+    but are not answer choices.  Prefer the active source section's big idea,
+    then fall back to a cleaned objective claim so a simpler question always
+    presents a factual statement rather than an instruction.
+    """
+    source = str(context.get("text") or "").strip()
+    if source:
+        # Keep the first complete source sentence when possible; this avoids
+        # turning a long retrieved passage into an unwieldy option.
+        match = re.search(r"^(.{20,}?[^.!?](?:[.!?]|$))", source, re.S)
+        candidate = (match.group(1) if match else source).strip()
+        if len(candidate) >= 20:
+            return candidate[:160].rstrip()
+    title = str(objective.get("title") or "this concept").strip()
+    outcome = str(objective.get("outcome") or objective.get("bottleneck") or "").strip()
+    cleaned = re.sub(r"^(?:explain|describe|apply|recall|recognize|identify|state|understand)\s+(?:how\s+)?", "", outcome, flags=re.I).strip(" .")
+    if cleaned and cleaned.casefold() != title.casefold():
+        return f"{title}: {cleaned}."[:160]
+    return f"{title} is explained by the relationships described in the source material."[:160]
+
 def _now() -> str: return datetime.now(timezone.utc).isoformat()
 def _parse_step(raw: dict):
     try: return STEP_ADAPTER.validate_python(raw)
@@ -623,7 +648,12 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         simpler = "simpler question" in lowered
         prompt = (f"Apply {objective.get('title', 'this concept')} in a new situation. Explain what would happen and why." if harder else f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?" if not simpler else f"Which statement best captures the central idea of {objective.get('title', 'this concept')}?")
         if simpler:
-            alternatives = [MultipleChoiceStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="multiple_choice", title=f"Start with the central idea", prompt=prompt, options=[{"id": "correct", "label": outcome[:160]}, {"id": "other", "label": "The concept is unrelated to the material."}], answerId="correct", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
+            correct_label = _grounded_central_statement(objective, context)
+            alternatives = [MultipleChoiceStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="multiple_choice", title="Start with the central idea", prompt=prompt, options=[
+                {"id": "correct", "label": correct_label},
+                {"id": "other", "label": f"{objective.get('title', 'This concept')} has no measurable effect in the situation."},
+                {"id": "unrelated", "label": "The material describes a different process entirely."},
+            ], answerId="correct", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
         else:
             alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=(f"Transfer {objective.get('title', 'this idea')}" if harder else f"Apply {objective.get('title', 'this idea')}"), prompt=prompt, acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
         if alternatives:
