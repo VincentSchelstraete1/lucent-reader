@@ -107,6 +107,7 @@ def compose_learning_scene(
     current_step, action: TutorAction | None, decision: TutorDecision | None,
     concept: dict, state: dict, feedback: str | None = None,
     feedback_kind: str | None = None, evaluation: LearnEvaluation | None = None,
+    teaching_override=None,
 ) -> LearningScene:
     """Compose one bounded tutor turn from existing validated teaching assets.
 
@@ -140,8 +141,11 @@ def compose_learning_scene(
 
     if feedback:
         result_label = "Feedback"
-        specific = evaluation.misconception if evaluation and evaluation.misconception else feedback
-        add(kind="feedback", label=result_label, title=None, content=specific, step=None, visual_spec=None, visual_ref=None)
+        # The runtime passes the learner-facing acknowledgement explicitly.
+        # A diagnosis/misconception may be useful inside the teaching block,
+        # but substituting it here duplicated the explanation and bypassed the
+        # student-language boundary.
+        add(kind="feedback", label=result_label, title=None, content=feedback, step=None, visual_spec=None, visual_ref=None)
 
     transition = decision.transition_message if decision else None
     if transition and any(phrase in transition.casefold() for phrase in ("using your response", "changing the approach", "choose the next", "evidence")):
@@ -162,7 +166,7 @@ def compose_learning_scene(
             elif directive.content or directive.visual_ref:
                 add(kind=directive.kind, label=directive.label, title=directive.title, content=directive.content, step=None, visual_spec=None, visual_ref=directive.visual_ref)
 
-    teaching = support or (current_step if getattr(current_step, "type", None) in {"teach", "walkthrough"} else None)
+    teaching = teaching_override or support or (current_step if getattr(current_step, "type", None) in {"teach", "walkthrough"} else None)
     if teaching is not None:
         if getattr(teaching, "content", None):
             add(kind="explanation", label="Understand", title=teaching.title, content=teaching.content, step=None, visual_spec=None, visual_ref=None)
@@ -190,7 +194,10 @@ def compose_learning_scene(
                 if candidate_spec is not None or candidate_ref is not None:
                     add(kind="animation" if candidate.type == "walkthrough" else "visual", label="Watch", title=None, step=None, visual_spec=candidate_spec, visual_ref=candidate_ref)
                     break
-        if not any(block.kind == "practice" for block in blocks):
+        # A remediation teaching override is paired with the runtime-selected
+        # follow-up below. Do not let the generic authored-asset scan insert a
+        # different unanswered question ahead of it.
+        if teaching_override is None and not any(block.kind == "practice" for block in blocks):
             for raw in steps:
                 candidate = _parse(raw)
                 if candidate and candidate.id not in set(state.get("answeredInteractionIds") or []) and candidate.type in _INTERACTIVE_TYPES and not student_facing_quality_issues(candidate, source_text):

@@ -38,6 +38,27 @@ def _required_concepts(text: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"[a-z][a-z-]{3,}", str(text).casefold())))[:5]
 
 
+def _visual_supports_remediation(scene: LearningScene, interaction) -> bool:
+    """Whether the current visual can express the failed interaction's idea.
+
+    A visual should not advance merely because one exists. Matching failures
+    are especially prone to this: a process diagram about one mechanism does
+    not necessarily explain a comparison between two different cases.
+    """
+    visual = next((block.visual_spec for block in scene.blocks if block.kind in {"visual", "animation"} and block.visual_spec), None)
+    if visual is None or not visual.stages:
+        return False
+    if getattr(interaction, "type", None) != "matching":
+        return True
+    pair_words = set()
+    for pair in getattr(interaction, "pairs", []) or []:
+        pair_words.update(_required_concepts(getattr(pair, "label", "")))
+    visual_words = set()
+    for node in visual.nodes:
+        visual_words.update(_required_concepts(f"{node.label} {node.detail or ''}"))
+    return bool(pair_words.intersection(visual_words))
+
+
 def _state(session) -> dict[str, Any]:
     return dict(session.state or {})
 
@@ -981,6 +1002,128 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, step_index=0, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.evidence, feedback_kind="info", evaluation=evaluation)
                     private_next = _private_for_rendered_scene(rendered, objective_id=prerequisite_id, decision=prereq_decision, fallback_step=prereq_next, objective=prerequisite)
                     return persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), private_next
+
+    # A failed or uncertain response becomes one cohesive intervention: a
+    # specific teaching surface followed by a new check of that same idea.
+    # Previously the runtime selected an unused generic teaching asset and
+    # the scene compiler attached the next authored question, producing an
+    # unrelated content -> quiz transition despite having the failed private
+    # interaction available here.
+    if (
+        evaluation is not None
+        and evaluation.result in {"incorrect", "partially_correct"}
+        and int(concept.get("attempts", 0) or 0) >= 3
+    ):
+        concept["state"] = "NEEDS_REVIEW"
+        concept["reviewDue"] = "NEXT_SESSION"
+        state["revisitQueue"] = list(dict.fromkeys([*state.get("revisitQueue", []), concept_id]))[:12]
+        state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
+        session.state = state
+        review_scene = scene.model_copy(update={"blocks": [block for block in scene.blocks if block.kind != "practice"], "response_interaction_id": None, "progress": {"status": "needs_review"}})
+        return _advance_objective_or_complete(
+            session, state, review_scene, exclude_concept_id=concept_id,
+            event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db,
+        )
+
+    if evaluation is not None and evaluation.result in {"incorrect", "partially_correct", "insufficient_evidence"} and current is not None:
+        from app.services.learn_engine import build_remediation_step
+
+        attempt_no = max(int(concept.get("attempts", 0)), 1)
+        repair_id = bounded_id("repair", concept_id, attempt_no, current.id, int(scene.revision or 0) + 1)
+        try:
+            repair = build_remediation_step(objective, current, repair_id)
+        except Exception:
+            outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+            repair = ShortAnswerStep(
+                id=repair_id,
+                type="short_answer",
+                title=f"Apply {objective.get('title', 'the idea')}",
+                prompt=f"Using what was just explained, describe the key relationship in {objective.get('title', 'this concept')}.",
+                acceptedAnswers=[outcome],
+                requiredConcepts=_required_concepts(outcome),
+                hints=[f"Start from this source-supported idea: {outcome[:220]}"],
+                feedbackIncorrect=f"Return to the relationship described here: {outcome[:260]}",
+                sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+            )
+
+        teaching_content = str(
+            evaluation.misconception
+            or getattr(current, "feedback_incorrect", None)
+            or objective.get("bottleneck")
+            or objective.get("outcome")
+            or objective.get("title")
+        )
+        teaching = TeachStep(
+            id=bounded_id("teach-repair", concept_id, attempt_no, current.id),
+            type="teach",
+            title=f"Let's clarify {objective.get('title', 'the idea')}",
+            content=teaching_content[:900],
+            sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+            sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+        )
+        fallback_action = TutorAction(
+            id=bounded_id("action", concept_id, repair.id),
+            type="ask_free_response",
+            conceptId=concept_id,
+            stepId=repair.id,
+            rationale="Teach the diagnosed distinction, then check that same distinction.",
+        )
+        fallback_decision = TutorDecision(
+            targetConcept=concept_id,
+            teachingAction=fallback_action.type,
+            pedagogicalGoal="BUILD_INTUITION" if evaluation.result == "insufficient_evidence" else "CORRECT_MISCONCEPTION",
+            pedagogicalStrategy="SCAFFOLDED_PRACTICE" if evaluation.result == "insufficient_evidence" else "CONTRAST_CASE",
+            scaffoldLevel=concept.get("scaffold", "FULL"),
+            nextStepId=repair.id,
+            transitionMessage="Let's make the distinction clear, then use it right away.",
+            rationale="The next learner action must depend on the teaching intervention.",
+        )
+        observation = build_tutor_observation(session, event=event, source_blocks=source_blocks)
+        try:
+            decision = choose_tutor_decision(
+                observation=observation,
+                context={"source": source_context_text},
+                fallback=fallback_decision,
+                allowed_step_ids={repair.id},
+            )
+        except Exception:
+            decision = fallback_decision
+
+        visual_state = scene.visual_state or LearningVisualState()
+        if _visual_supports_remediation(scene, current) and (
+            evaluation.remediation_category == "change_modality"
+            or decision.pedagogical_strategy in {"VISUAL_MODEL", "ANIMATED_MECHANISM"}
+            or decision.visual_action
+        ):
+            visual_block = next((block for block in scene.blocks if block.kind in {"visual", "animation"} and block.visual_spec), None)
+            if visual_block is not None and visual_block.visual_spec and visual_block.visual_spec.stages:
+                next_stage = min(int(visual_state.stage) + 1, len(visual_block.visual_spec.stages) - 1)
+                stage = visual_block.visual_spec.stages[next_stage]
+                active_nodes = list((stage.get("activeNodeIds") or stage.get("active_node_ids") or []) if isinstance(stage, dict) else stage.active_node_ids)
+                visual_state = visual_state.model_copy(update={"stage": next_stage, "highlighted_element_ids": active_nodes})
+                state["visualState"] = visual_state.model_dump(by_alias=True)
+                teaching.content = f"{teaching.content[:760]} In the visual, follow the highlighted stage and the relationship connected to it."
+
+        state["usedTeachingIds"] = list(dict.fromkeys([*(state.get("usedTeachingIds") or []), teaching.id]))[-16:]
+        state["lastTutorDecision"] = decision.model_dump(by_alias=True)
+        state["previousTutorActions"] = (list(state.get("previousTutorActions", [])) + [decision.teaching_action])[-8:]
+        state["lastFeedback"] = evaluation.student_message or evaluation.misconception or "Let's work through the key relationship."
+        state["lastFeedbackKind"] = "info"
+        session.state = state
+        rendered = compose_learning_scene(
+            session_id=str(session.id), objective=objective, steps=steps, step_index=0,
+            current_step=repair, action=fallback_action, decision=decision,
+            concept=concept, state=state,
+            feedback=state["lastFeedback"], feedback_kind="info", evaluation=evaluation,
+            teaching_override=teaching,
+        )
+        rendered = rendered.model_copy(update={"visual_state": visual_state})
+        private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=repair, objective=objective)
+        return persist_scene_revision(
+            session, rendered, private_next,
+            event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db,
+        ), private_next
 
     candidates = []
     for raw in steps:

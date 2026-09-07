@@ -139,6 +139,10 @@ def test_matching_public_options_use_bounded_ids_and_still_grade_correctly():
     assert all(option.id not in {first, second} for option in view.options)
     submitted = json.dumps({"real": view.options[0].id, "ideal": view.options[1].id})
     assert evaluate_step(matching, response=submitted, option_id=None).result == "correct"
+    reversed_submission = json.dumps({"real": view.options[1].id, "ideal": view.options[0].id})
+    reversed_result = evaluate_step(matching, response=reversed_submission, option_id=None)
+    assert reversed_result.result == "incorrect"
+    assert "reversed" in (reversed_result.student_message or "").casefold()
 
 def test_retrieval_returns_grounded_section_and_block_references():
     result = retrieve_note_context({"sectionNotes":[{"id":"s1","bigIdea":"Protons build a gradient.","sourceBlockIds":["b1"]},{"id":"s2","bigIdea":"Unrelated history.","sourceBlockIds":["b2"]}]}, "proton gradient")
@@ -309,6 +313,47 @@ def test_tutor_agent_fake_provider_selects_a_bounded_next_intervention():
         assert decision.teaching_action == "show_animation"
         assert decision.next_step_id == "visual-1"
         assert decision.actions[0].tool == "set_visual_stage"
+    finally:
+        set_tutor_provider(None)
+
+
+def test_tutor_decision_rejects_scene_plan_step_outside_allowed_intervention():
+    def fake_provider(*_args, **_kwargs):
+        return {
+            "hypothesis": "The learner needs a contrast.",
+            "diagnosis": "The two cases were reversed.",
+            "confidence": 0.9,
+            "pedagogicalGoal": "CORRECT_MISCONCEPTION",
+            "pedagogicalStrategy": "CONTRAST_CASE",
+            "teachingAction": "ask_multiple_choice",
+            "targetConcept": "energy",
+            "interactionType": "multiple_choice",
+            "scaffoldLevel": "GUIDED",
+            "visualAction": None,
+            "prerequisiteBranch": None,
+            "rationale": "Use the contrast immediately.",
+            "actions": [],
+            "scenePlan": {
+                "blocks": [{"kind": "practice", "label": "Try", "stepId": "unrelated-authored-step"}],
+                "completionCondition": "Explain the distinction.",
+            },
+            "expectedEvidence": "A correct contrast.",
+            "transitionMessage": "Use the distinction now.",
+            "nextStepId": "repair-step",
+        }
+
+    fallback = TutorDecision(
+        targetConcept="energy", teachingAction="ask_free_response",
+        pedagogicalGoal="CORRECT_MISCONCEPTION", pedagogicalStrategy="CONTRAST_CASE",
+        scaffoldLevel="GUIDED", nextStepId="repair-step",
+    )
+    observation = TutorObservation(sessionId="s", objectiveId="energy", currentConcept="Energy", learnerGoal="understand")
+    set_tutor_provider(fake_provider)
+    try:
+        assert choose_tutor_decision(
+            observation=observation, fallback=fallback,
+            allowed_step_ids={"repair-step"},
+        ) == fallback
     finally:
         set_tutor_provider(None)
 

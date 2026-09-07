@@ -194,6 +194,10 @@ def choose_tutor_decision(*, observation: TutorObservation | None = None, contex
             return fallback
         if allowed_step_ids is not None and decision.next_step_id is not None and decision.next_step_id not in allowed_step_ids:
             return fallback
+        if decision.scene_plan is not None and allowed_step_ids is not None:
+            for block in decision.scene_plan.blocks:
+                if block.step_id is not None and str(block.step_id) not in allowed_step_ids:
+                    return fallback
         for call in decision.actions:
             args = call.arguments or {}
             if set(args) - {"stepId", "conceptId", "stage", "nodeId", "reason"}:

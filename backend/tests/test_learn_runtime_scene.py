@@ -43,13 +43,12 @@ def test_failed_response_teaches_before_exposing_another_assessment():
     session = _session()
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
-    assert scene.response_interaction_id is None
+    assert scene.response_interaction_id is not None
+    assert scene.response_interaction_id != "check"
     assert any(block.kind == "explanation" for block in scene.blocks)
-    assert private is None
-    next_scene, next_private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
-    assert next_private is not None
-    assert next_scene.response_interaction_id is not None
-    assert next_scene.response_interaction_id != "check"
+    assert private is not None
+    kinds = [block.kind for block in scene.blocks]
+    assert kinds.index("explanation") < kinds.index("practice")
 
 
 def test_failed_response_remediation_scene_includes_learner_feedback():
@@ -88,26 +87,27 @@ def test_explicit_uncertainty_is_not_graded_as_correct_or_advanced():
     scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
     scene, private = process_tutor_event(session, {"id": "idk", "type": "CONTINUE"})
     scene, private = process_tutor_event(session, {"id": "uncertain", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "I don't know"}})
-    assert private is None
+    assert private is not None
     assert scene.objective_id == "energy"
     assert any(block.kind == "explanation" for block in scene.blocks)
+    assert scene.response_interaction_id is not None
     assert session.state["concepts"][0].get("uncertaintyCount", 0) == 1
 
 
 def test_idk_produces_teaching_support_before_followup_practice():
     session = _session()
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
-    # First miss creates the teaching turn; Continue exposes the guided check.
+    # The miss composes teaching before its tied guided check in one scene.
     scene, _ = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"optionId": "a"}})
     scene, _ = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
     active = scene.response_interaction_id
     scene, private = process_tutor_event(session, {"id": "idk", "type": "RESPONSE", "interactionId": active, "response": {"response": "I don't know"}})
-    assert private is None
+    assert private is not None
     assert any(block.kind == "explanation" and block.content for block in scene.blocks)
-    assert scene.response_interaction_id is None
-    followup, followup_private = process_tutor_event(session, {"id": "guided", "type": "CONTINUE"})
-    assert followup_private is not None
-    assert followup.response_interaction_id != active
+    assert scene.response_interaction_id is not None
+    assert scene.response_interaction_id != active
+    kinds = [block.kind for block in scene.blocks]
+    assert kinds.index("explanation") < kinds.index("practice")
 
 
 def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
@@ -436,18 +436,23 @@ def test_matching_failure_gets_a_contrastive_remediation_not_a_generic_prompt():
                 "matches": {"oncogene": "Gain-of-function", "suppressor": "Loss-of-function"},
                 "sourceSectionIds": ["genetics"], "sourceBlockIds": ["block-1"],
             },
+            {
+                "id": "unrelated-order", "type": "ordering", "title": "Order another process",
+                "prompt": "Put these other stages in order.",
+                "items": [{"id": "one", "label": "One"}, {"id": "two", "label": "Two"}],
+                "correctOrder": ["one", "two"],
+                "sourceSectionIds": ["genetics"], "sourceBlockIds": ["block-1"],
+            },
         ],
     }
     session = SimpleNamespace(id="session-2", plan={"objectives": [objective]}, state={}, objective_index=0, step_index=0, status="active", goal="understand")
     scene, private = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
     assert scene.response_interaction_id == "match"
     scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "match", "response": {"response": "{}"}})
-    # A miss first produces a teaching-only contrast; it must not immediately
-    # expose another assessment before the learner sees the correction.
-    assert private is None
-    assert any(block.kind == "explanation" for block in scene.blocks)
-    scene, private = process_tutor_event(session, {"id": "continue", "type": "CONTINUE"})
+    # The same scene teaches the distinction before exposing a directly tied
+    # follow-up, preserving context instead of advancing to an unrelated card.
     assert private is not None
+    assert any(block.kind == "explanation" for block in scene.blocks)
     interaction = private["interaction"]
     assert interaction["type"] in {"multiple_choice", "short_answer"}
     text = str(interaction).casefold()

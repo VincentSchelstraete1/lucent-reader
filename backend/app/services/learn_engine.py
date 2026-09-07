@@ -383,7 +383,32 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
             for key, value in step.matches.items()
             if str(submitted.get(key)) in {str(value), _matching_option_id(value)}
         ); result = "correct" if hits == len(step.matches) else "partially_correct" if hits else "incorrect"
-        return LearnEvaluation(result=result, confidence=0.95 if result == "correct" else 0.7, evidence=f"Matched {hits} of {len(step.matches)} relationships.", misconception=None if result == "correct" else "Some relationships need to be distinguished.", remediationCategory="simplify" if result != "correct" else "none")
+        distinctions = "; ".join(
+            f"{pair.label}: {_option_label(step.matches.get(pair.id, ''), 120)}"
+            for pair in step.pairs
+            if step.matches.get(pair.id)
+        )
+        correction = f"Keep these relationships separate: {distinctions}." if distinctions else "Let's separate the relationships before trying again."
+        submitted_values = [str(submitted.get(pair.id, "")) for pair in step.pairs]
+        expected_values = [_matching_option_id(step.matches[pair.id]) for pair in step.pairs if pair.id in step.matches]
+        reversed_relationships = bool(
+            hits == 0
+            and len(submitted_values) == len(expected_values)
+            and set(submitted_values) == set(expected_values)
+        )
+        student_message = (
+            "Those two relationships were reversed. Let's separate what happens in each case."
+            if reversed_relationships
+            else "Let's separate what happens in each case before you try again."
+        )
+        return LearnEvaluation(
+            result=result,
+            confidence=0.95 if result == "correct" else 0.7,
+            evidence=f"Matched {hits} of {len(step.matches)} relationships.",
+            misconception=None if result == "correct" else correction,
+            remediationCategory="simplify" if result != "correct" else "none",
+            studentMessage=None if result == "correct" else student_message,
+        )
     if isinstance(step, LabelingStep):
         try: submitted = json.loads(response or "{}")
         except json.JSONDecodeError: submitted = {}
@@ -441,7 +466,7 @@ def build_remediation_step(objective: dict, failed_step: LearnStep, repair_id: s
                 # Keep the fallback generic: the source comparison value is
                 # the teaching content.  Never infer a topic-specific effect
                 # (for example, a cancer-growth consequence) here.
-                label = f"{pair.label}: {value}"
+                label = _option_label(f"{pair.label}: {value}")
                 option_id = chr(97 + index)
                 options.append({"id": option_id, "label": label})
             scenario = str(matches.get(pairs[0].id, "the first mechanism"))
