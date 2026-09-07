@@ -148,10 +148,12 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
         block = primaryVisual
       }
       const referenced = block.visualRef && typeof block.visualRef.componentIndex === "number" ? note.components[block.visualRef.componentIndex] : null
+      const polishedContent = block.content ? polishLearnerText(block.kind === "tutor_message" ? learnerTutorText(block.content) : block.content) : ""
+      if (!polishedContent && !block.title && !block.visualSpec && !referenced) return null
       return <section className={`learn-scene-block learn-scene-block-${block.kind}`} key={block.id}>
         <p className="learn-scene-block-label">{block.kind === "tutor_message" || block.label?.toLowerCase() === "try" ? (block.label?.toLowerCase() === "try" ? "Tutor prompt" : "Tutor") : block.kind === "feedback" ? "Feedback" : block.label}</p>
         {block.title && !(block.visualSpec || referenced) && <h3>{block.title}</h3>}
-        {block.content && <p className="learn-scene-block-content">{polishLearnerText(block.kind === "tutor_message" ? learnerTutorText(block.content) : block.content)}</p>}
+        {polishedContent && <p className="learn-scene-block-content">{polishedContent}</p>}
         {block.visualSpec && <div className="learn-teaching-visual"><StructuredVisual spec={block.visualSpec} initialStage={session.scene?.visualState?.stage ?? 0} onStageChange={onVisualStageChange} /></div>}
         {referenced && <div className="learn-teaching-visual"><ComponentView component={referenced as any} /></div>}
       </section>
