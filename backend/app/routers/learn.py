@@ -603,12 +603,13 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         answered = set(ask_state.get("answeredInteractionIds") or [])
         active_id = str((load_current_scene(session).response_interaction_id if load_current_scene(session) else "") or getattr(current_step, "id", ""))
         alternatives = [candidate for candidate in (_parse_step(raw) for raw in objective.get("steps", [])) if candidate and candidate.id not in answered and candidate.id != active_id and candidate.type not in {"teach", "walkthrough"}]
-        if not alternatives:
-            # Authored candidates are optional source material, not a finite
-            # question bank. Compose one bounded, source-grounded alternative
-            # when the learner explicitly asks for a different question.
-            outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
-            alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=f"Apply {objective.get('title', 'this idea')}", prompt=f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?", acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
+        # Prefer a fresh, source-grounded short-answer interaction for an
+        # explicit request rather than replaying an authored format whose
+        # private grading shape may no longer be valid after prior turns.  The
+        # authored candidates remain available to ordinary tutor planning; Ask
+        # must reliably produce a new active interaction in the same scene.
+        outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+        alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=f"Apply {objective.get('title', 'this idea')}", prompt=f"In your own words, what is the key distinction in {objective.get('title', 'this concept')}?", acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
         if alternatives:
             replacement = alternatives[0]
             replacement_step = replacement
