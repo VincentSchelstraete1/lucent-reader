@@ -87,3 +87,32 @@ one or more local PDFs without persistence, run from `backend/`:
 ```bash
 PYTHONPATH=. venv/bin/python scripts/evaluate_normalization.py /path/to/file.pdf
 ```
+
+## RAG source indexing
+
+Learn and Ask Lucent use persisted original-source `LearningBlock` records.
+Configure the server without checking secrets into the repository:
+
+```bash
+VOYAGE_API_KEY=your-server-side-key
+RAG_EMBEDDING_MODEL=voyage-3-lite
+RAG_EMBEDDING_DIMENSIONS=512
+RAG_EMBEDDING_TIMEOUT_SECONDS=20
+RAG_EMBEDDING_BATCH_SIZE=32
+```
+
+New PDF, DOCX, and PPTX ingestion persists the source corpus before note
+generation and indexes it asynchronously. Check safe public readiness at
+`GET /documents/{document_id}/source-index`. Legacy documents without an index
+must be re-uploaded; generated notes are never used as retrieval evidence.
+
+After a local process restart, retry PENDING, FAILED, or expired indexing
+leases from `backend/` with:
+
+```bash
+PYTHONPATH=. venv/bin/python scripts/index_learning_blocks.py
+```
+
+The command reuses persisted source blocks and does not require original upload
+files. Provider failures are stored as bounded failure codes; raw source,
+queries, vectors, and provider errors are not written to ordinary logs.
