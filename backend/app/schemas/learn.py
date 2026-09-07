@@ -644,7 +644,6 @@ class LearnSessionResponse(BaseModel):
     familiarity: Familiarity
     status: LearnStatus
     objective_index: int = Field(alias="objectiveIndex")
-    step_index: int = Field(alias="stepIndex")
     objective_count: int = Field(alias="objectiveCount")
     objective_title: str | None = Field(default=None, alias="objectiveTitle")
     step: LearnStepView | None = None
