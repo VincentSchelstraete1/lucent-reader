@@ -209,6 +209,21 @@ def test_ask_teaching_messages_refine_one_scene_block_instead_of_accumulating():
     assert explanation_blocks[0].content == "A clearer explanation."
 
 
+def test_ask_scene_truncates_provider_copy_at_a_complete_sentence():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    long_answer = "A complete explanation stays visible. " + ("This unfinished clause keeps growing, " * 80)
+    scene = apply_scene_message(
+        session,
+        message="Explain this carefully",
+        answer=long_answer,
+        block_kind="explanation",
+        block_label="Clarify",
+    )
+    content = next(block.content for block in scene.blocks if block.kind == "explanation")
+    assert content == "A complete explanation stays visible."
+
+
 def test_ask_event_replacement_step_is_executed_by_runtime():
     session = _session()
     process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

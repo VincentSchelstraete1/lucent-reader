@@ -29,6 +29,7 @@ from app.services.retrieval import (
 )
 from app.models.learning_block import DocumentSourceIndex
 from app.services.adaptive_policy import content_policy
+from app.services.learner_content import bounded_student_copy
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -670,7 +671,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     # Ask Lucent is an interruption in the same scene.  Mutate the persisted
     # scene itself so the learner sees the change immediately; no graded
     # evidence is changed by chat.
-    ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
+    ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": bounded_student_copy(answer, 900)}
     session.state = ask_state
     replacement_step = None
     inline_step = None

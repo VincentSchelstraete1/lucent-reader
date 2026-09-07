@@ -502,11 +502,12 @@ def apply_evaluation(session, evaluation: Any, *, interaction_id: str | None = N
 def apply_scene_message(session, *, message: str, answer: str, source_section_ids: list[str] | None = None, source_block_ids: list[str] | None = None, visual_action: dict[str, Any] | None = None, block_kind: str = "tutor_message", block_label: str = "Ask Lucent", db=None) -> LearningScene | None:
     """Apply an Ask Lucent response to the same persisted LearningScene."""
     from app.schemas.learn import LearningSceneBlock, LearningVisualState
+    from app.services.learner_content import bounded_student_copy
     scene = load_current_scene(session)
     if scene is None:
         return None
     blocks = list(scene.blocks)
-    block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+    block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=bounded_student_copy(answer, 900), sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
     # Reframes are one active teaching surface. Older sessions may contain
     # reframe blocks under different kinds (e.g. explanation then analogy),
     # so remove those prior variants before writing the new one.

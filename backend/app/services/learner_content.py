@@ -68,3 +68,16 @@ def extract_source_propositions(source: Any) -> list[str]:
     else:
         text = ""
     return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if len(sentence.strip()) >= 20][:8]
+
+
+def bounded_student_copy(value: Any, limit: int = 900) -> str:
+    """Fit learner-facing prose without exposing a chopped sentence."""
+    text = " ".join(str(value or "").split()).strip()
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit]
+    sentence_ends = [match.end() for match in re.finditer(r"[.!?](?=\s|$)", clipped)]
+    if sentence_ends:
+        return clipped[:sentence_ends[-1]].strip()
+    bounded = clipped.rsplit(" ", 1)[0].rstrip(" ,;:—-")
+    return (bounded or clipped).strip()
