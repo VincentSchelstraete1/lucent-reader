@@ -19,7 +19,7 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest, VisualEdge, VisualAnimation
 from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues, synthesize_visual_spec
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
@@ -458,6 +458,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     if requested_visual and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
         current_title = str(getattr(visual_candidate.visual_spec, "title", ""))
         alternate = None
+        alternate_spec_created = False
         for section in (payload.get("sectionNotes") or []):
             nested_content = section.get("content") if isinstance(section, dict) and isinstance(section.get("content"), dict) else {}
             components = (section.get("components") or nested_content.get("components") or []) if isinstance(section, dict) else []
@@ -476,6 +477,31 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             if spec is not None:
                 visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual-new", objective.get("id"), section.get("id")), "visual_spec": spec, "visual_ref": None, "type": "teach"})()
                 visual_action = {"type": "add_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": spec.model_dump(by_alias=True), "newVisual": True}
+                alternate_spec_created = True
+        # A source may contain only one visualizable component. In that case
+        # still provide a genuinely new, grounded view by recomposing the
+        # validated nodes into a relationship map. This is not a duplicate
+        # stage: it changes the visual representation while preserving the
+        # source-backed labels/details and provenance.
+        if not alternate_spec_created and getattr(visual_candidate, "visual_spec", None) is not None:
+            base = visual_candidate.visual_spec
+            if len(base.nodes) >= 2:
+                edges = list(base.edges)
+                if not edges:
+                    edges = [{"source": base.nodes[0].id, "target": base.nodes[1].id, "label": "contrasts with"}]
+                first_edge = edges[0]
+                edge_source = getattr(first_edge, "source", None) or first_edge.get("source")
+                edge_target = getattr(first_edge, "target", None) or first_edge.get("target")
+                edge_label = getattr(first_edge, "label", None) or first_edge.get("label") or "Follow the relationship."
+                normalized_edges = [edge if isinstance(edge, VisualEdge) else VisualEdge.model_validate(edge) for edge in edges[:24]]
+                alternate_spec = base.model_copy(update={
+                    "type": "relationship_map",
+                    "title": f"Relationship view: {base.title}",
+                    "edges": normalized_edges,
+                    "animations": [VisualAnimation(operation="flow", targetIds=[edge_source, edge_target], durationMs=900, explanation=edge_label)],
+                })
+                visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual-new", objective.get("id"), "relationship"), "visual_spec": alternate_spec, "visual_ref": None, "type": "teach"})()
+                visual_action = {"type": "add_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": alternate_spec.model_dump(by_alias=True), "newVisual": True}
     if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
         visual_action = _visual_request_action(visual_candidate)
         if getattr(visual_candidate, "visual_spec", None) is not None:

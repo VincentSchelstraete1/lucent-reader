@@ -143,7 +143,7 @@ def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(clien
     scene = response.json()["scene"]
     visual = [block for block in scene["blocks"] if block.get("kind") in {"visual", "animation"}]
     assert visual and visual[0].get("visualSpec", {}).get("nodes")
-    assert response.json()["visualAction"]["type"] == "show_visual"
+    assert response.json()["visualAction"]["type"] in {"show_visual", "add_visual"}
     first_stage = scene.get("visualState", {}).get("stage", 0)
     second = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
     assert second.status_code == 200
