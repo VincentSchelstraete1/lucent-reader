@@ -378,7 +378,6 @@ class TutorSceneBlockPlan(BaseModel):
 
 class TutorScenePlan(BaseModel):
     blocks: list[TutorSceneBlockPlan] = Field(default_factory=list, max_length=5)
-    response_step_id: str | None = Field(default=None, alias="responseStepId", max_length=60)
     expected_evidence: list[str] = Field(default_factory=list, alias="expectedEvidence", max_length=6)
     completion_condition: str | None = Field(default=None, alias="completionCondition", max_length=240)
 
@@ -633,16 +632,6 @@ class LearningScene(BaseModel):
     # interaction remains authoritative and its evidence target is unchanged.
     inline_interaction: LearnStepView | None = Field(default=None, alias="inlineInteraction")
     progress: dict[str, str | int | float | bool] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_legacy_fields(cls, value):
-        if isinstance(value, dict):
-            value = dict(value)
-            if "responseInteractionId" not in value and "responseStepId" in value:
-                value["responseInteractionId"] = value["responseStepId"]
-            value.setdefault("visualState", {})
-        return value
 
 class LearnSessionResponse(BaseModel):
     id: str

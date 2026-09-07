@@ -241,7 +241,7 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         ),
         {"conceptId": str(objective.get("id")), "scaffold": "FULL"},
     )
-    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=available_steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept=active_concept, state=state)
+    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=available_steps, current_step=parsed, action=None, decision=None, concept=active_concept, state=state)
     scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     scene_data = scene.model_dump(by_alias=True)
     # The scene compiler can keep an authored teaching asset visible while
@@ -1034,6 +1034,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         # only after evidence is recorded, so the parent replan can observe
         # the repaired prerequisite.
         if evaluation.result == "correct" and state.get("branchStack"):
+            # Publish repaired prerequisite evidence before popping the stack;
+            # return_from_prerequisite() operates on the persisted session
+            # snapshot just like the branch push above.
+            session.state = state
             branch = return_from_prerequisite(session)
             if branch:
                 state = _state(session)
@@ -1042,7 +1046,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     parent_steps = list(parent.get("steps") or [])
                     parent_candidates = [adapter.validate_python(raw) for raw in parent_steps if isinstance(raw, dict)]
                     answered_parent = set(state.get("answeredInteractionIds") or [])
-                    parent_next = next((item for item in parent_candidates if item.id not in answered_parent and item.type not in {"teach", "walkthrough"}), None) or next((item for item in parent_candidates if item.id not in answered_parent), None)
+                    parent_next = next((item for item in parent_candidates if item.id not in answered_parent and item.type not in {"teach", "walkthrough"}), None)
                     if parent_next is None:
                         # Returning from a prerequisite must not depend on an
                         # unanswered authored asset. Compose a bounded parent
@@ -1062,7 +1066,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                         parent_concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == branch.get("returnObjectiveId")), {"conceptId": branch.get("returnObjectiveId"), "state": "DEVELOPING", "scaffold": "GUIDED"})
                         parent_action = TutorAction(id=bounded_id("action", branch.get("returnObjectiveId"), parent_next.id, "return"), type="ask_free_response", conceptId=str(branch.get("returnObjectiveId")), stepId=parent_next.id, rationale="Return to the original concept after prerequisite repair.")
                         parent_decision = TutorDecision(targetConcept=str(branch.get("returnObjectiveId")), teachingAction=parent_action.type, pedagogicalGoal="VERIFY_UNDERSTANDING", pedagogicalStrategy="GUIDED_DISCOVERY", scaffoldLevel=parent_concept.get("scaffold", "GUIDED"), nextStepId=parent_next.id, transitionMessage="That supporting idea is in place. Now let’s apply it back to the original concept.", rationale="Prerequisite evidence is sufficient to resume the parent concept.")
-                        rendered = compose_learning_scene(session_id=str(session.id), objective=parent, steps=parent_steps, step_index=0, current_step=parent_next, action=parent_action, decision=parent_decision, concept=parent_concept, state=state, feedback="Good — the supporting idea is in place.", feedback_kind="correct", evaluation=evaluation)
+                        rendered = compose_learning_scene(session_id=str(session.id), objective=parent, steps=parent_steps, current_step=parent_next, action=parent_action, decision=parent_decision, concept=parent_concept, state=state, feedback="Good — the supporting idea is in place.", feedback_kind="correct", evaluation=evaluation)
                         private_next = _private_for_rendered_scene(rendered, objective_id=str(branch.get("returnObjectiveId")), decision=parent_decision, fallback_step=parent_next, objective=parent)
                         return persist_scene_revision(session, rendered, private_next, event_id=event_id_value if 'event_id_value' in locals() else None, db=db), private_next
 
@@ -1075,19 +1079,42 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         weak_ids = prerequisite_ids(objective, state.get("concepts", []))
         prerequisite_id = next((cid for cid in weak_ids if cid != concept_id), None)
         if prerequisite_id:
+            # ``push_prerequisite_branch`` reads and persists the session's
+            # authoritative state.  Publish the response evidence collected
+            # above before pushing, otherwise the branch would start from the
+            # pre-response snapshot and silently discard the parent failure.
+            session.state = state
             branch = push_prerequisite_branch(session, original_concept_id=concept_id, prerequisite_concept_id=prerequisite_id, reason=evaluation.misconception or "A prerequisite needs a quick check first.", return_scene_id=scene.id)
             state = _state(session)
             prerequisite = _objective(session.plan or {}, prerequisite_id)
             if branch and prerequisite:
                 prereq_steps = list(prerequisite.get("steps") or [])
                 prereq_candidates = [adapter.validate_python(raw) for raw in prereq_steps if isinstance(raw, dict)]
-                prereq_next = next((item for item in prereq_candidates if item.type in {"teach", "walkthrough"}), None) or next((item for item in prereq_candidates if item.id not in set(state.get("answeredInteractionIds") or [])), None)
-                if prereq_next:
+                prereq_teaching = next((item for item in prereq_candidates if item.type in {"teach", "walkthrough"}), None)
+                if prereq_teaching:
                     prereq_concept = next((item for item in state.get("concepts", []) if item.get("conceptId") == prerequisite_id), {"conceptId": prerequisite_id, "state": "NOT_SEEN", "scaffold": "FULL"})
-                    prereq_action = TutorAction(id=bounded_id("action", prerequisite_id, prereq_next.id, "prerequisite"), type="teach_concept" if prereq_next.type in {"teach", "walkthrough"} else "ask_free_response", conceptId=prerequisite_id, stepId=prereq_next.id, rationale="Repair a prerequisite before returning to the current concept.")
+                    prereq_outcome = str(prerequisite.get("outcome") or prerequisite.get("title") or "the supporting idea")
+                    # A branch is a deliberate new repair, not permission to
+                    # resurrect an authored interaction the learner already
+                    # answered earlier in the session.  Compose a fresh,
+                    # bounded check from the prerequisite's own source-backed
+                    # evidence target and keep its teaching asset alongside it.
+                    prereq_next = ShortAnswerStep(
+                        id=bounded_id("prereq-repair", prerequisite_id, concept_id, len(state.get("recentAttempts", []))),
+                        type="short_answer",
+                        title="Connect the supporting idea",
+                        prompt=f"In your own words, how does {prerequisite.get('title', 'this supporting idea')} help explain the original problem?",
+                        acceptedAnswers=[prereq_outcome],
+                        requiredConcepts=_required_concepts(prereq_outcome),
+                        hints=[f"Start with this relationship: {prereq_outcome[:220]}"],
+                        feedbackIncorrect=f"Return to this supporting relationship: {prereq_outcome[:260]}",
+                        sourceSectionIds=list(prerequisite.get("sourceSectionIds", [])),
+                        sourceBlockIds=list(prerequisite.get("sourceBlockIds", [])),
+                    )
+                    prereq_action = TutorAction(id=bounded_id("action", prerequisite_id, prereq_next.id, "prerequisite"), type="ask_free_response", conceptId=prerequisite_id, stepId=prereq_next.id, rationale="Teach and repair a source-backed prerequisite before returning to the current concept.")
                     prereq_decision = TutorDecision(targetConcept=prerequisite_id, teachingAction=prereq_action.type, pedagogicalGoal="REPAIR_PREREQUISITE", pedagogicalStrategy="PREREQUISITE_REPAIR", scaffoldLevel=prereq_concept.get("scaffold", "FULL"), nextStepId=prereq_next.id, transitionMessage="Let's make sure the supporting idea is clear first.")
                     session.state = state
-                    rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, step_index=0, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.evidence, feedback_kind="info", evaluation=evaluation)
+                    rendered = compose_learning_scene(session_id=str(session.id), objective=prerequisite, steps=prereq_steps, current_step=prereq_next, action=prereq_action, decision=prereq_decision, concept=prereq_concept, state=state, feedback=evaluation.student_message or "This difficulty points to a supporting idea we should strengthen first.", feedback_kind="info", evaluation=evaluation, teaching_override=prereq_teaching)
                     private_next = _private_for_rendered_scene(rendered, objective_id=prerequisite_id, decision=prereq_decision, fallback_step=prereq_next, objective=prerequisite)
                     return persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db), private_next
 
@@ -1100,6 +1127,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if (
         evaluation is not None
         and evaluation.result in {"incorrect", "partially_correct"}
+        and not state.get("branchStack")
         and (
             int(concept.get("incorrect", 0) or 0)
             + int(concept.get("partiallyCorrect", 0) or 0)
@@ -1212,7 +1240,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         state["lastFeedbackKind"] = "info"
         session.state = state
         rendered = compose_learning_scene(
-            session_id=str(session.id), objective=objective, steps=steps, step_index=0,
+            session_id=str(session.id), objective=objective, steps=steps,
             current_step=repair, action=fallback_action, decision=decision,
             concept=concept, state=state,
             feedback=state["lastFeedback"], feedback_kind="info", evaluation=evaluation,
@@ -1279,7 +1307,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 concept["scaffoldingLevel"] = "INDEPENDENT"
                 state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 session.state = state
-                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=application_step, action=application_action, decision=application_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good. Now apply the idea without the worked path.", feedback_kind="correct", evaluation=evaluation)
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, current_step=application_step, action=application_action, decision=application_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good. Now apply the idea without the worked path.", feedback_kind="correct", evaluation=evaluation)
                 rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=application_decision, fallback_step=application_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
@@ -1303,7 +1331,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 concept["scaffoldingLevel"] = "TRANSFER"
                 state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 session.state = state
-                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
                 rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=transfer_decision, fallback_step=transfer_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
@@ -1323,7 +1351,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 # independent check so the next response cannot resurrect the
                 # original authored interaction.
                 session.state = state
-                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=independent_step, action=independent_action, decision=independent_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good progress. Now try the idea with less help.", feedback_kind="correct", evaluation=evaluation)
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, current_step=independent_step, action=independent_action, decision=independent_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good progress. Now try the idea with less help.", feedback_kind="correct", evaluation=evaluation)
                 rendered = _carry_authoritative_visual(scene, rendered)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=independent_decision, fallback_step=independent_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
@@ -1414,7 +1442,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 or evaluation.misconception
                 or ("Let's look at the key relationship together." if evaluation else None)
             )
-            rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=remediation_feedback, evaluation=evaluation)
+            rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, current_step=teaching, action=teaching_action, decision=teaching_decision, concept=concept, state=state, feedback=remediation_feedback, evaluation=evaluation)
             rendered = _carry_authoritative_visual(scene, rendered)
             if scene.visual_state is not None:
                 rendered = rendered.model_copy(update={"visual_state": scene.visual_state})
@@ -1541,7 +1569,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             if next_step.type in {"teach", "walkthrough"} and getattr(next_step, "content", None) and "visual" not in str(next_step.content).casefold():
                 next_step = next_step.model_copy(update={"content": f"{next_step.content[:760]} Watch the highlighted part of the visual as you connect this relationship."})
     session.state = state
-    rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
+    rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, current_step=next_step, action=fallback_action, decision=decision, concept=concept, state=state, feedback=feedback, evaluation=evaluation)
     rendered = _carry_authoritative_visual(scene, rendered)
     private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=decision, fallback_step=next_step, objective=objective)
     rendered = persist_scene_revision(session, rendered, private_next, event_id=getattr(event, "id", None) if not isinstance(event, dict) else event.get("id"), db=db)

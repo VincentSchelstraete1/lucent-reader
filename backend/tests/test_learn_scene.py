@@ -5,7 +5,7 @@ from app.schemas.learn import AskLucentResponse, LearningScene, MultipleChoiceSt
 from app.services.learn_scene import compose_learning_scene
 
 
-def _scene(*, step_index=1, decision=None):
+def _scene(*, decision=None):
     teach = {
         "id": "teach-energy", "type": "teach", "title": "Energy changes",
         "content": "As the pendulum falls, gravitational potential energy becomes kinetic energy.",
@@ -20,7 +20,7 @@ def _scene(*, step_index=1, decision=None):
     objective = {"id": "energy-objective", "title": "Pendulum energy", "outcome": "Explain the energy change", "bottleneck": "Connect speed to kinetic energy", "sourceSectionIds": ["section-energy"], "sourceBlockIds": ["block-energy"]}
     action = TutorAction(id="action-check", type="ask_multiple_choice", conceptId="energy-objective", stepId="predict-speed", rationale="Check the relationship")
     return compose_learning_scene(
-        session_id="session-1", objective=objective, steps=[teach, check], step_index=step_index,
+        session_id="session-1", objective=objective, steps=[teach, check],
         current_step=MultipleChoiceStep.model_validate(check), action=action, decision=decision,
         concept={"scaffold": "GUIDED"}, state={"sceneRevision": 2},
     )
@@ -79,12 +79,12 @@ def test_teaching_scene_reuses_next_grounded_visual_before_practice():
     visual_step = {"id": "visual", "type": "teach", "title": "Energy diagram", "content": "The diagram tracks the conversion.", "visualSpec": visual, "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}
     objective = {"id": "o", "title": "Pendulum energy", "outcome": "Explain energy conversion", "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}
     current = TeachStep.model_validate(teach)
-    scene = compose_learning_scene(session_id="s", objective=objective, steps=[teach, visual_step], step_index=0, current_step=current, action=None, decision=None, concept={"scaffold": "FULL"}, state={})
+    scene = compose_learning_scene(session_id="s", objective=objective, steps=[teach, visual_step], current_step=current, action=None, decision=None, concept={"scaffold": "FULL"}, state={})
     assert [block.kind for block in scene.blocks] == ["explanation", "visual"]
     assert scene.blocks[1].visual_spec is not None
 
 
-def test_public_scene_excludes_internal_tutor_metadata_and_normalizes_legacy_response_id():
+def test_public_scene_excludes_internal_tutor_metadata_and_legacy_response_id():
     scene = LearningScene.model_validate({
         "id": "scene-1", "revision": 1, "objectiveId": "o", "objective": "Energy",
         "blocks": [{"id": "b", "kind": "explanation", "label": "Understand", "content": "Energy changes.", "sourceSectionIds": ["s"], "sourceBlockIds": ["b"]}],
@@ -92,7 +92,7 @@ def test_public_scene_excludes_internal_tutor_metadata_and_normalizes_legacy_res
         "strategy": "DIRECT_INSTRUCTION", "scaffoldLevel": "FULL", "completionCondition": "internal",
     })
     payload = scene.model_dump(by_alias=True)
-    assert payload["responseInteractionId"] == "legacy-check"
+    assert payload["responseInteractionId"] is None
     assert "tutorHypothesis" not in payload
     assert "pedagogicalGoal" not in payload
     assert "strategy" not in payload
