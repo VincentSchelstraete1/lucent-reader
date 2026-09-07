@@ -449,6 +449,14 @@ def apply_scene_message(session, *, message: str, answer: str, source_section_id
         return None
     blocks = list(scene.blocks)
     block = LearningSceneBlock(id=bounded_id("ask", session.id, message[:80]), kind=block_kind, label=block_label, title=None, content=answer[:900], sourceSectionIds=list(source_section_ids or [])[:8], sourceBlockIds=list(source_block_ids or [])[:12])
+    # Reframes are one active teaching surface. Older sessions may contain
+    # reframe blocks under different kinds (e.g. explanation then analogy),
+    # so remove those prior variants before writing the new one.
+    if block_kind in {"analogy", "explanation", "tutor_message"} and re.search(r"another way|reframe|ask lucent", f"{block_label} {message}", re.I):
+        blocks = [existing for existing in blocks if not (
+            existing.kind == "analogy" or
+            (existing.kind in {"explanation", "tutor_message"} and re.search(r"another way|reframe|ask lucent", str(existing.label or ""), re.I))
+        )]
     # Ask/tutor interruptions refine the current teaching surface. Keep one
     # learner-facing block for a given role instead of stacking every prior
     # explanation/analogy into a long column of competing text boxes.
