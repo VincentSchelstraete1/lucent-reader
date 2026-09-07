@@ -152,6 +152,17 @@ def test_ask_inline_interaction_can_be_checked_without_advancing_primary(client)
     assert any(block["kind"] == "feedback" for block in result["scene"]["blocks"])
 
 
+def test_ask_walkthrough_adds_guided_steps_tied_to_active_task(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Walk me through it"})
+    assert response.status_code == 200
+    scene = response.json()["scene"]
+    guided = next(block for block in scene["blocks"] if block["kind"] == "worked_example")
+    assert "one step at a time" in guided["content"]
+    assert scene["responseInteractionId"] == session["scene"]["responseInteractionId"]
+
+
 def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/visual"}).json()
     document = client.post("/documents", json={"source_id": source["id"], "title": "Mechanism material", "content": "A source-grounded comparison."}).json()

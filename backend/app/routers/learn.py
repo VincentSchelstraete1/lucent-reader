@@ -425,7 +425,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     elif "example" in lowered:
         ask_action, ask_strategy, ask_kind, ask_label = "give_example", "CONCRETE_EXAMPLE", "example", "Example"
     elif "walk me through" in lowered:
-        ask_action, ask_strategy, ask_kind, ask_label = "give_worked_example", "GUIDED_REASONING", "worked_example", "Step by step"
+        ask_action, ask_strategy, ask_kind, ask_label = "give_worked_example", "WORKED_EXAMPLE", "worked_example", "Step by step"
         prompt_text = str(getattr(current_step, "prompt", "the current task") or "the current task")
         first_hint = next(iter(getattr(current_step, "hints", []) or []), "Start with the central relationship described in the material.")
         guided_content = f"Let's take this one step at a time. Begin with: {first_hint} Then return to the task: {prompt_text}"
@@ -541,7 +541,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     ask_fallback = TutorDecision(
         hypothesis="Learner requested an explanation in the current concept context.", diagnosis="UNCERTAINTY", confidence=0.55,
         pedagogicalGoal="BUILD_INTUITION", pedagogicalStrategy=ask_strategy, teachingAction=ask_action, targetConcept=objective.get("id", "concept"),
-            interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool={"clarify_definition": "explain_concept", "simplify_explanation": "explain_concept"}.get(ask_action, ask_action), arguments={"conceptId": objective.get("id", "concept")})],
+            interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool={"clarify_definition": "explain_concept", "simplify_explanation": "explain_concept", "give_worked_example": "show_worked_example"}.get(ask_action, ask_action), arguments={"conceptId": objective.get("id", "concept")})],
         expectedEvidence="The learner can restate the explanation or apply it in the next check.", transitionMessage="I’m adapting the explanation to your question.", rationale="Learner-initiated clarification in the active concept.",
         scenePlan=TutorScenePlan(blocks=[fallback_block], expectedEvidence=["The learner can connect the explanation to the source concept."] , completionCondition="The learner can explain the concept using the source-supported relationship."),
     )
@@ -641,7 +641,12 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             if replacement_step is not None:
                 visual_action = None
             scene_kind, ask_label = "tutor_message", "Try"
-    scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
+    scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation", "worked_example"} else "tutor_message"
+    if ask_kind == "worked_example" and guided_content:
+        # A walkthrough must contain the concrete first step, not a generic
+        # provider acknowledgement, so the guidance remains attached to the
+        # active task in the authoritative scene.
+        answer = guided_content
     process_tutor_event(session, {
         "type": "ASK_LUCENT",
         "message": request.message,
