@@ -148,6 +148,8 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
       .replace(/^Here's a question for you:\s*/i, "")
       .replace(/\*\*(.*?)\*\*/g, "$1")
       .replace(/__(.*?)__/g, "$1")
+      .replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, "$1")
+      .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "$1")
       .replace(/\s{2,}/g, " ")
       .trim() || (narratedVisual ? "Follow the highlighted relationship in the visual as you connect it to the idea." : "")
   }
@@ -156,6 +158,8 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     .replace(/^Here's a question for you:\s*/i, "")
     .replace(/\*\*(.*?)\*\*/g, "$1")
     .replace(/__(.*?)__/g, "$1")
+    .replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, "$1")
+    .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "$1")
     .replace(/\s{2,}/g, " ")
     .trim()
   return <div className="learn-scene-support" aria-label="Tutor teaching">
