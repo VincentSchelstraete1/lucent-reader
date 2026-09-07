@@ -322,6 +322,11 @@
 .structured-visual-column-label { fill: #687067; font-size: 11px; text-anchor: middle; }
 .structured-visual-node { cursor: pointer; outline: none; }
 .structured-visual-node rect { fill: #f2efe6; stroke: #9ea89d; stroke-width: 1.25; }
+.structured-visual-node.semantic-input rect, .structured-visual-node.semantic-start rect { fill: #e5effa; stroke: #8eabc9; }
+.structured-visual-node.semantic-mechanism rect, .structured-visual-node.semantic-process rect { fill: #e4f2e8; stroke: #8fb99b; }
+.structured-visual-node.semantic-outcome rect, .structured-visual-node.semantic-consequence rect { fill: #f9eadc; stroke: #d8aa86; }
+.structured-visual-node.semantic-interpretation rect, .structured-visual-node.semantic-audience rect { fill: #eee5f7; stroke: #b39aca; }
+.structured-visual-node.semantic-warning rect, .structured-visual-node.semantic-misconception rect, .structured-visual-node.semantic-contradiction rect { fill: #f8e2e0; stroke: #cf9690; }
 .structured-visual-node:hover rect, .structured-visual-node:focus rect, .structured-visual-node.selected rect, .structured-visual-node.active rect { fill: #e5eee5; stroke: #44745a; }
 .structured-visual-node text { fill: #30342f; font-size: 12px; pointer-events: none; }
 .structured-visual-node .structured-visual-node-detail { fill: #657067; font-size: 9px; }
