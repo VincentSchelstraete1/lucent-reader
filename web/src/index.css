@@ -175,6 +175,8 @@
 .learn-scene-block-tutor_message { padding: .75rem .9rem; border-left: 3px solid #58735d; border-radius: 8px; background: #f1f5ef; }
 .learn-scene-block-visual { padding: .8rem .9rem 0; border: 1px solid #cfe3df; border-radius: 14px; background: #f5fbfa; }
 .learn-scene-block-visual .learn-scene-block-label { color: #32756e; }
+.learn-scene-block-visual + .learn-scene-block-analogy,
+.learn-scene-block-visual + .learn-scene-block-explanation { margin-top: -1rem; padding: .2rem .9rem .9rem; border: 1px solid #cfe3df; border-top: 0; border-radius: 0 0 14px 14px; background: #f5fbfa; }
 .learn-scene-block-explanation .learn-scene-block-label { color: #536da2; }
 .learn-focus-mode .learn-scene-shell { width: min(980px, 100%); margin: 0 auto; display: flex; flex-direction: column; gap: 1.15rem; align-items: stretch; }
 .learn-focus-mode .learn-step { max-width: none; }
