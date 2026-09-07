@@ -654,6 +654,17 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     if not request.restart:
         existing = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.plan_fingerprint == fingerprint, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
         if existing: return _session_payload(existing)
+    else:
+        # A restart is a clean acceptance/user journey boundary.  Retaining
+        # older active rows makes the active-session lookup nondeterministic
+        # after refresh (and can surface a different scene than the one just
+        # created).  Archive prior active sessions for this user/document
+        # before creating the replacement; their history remains available in
+        # the database for reporting/audit.
+        prior_active = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.status == "active")).scalars().all()
+        for prior in prior_active:
+            prior.status = "stopped"
+            prior.ended_reason = "restarted"
     try:
         plan = build_learn_plan(payload, request.goal, request.familiarity)
     except ValueError as exc:
