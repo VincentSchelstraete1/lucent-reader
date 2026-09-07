@@ -1,3 +1,6 @@
+import logging
+import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -17,6 +20,45 @@ import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
+application_logger = logging.getLogger("app")
+application_logger.setLevel(settings.log_level)
+# Uvicorn deliberately configures its own loggers rather than the root logger.
+# Reuse its error stream for application telemetry so INFO measurements are
+# visible in the deployed process without adding another logging dependency.
+server_handlers = logging.getLogger("uvicorn.error").handlers or logging.getLogger("uvicorn").handlers
+if server_handlers and not application_logger.handlers:
+    application_logger.handlers.extend(server_handlers)
+    application_logger.propagate = False
+
+
+@app.middleware("http")
+async def record_request_telemetry(request, call_next):
+    """Emit one bounded completion event for production latency analysis."""
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        route = request.scope.get("route")
+        logger.error(
+            "http_request_complete method=%s route=%s status=%s outcome=error exception_type=%s duration_ms=%.1f",
+            request.method,
+            getattr(route, "path", "unmatched"),
+            500,
+            type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
+        )
+        raise
+    route = request.scope.get("route")
+    logger.info(
+        "http_request_complete method=%s route=%s status=%s outcome=%s exception_type=none duration_ms=%.1f",
+        request.method,
+        getattr(route, "path", "unmatched"),
+        response.status_code,
+        "success" if response.status_code < 400 else "rejected",
+        (time.perf_counter() - started) * 1000,
+    )
+    return response
 
 @app.middleware("http")
 async def prevent_auth_response_caching(request, call_next):

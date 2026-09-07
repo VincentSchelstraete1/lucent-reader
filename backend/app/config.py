@@ -14,6 +14,7 @@ def _origins(value: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     environment: str
+    log_level: str
     database_url: str
     web_origins: tuple[str, ...]
     api_origin: str
@@ -71,6 +72,7 @@ def load_settings() -> Settings:
     environment = os.getenv("APP_ENV", "development")
     settings = Settings(
         environment=environment,
+        log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         database_url=os.environ["DATABASE_URL"],
         web_origins=_origins(os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")),
         api_origin=os.getenv("API_ORIGIN", "http://127.0.0.1:8000").rstrip("/"),
@@ -98,6 +100,8 @@ def load_settings() -> Settings:
     )
     if settings.pdf_upload_max_bytes <= 0:
         raise RuntimeError("PDF_UPLOAD_MAX_BYTES must be greater than zero")
+    if settings.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise RuntimeError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
     if settings.anthropic_timeout_seconds <= 0:
         raise RuntimeError("ANTHROPIC_TIMEOUT_SECONDS must be greater than zero")
     if settings.anthropic_max_retries < 0:

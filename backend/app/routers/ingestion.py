@@ -297,6 +297,7 @@ async def ingest_pdf(
 
 async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
     job = _PROGRESSIVE_JOBS[job_id]
+    started = time.perf_counter()
     try:
         objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
 
@@ -319,14 +320,20 @@ async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semant
         job["status"] = "complete"
         job["error"] = None
         job["finished_at"] = time.monotonic()
+        logger.info(
+            "ingestion_job_complete operation=progressive outcome=success exception_type=none duration_ms=%.1f section_count=%s",
+            (time.perf_counter() - started) * 1000,
+            len(job["sections"]),
+        )
     except Exception as exc:
         # Do not attach the exception traceback/message: provider and parser
         # errors can echo source fragments. The class and operation are enough
         # to correlate this terminal job outcome without logging document text.
         logger.error(
-            "progressive_ingestion_failed job_id=%s exception_type=%s",
-            job_id,
+            "ingestion_job_complete operation=progressive outcome=error exception_type=%s duration_ms=%.1f section_count=%s",
             type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
+            len(job["sections"]),
         )
         for state in job["sections"]:
             if state["status"] in {"pending", "generating"}:

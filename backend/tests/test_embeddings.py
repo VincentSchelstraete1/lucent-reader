@@ -113,3 +113,18 @@ def test_retry_after_supports_http_date_and_bounds_delay():
     assert _retry_after_seconds("Sun, 07 Sep 2026 12:00:12 GMT", now=now) == 12
     assert _retry_after_seconds("120", now=now) == 60
     assert _retry_after_seconds("invalid", now=now) is None
+
+
+def test_voyage_success_telemetry_excludes_embedding_input(monkeypatch, caplog):
+    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+    response = httpx.Response(200, request=httpx.Request("POST", "https://api.voyageai.com/v1/embeddings"), json={
+        "data": [{"index": 0, "embedding": [1.0] + [0.0] * 511}],
+    })
+    monkeypatch.setattr("app.services.embeddings.httpx.post", lambda *args, **kwargs: response)
+    caplog.set_level("INFO", logger="app.services.embeddings")
+
+    VoyageEmbeddingProvider().embed_query("SECRET CC0 QUERY")
+
+    messages = [record.getMessage() for record in caplog.records if "provider_operation_complete" in record.getMessage()]
+    assert any("provider=voyage operation=embed_query outcome=success" in message for message in messages)
+    assert all("SECRET CC0 QUERY" not in message for message in messages)

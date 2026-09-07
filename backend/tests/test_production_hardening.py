@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import engine
 from app.schemas.learn import LearnEvaluation
 import app.routers.ingestion as ingestion_router
+import app.main as main_module
 import app.services.anthropic_service as anthropic_service
 import app.services.learn_tutor as learn_tutor
 
@@ -84,8 +85,11 @@ def test_progressive_job_failure_becomes_terminal_without_leaking_details(monkey
         assert job["error"] == "Lucent could not finish processing this document. Please try again."
         assert job["sections"][0]["status"] == "failed"
         assert "private provider detail" not in job["error"]
-        assert "progressive_ingestion_failed" in logged["message"]
-        assert logged["args"] == (job_id, "RuntimeError")
+        assert "ingestion_job_complete" in logged["message"]
+        assert "private provider detail" not in str(logged)
+        assert logged["args"][0] == "RuntimeError"
+        assert isinstance(logged["args"][1], float)
+        assert logged["args"][2] == 1
     finally:
         ingestion_router._PROGRESSIVE_JOBS.pop(job_id, None)
 
@@ -137,7 +141,8 @@ def test_structured_provider_failure_log_excludes_prompt_and_exception_text(monk
     with pytest.raises(RuntimeError):
         anthropic_service._run_structured_tool("SECRET SOURCE", "test_tool", {}, 10)
 
-    assert logged["args"] == ("test_tool", "RuntimeError")
+    assert logged["args"][:2] == ("test_tool", "RuntimeError")
+    assert isinstance(logged["args"][2], float)
     assert "SECRET SOURCE" not in str(logged)
     assert "private prompt fragment" not in str(logged)
 
@@ -166,3 +171,17 @@ def test_tutor_provider_failure_is_logged_safely_and_uses_fallback(monkeypatch):
     assert logged["args"] == ("diagnose_response", "request_or_validation", "RuntimeError")
     assert "SECRET PROMPT" not in str(logged)
     assert "private learner response" not in str(logged)
+
+
+def test_request_telemetry_uses_route_template_without_query_content(client, monkeypatch):
+    logged = []
+    monkeypatch.setattr(main_module.logger, "info", lambda message, *args: logged.append((message, args)))
+
+    response = client.get("/?private_query=SECRET")
+
+    assert response.status_code == 200
+    request_events = [(message, args) for message, args in logged if "http_request_complete" in message]
+    assert request_events
+    assert request_events[-1][1][:4] == ("GET", "/", 200, "success")
+    assert "SECRET" not in str(request_events)
+    assert "private_query" not in str(request_events)

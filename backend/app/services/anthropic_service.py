@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from dataclasses import dataclass
 from anthropic import Anthropic
 from pydantic import ValidationError
@@ -230,6 +231,7 @@ def _run_structured_tool(
     max_retries: int | None = None,
     include_metadata: bool = False,
 ) -> dict | StructuredToolResult:
+    started = time.perf_counter()
     request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
     try:
         message = request_client.messages.create(
@@ -248,29 +250,21 @@ def _run_structured_tool(
         )
     except Exception as exc:
         logger.warning(
-            "structured_generation_failed tool=%s stage=request exception_type=%s outcome=raise",
+            "provider_operation_complete provider=anthropic operation=%s stage=request outcome=error exception_type=%s duration_ms=%.1f",
             tool_name,
             type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
         )
         raise
 
     usage = getattr(message, "usage", None)
-    logger.info(
-        "structured_generation_response tool=%s model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
-        tool_name,
-        getattr(message, "model", "unknown"),
-        getattr(message, "stop_reason", "unknown"),
-        getattr(usage, "input_tokens", "unknown"),
-        getattr(usage, "output_tokens", "unknown"),
-        max_tokens,
-    )
-
     tool_input = next((block.input for block in message.content if block.type == "tool_use"), None)
     if getattr(message, "stop_reason", None) == "max_tokens":
         logger.warning(
-            "structured_generation_failed tool=%s stage=truncated exception_type=%s outcome=raise",
+            "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=truncated exception_type=%s duration_ms=%.1f",
             tool_name,
             "StructuredToolTruncatedError",
+            (time.perf_counter() - started) * 1000,
         )
         raise StructuredToolTruncatedError(
             input_tokens=getattr(usage, "input_tokens", None),
@@ -280,6 +274,16 @@ def _run_structured_tool(
         )
 
     if isinstance(tool_input, dict):
+        logger.info(
+            "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=success exception_type=none duration_ms=%.1f model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
+            tool_name,
+            (time.perf_counter() - started) * 1000,
+            getattr(message, "model", "unknown"),
+            getattr(message, "stop_reason", "unknown"),
+            getattr(usage, "input_tokens", "unknown"),
+            getattr(usage, "output_tokens", "unknown"),
+            max_tokens,
+        )
         if include_metadata:
             return StructuredToolResult(
                 data=tool_input,
@@ -291,9 +295,10 @@ def _run_structured_tool(
         return tool_input
 
     logger.warning(
-        "structured_generation_failed tool=%s stage=missing_tool_output exception_type=%s outcome=raise",
+        "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=invalid exception_type=%s duration_ms=%.1f",
         tool_name,
         "ValueError",
+        (time.perf_counter() - started) * 1000,
     )
     raise ValueError("Model did not return structured tool output")
 

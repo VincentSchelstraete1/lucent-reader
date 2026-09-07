@@ -26,6 +26,17 @@ The paid Voyage tier was already established before this phase and was not chang
 
 The progressive job registry is intentionally still process-local. Polling therefore requires affinity to the API process that accepted the upload, and in-flight state is lost on a process restart. Moving this lifecycle to shared durable infrastructure is a future scaling concern, not part of this phase.
 
+### Phase 3 — Basic production observability: complete
+
+- **Request latency:** every HTTP response emits method, matched route template, status, outcome, exception class, and end-to-end duration. Query strings, request bodies, user/session IDs, and headers are excluded.
+- **Anthropic operations:** structured provider calls emit one terminal event with the bounded operation/tool name, validation/request stage, outcome, exception class, latency, model/stop reason, token usage when returned, and output budget. The log never includes the prompt or generated payload.
+- **Voyage operations:** document/query embedding calls emit one terminal event with operation, outcome, exception class, latency, attempt count, item count, and model. Input text and credentials are excluded. Numeric and HTTP-date retry hints continue to use the Phase 2 bounded policy.
+- **RAG attribution:** the existing exact-retrieval telemetry continues to separate query-embedding, search, and total latency and records supported/weak/unavailable outcomes. Source indexing already records provider/model, embedded count, duration, and bounded failure codes.
+- **Ingestion outcomes:** progressive jobs now emit terminal success/error duration and section count events without job, document, or source-content identifiers. Existing fallback events identify the bounded pipeline stage and exception class.
+- **Operational log delivery:** `LOG_LEVEL` defaults to `INFO`, is startup-validated, and the `app` logger reuses Uvicorn's configured output stream. This makes successful latency events visible in the deployed process without introducing a telemetry platform dependency.
+
+These stable event fields can be aggregated by the deployment log collector to calculate per-route/provider p50/p95 latency, provider error/fallback counts, retrieval contribution, and progressive-ingestion failure rates. Phase 3 intentionally adds measurement only; it does not optimize or replace any RAG/Learn path.
+
 ## Validation evidence
 
 - Focused backend hardening/ingestion/note/quiz suite: 65 passed.
@@ -51,6 +62,15 @@ The progressive job registry is intentionally still process-local. Polling there
 - The authenticated write contract remains covered end-to-end by the security/API suite, including valid CSRF acceptance, invalid/missing CSRF rejection, and the new assertion that cookie-session resolution/touch occurs only once per request.
 - Native browser smoke could not be repeated at this checkpoint because the local Mac was locked and the browser-control surface could not unlock it. No product/browser failure was observed; the Phase 1 CC0 browser evidence above remains the latest interactive smoke.
 
+### Phase 3 validation evidence
+
+- Focused telemetry/provider/auth/RAG/Learn tests: passed, including assertions that request queries, embedding input, prompts, provider exception text, and learner/source content do not enter telemetry.
+- Full backend suite: 421 passed, 7 existing dependency deprecation warnings.
+- Full frontend suite: 128 passed.
+- Production frontend build: passed (the existing large-chunk warning remains).
+- Running backend health: HTTP 200, with the emitted event `http_request_complete method=GET route=/ status=200 outcome=success ... duration_ms=0.6` observed in the Uvicorn stream.
+- Native interactive browser smoke remains unavailable because the Mac is locked. This is an environment restriction rather than an observed application failure; no user-facing code changed in this phase.
+
 ## Audit/source note
 
 `AUDIT_REPORT.md` was not present in the repository, any branch history, or the supplied attachment directory at this checkpoint. Phase 1 was therefore reconciled against the explicit Tier 1 findings in the user-provided productionization objective and the current code/history. No absent-audit claim was treated as additional scope.
@@ -61,4 +81,4 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
 
 ## Next phase (do not begin without explicit instruction)
 
-Phase 3 is the next productionization phase. Begin only after explicit instruction, preserving the Phase 1/2 reliability boundaries and the accepted RAG/Learn behavior.
+Phase 4 adds CI, reproducible deployment configuration, environment/migration documentation, and meaningful liveness/readiness checks. It must preserve all Phase 1–3 boundaries and the accepted RAG/Learn behavior.
