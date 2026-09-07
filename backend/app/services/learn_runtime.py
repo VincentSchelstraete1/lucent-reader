@@ -182,10 +182,28 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         )
     if parsed is None:
         raise ValueError("objective has no valid candidate asset")
-    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
+    # The compiler may pair a teaching asset with a later practice asset.  Do
+    # not offer interactions that durable attempt history says were already
+    # answered, even if an older JSON compatibility list is stale.
+    available_steps = [
+        raw for raw in steps
+        if not isinstance(raw, dict)
+        or raw.get("type") in {"teach", "walkthrough"}
+        or str(raw.get("id")) not in answered
+    ]
+    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=available_steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
     scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     scene_data = scene.model_dump(by_alias=True)
-    private = None if parsed.type in {"teach", "walkthrough"} else ScenePrivateState(sceneId=scene.id, revision=scene.revision, interaction=parsed.model_dump(by_alias=True), objectiveId=str(objective.get("id")), targetConceptIds=[str(objective.get("id"))], decisionId=bounded_id("decision", objective.get("id"), scene.id)).model_dump(by_alias=True)
+    # The scene compiler can keep an authored teaching asset visible while
+    # attaching a separate practice interaction.  Private grading/hint state
+    # must therefore follow the interaction the learner actually sees, not
+    # the asset originally selected to seed the scene.
+    private = _private_for_rendered_scene(
+        scene,
+        objective_id=str(objective.get("id")),
+        fallback_step=parsed,
+        objective=objective,
+    )
     return scene, private
 
 
@@ -213,7 +231,7 @@ def ensure_runtime_state(session, db=None) -> tuple[LearningScene, dict[str, Any
     state.update({"runtimeVersion": RUNTIME_VERSION, "planSemanticsVersion": PLAN_SEMANTICS_VERSION, "currentObjectiveId": str(objective.get("id")), "currentScene": scene.model_dump(by_alias=True), "currentScenePrivate": private})
     concepts = list(state.get("concepts") or [])
     if not any(str(item.get("conceptId")) == str(objective.get("id")) for item in concepts):
-        concepts.append({"conceptId": str(objective.get("id")), "title": objective.get("title", "Concept"), "state": "INTRODUCED", "attempts": 0, "correct": 0, "incorrect": 0, "partiallyCorrect": 0, "scaffold": "FULL", "scaffoldingLevel": "FULL", "misconceptions": [], "interactionTypes": []})
+        concepts.append({"conceptId": str(objective.get("id")), "title": objective.get("title", "Concept"), "state": "INTRODUCED", "attempts": 0, "correct": 0, "incorrect": 0, "partiallyCorrect": 0, "assistedSuccesses": 0, "independentSuccesses": 0, "scaffold": "FULL", "scaffoldingLevel": "FULL", "misconceptions": [], "interactionTypes": []})
         state["concepts"] = concepts
     state.pop("sceneRevision", None)
     state.pop("sceneInterruption", None)
@@ -432,10 +450,13 @@ def _objective_evidence_sufficient(objective: dict[str, Any], concept: dict[str,
     )
     if requires_application and int(concept.get("applicationEvidence", 0) or 0) < 1:
         return False
-    # Transfer is a stronger optional target. Once the runtime has explicitly
-    # entered TRANSFER scaffolding, require that evidence before completion.
-    if concept.get("scaffold") == "TRANSFER" and int(concept.get("transferEvidence", 0) or 0) < 1:
-        return False
+    if requires_application:
+        # Success while the full/guided teaching surface is visible may justify
+        # fading support, but it is not proof of independent application.
+        if int(concept.get("independentSuccesses", 0) or 0) < 1:
+            return False
+        if int(concept.get("transferEvidence", 0) or 0) < 1:
+            return False
     return True
 
 
@@ -864,18 +885,23 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
         concept = dict(concept)
         concept.update({"attempts": int(concept.get("attempts", 0)) + 1, "lastSeen": now, "lastResult": evaluation.result})
         hints_used = int((state.get("hints") or {}).get(current.id, 0))
-        # "Independent" describes whether the learner answered without an
-        # explicit hint; the current scaffold level controls how far support
-        # can fade after that success.
-        independent = hints_used == 0
-        transfer = current.type in {"problem", "teach_back", "prediction", "numeric"} and independent and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"} and evaluation.result == "correct"
-        concept["scaffold"] = next_scaffold(concept.get("scaffold"), evaluation.result, hints_used, independent=independent)
+        # A no-hint success can justify one bounded fade, but it is only truly
+        # independent evidence when the learner answered on an independent or
+        # transfer scene with the worked/guided surface already removed.
+        can_fade = hints_used == 0
+        current_scaffold = str(concept.get("scaffold") or concept.get("scaffoldingLevel") or "FULL")
+        independent = can_fade and current_scaffold in {"INDEPENDENT", "TRANSFER"}
+        is_transfer_task = str(current.id).startswith("transfer-")
+        transfer = is_transfer_task and current.type in {"problem", "teach_back", "prediction", "numeric"} and independent and evaluation.result == "correct"
+        concept["scaffold"] = next_scaffold(concept.get("scaffold"), evaluation.result, hints_used, independent=can_fade)
         concept["scaffoldingLevel"] = concept["scaffold"]
         concept["hintDependence"] = int(concept.get("hintDependence", 0)) + (1 if hints_used else 0)
         concept["scaffoldDependence"] = int(concept.get("scaffoldDependence", 0)) + (1 if not independent else 0)
         concept["reviewDue"] = review_due(evaluation.result, hints=hints_used, scaffold=concept["scaffold"], transfer=transfer, delayed=bool(state.get("revisitMode")))
         if evaluation.result == "correct":
             concept["correct"] = int(concept.get("correct", 0)) + 1
+            evidence_counter = "independentSuccesses" if independent else "assistedSuccesses"
+            concept[evidence_counter] = int(concept.get(evidence_counter, 0)) + 1
             concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 or not _objective_evidence_sufficient(objective, concept) else "DEMONSTRATED"
             evidence_key = {
                 "multiple_choice": "recognitionEvidence",
@@ -1012,7 +1038,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
     if (
         evaluation is not None
         and evaluation.result in {"incorrect", "partially_correct"}
-        and int(concept.get("attempts", 0) or 0) >= 3
+        and (
+            int(concept.get("incorrect", 0) or 0)
+            + int(concept.get("partiallyCorrect", 0) or 0)
+        ) >= 3
     ):
         concept["state"] = "NEEDS_REVIEW"
         concept["reviewDue"] = "NEXT_SESSION"
@@ -1155,7 +1184,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             # source-grounded application/transfer check in memory. This is
             # deliberately scene-local: authored plan steps remain assets,
             # never a finite progression cursor.
-            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and concept.get("scaffold") in {"PARTIAL", "INDEPENDENT", "TRANSFER"}:
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("independentSuccesses", 0) or 0) > 0 and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"}:
                 outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
                 transfer_id = bounded_id("transfer", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
                 transfer_step = TeachBackStep(
@@ -1171,11 +1200,14 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 )
                 transfer_action = TutorAction(id=bounded_id("action", concept_id, transfer_id), type="ask_teach_back", conceptId=concept_id, stepId=transfer_id, rationale="Check whether the learner can transfer the idea beyond the original example.")
                 transfer_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_teach_back", pedagogicalGoal="TEST_TRANSFER", pedagogicalStrategy="TRANSFER_PRACTICE", scaffoldLevel="TRANSFER", nextStepId=transfer_id, transitionMessage="Good. Now let's use the idea in a new situation.", rationale="Application evidence is present; transfer evidence is still needed.")
+                concept["scaffold"] = "TRANSFER"
+                concept["scaffoldingLevel"] = "TRANSFER"
+                state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 session.state = state
                 rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=transfer_step, action=transfer_action, decision=transfer_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good — now let's see whether the idea transfers.", feedback_kind="correct", evaluation=evaluation)
                 private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=transfer_decision, fallback_step=transfer_step, objective=objective)
                 return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
-            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0:
+            if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("applicationEvidence", 0) or 0) > 0 and int(concept.get("independentSuccesses", 0) or 0) == 0:
                 # Assisted/guided success earns a lower-support application
                 # check before the tutor is allowed to demand transfer.
                 independent_id = bounded_id("independent", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
@@ -1183,6 +1215,9 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 independent_step = TeachBackStep(id=independent_id, type="teach_back", title="Apply it with less help", prompt=f"Explain how {objective.get('title', 'this concept')} would work in a concrete situation, using your own reasoning.", requiredConcepts=_required_concepts(outcome), hints=[], feedbackIncorrect=f"Start from the central relationship: {outcome[:260]}", sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))
                 independent_action = TutorAction(id=bounded_id("action", concept_id, independent_id), type="ask_teach_back", conceptId=concept_id, stepId=independent_id, rationale="Check independent application before transfer.")
                 independent_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_teach_back", pedagogicalGoal="TEST_APPLICATION", pedagogicalStrategy="SCAFFOLDED_PRACTICE", scaffoldLevel="INDEPENDENT", nextStepId=independent_id, transitionMessage="Good progress. Now try the idea with less help.", rationale="Guided success is not yet independent mastery.")
+                concept["scaffold"] = "INDEPENDENT"
+                concept["scaffoldingLevel"] = "INDEPENDENT"
+                state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
                 # Evidence and answered-interaction history were mutated above;
                 # persist that state before returning the scene-local
                 # independent check so the next response cannot resurrect the

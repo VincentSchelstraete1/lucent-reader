@@ -33,7 +33,7 @@ def content_policy(objective: dict) -> str:
 def next_scaffold(current: str | None, result: str, hints: int = 0, independent: bool = False) -> str:
     level = current if current in SCAFFOLD_LEVELS else "FULL"
     idx = SCAFFOLD_LEVELS.index(level)
-    if result in {"incorrect", "partially_correct"}:
+    if result in {"incorrect", "partially_correct", "insufficient_evidence"}:
         return SCAFFOLD_LEVELS[max(0, idx - 1)]
     if result == "correct":
         if independent:

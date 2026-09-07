@@ -115,8 +115,10 @@ def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     scene, private = ensure_runtime_state(session)
     assert session.state["runtimeVersion"] == 2
     assert session.state["currentScene"]["id"] == scene.id
-    # Teaching-only scenes intentionally have no active response payload.
-    assert private is None
+    # A teaching surface may coexist with an authored practice target; private
+    # state follows the interaction that is actually rendered.
+    assert private is not None
+    assert private["interaction"]["id"] == scene.response_interaction_id
     again, again_private = ensure_runtime_state(session)
     assert again.revision == scene.revision
     assert again_private == private

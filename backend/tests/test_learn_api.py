@@ -40,25 +40,40 @@ def test_learn_session_supports_goal_sensitive_response_and_hint_flow(client):
     assert session["scene"] is not None
     assert any(block["kind"] == "explanation" for block in session["scene"]["blocks"])
 
-    next_step = client.post(f"/learn-sessions/{session['id']}/responses", json={}).json()
-    # Continue acknowledges a scene that already has an active response; it
-    # must not rewind or manufacture a second legacy step.
-    assert next_step["scene"]["revision"] >= session["scene"]["revision"]
+    # The initial authoritative scene already owns the active response.  The
+    # real frontend never submits an empty RESPONSE to advance past it.
+    next_step = session
     active_id = next_step["scene"].get("responseInteractionId")
     if active_id:
+        active_block = next(block for block in next_step["scene"]["blocks"] if (block.get("step") or {}).get("id") == active_id)
+        assert active_block["step"]["hintsAvailable"] > 0, active_block
         hint = client.post(f"/learn-sessions/{session['id']}/hints", json={"interactionId": active_id}).json()
+        assert "detail" not in hint, hint
         assert hint["hintsUsed"] == 1
 
     wrong = client.post(f"/learn-sessions/{session['id']}/responses", json={"interactionId": active_id, "eventType": "RESPONSE", "response": "unrelated"}).json()
     if active_id:
-        assert wrong["feedbackKind"] == "incorrect"
+        # Remediation is an instructional scene, so its top-level tone is
+        # informational even though the attempt itself was incorrect.
+        assert wrong["feedbackKind"] == "info", wrong
         assert wrong["scene"] is not None
         assert wrong["scene"]["revision"] > next_step["scene"]["revision"]
+        assert any(block["kind"] == "explanation" for block in wrong["scene"]["blocks"])
     # The authoritative scene carries the pedagogical change; the legacy
     # action envelope is intentionally empty during scene-only runtime.
     assert wrong["scene"] is not None
 
-    remediation = client.post(f"/learn-sessions/{session['id']}/responses", json={"response": "the source-grounded relationship"}).json()
+    remediation_id = wrong["scene"].get("responseInteractionId")
+    remediation = client.post(
+        f"/learn-sessions/{session['id']}/responses",
+        json={
+            "sceneId": wrong["scene"]["id"],
+            "sceneRevision": wrong["scene"]["revision"],
+            "interactionId": remediation_id,
+            "eventType": "RESPONSE",
+            "response": "the source-grounded relationship",
+        },
+    ).json()
     assert remediation["status"] in {"active", "completed"}
 
 
