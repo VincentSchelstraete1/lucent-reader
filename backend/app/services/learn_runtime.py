@@ -1210,6 +1210,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                     prompt=f"In a concrete case involving {objective.get('title', 'this concept')}, predict what changes and explain why using the relationship you learned.",
                     responseType="short_answer",
                     acceptedAnswers=[outcome],
+                    requiredConcepts=_required_concepts(outcome),
                     solution=outcome,
                     hints=[],
                     feedbackIncorrect=f"Use this central relationship in the case: {outcome[:260]}",

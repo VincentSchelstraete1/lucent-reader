@@ -215,6 +215,7 @@ class ProblemStep(LearnStepBase):
     prompt: str = Field(min_length=1, max_length=500)
     response_type: Literal["short_answer", "numeric"] = Field(alias="responseType")
     accepted_answers: list[str] = Field(default_factory=list, alias="acceptedAnswers", max_length=8)
+    required_concepts: list[str] = Field(default_factory=list, alias="requiredConcepts", max_length=8)
     answer: float | None = None
     tolerance: float | None = Field(default=None, ge=0, le=1000000)
     solution: str = Field(min_length=1, max_length=700)

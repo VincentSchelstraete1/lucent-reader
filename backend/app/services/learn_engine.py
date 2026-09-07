@@ -294,7 +294,7 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             else:
                 answer = takeaways[0] if takeaways else big_idea
                 steps.append(TeachStep(id=_bounded_plan_id("method", section_identity), type="teach", title="Choose the method", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
-                steps.append(ProblemStep(id=_bounded_plan_id("apply", section_identity), type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], solution=answer, hints=[f"Start with the claim about {title}.", f"Use the terms that describe how {title} works."], feedbackIncorrect=f"Use the stated claim about {title} as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
+                steps.append(ProblemStep(id=_bounded_plan_id("apply", section_identity), type="problem", title="Apply the idea", prompt=f"State the key move used in {title}.", responseType="short_answer", acceptedAnswers=[answer], requiredConcepts=[word for word in re.findall(r"[a-z][a-z-]{3,}", answer.casefold()) if word not in {"this", "that", "with", "from", "into", "what", "does"}][:6], solution=answer, hints=[f"Start with the claim about {title}.", f"Use the terms that describe how {title} works."], feedbackIncorrect=f"Use the stated claim about {title} as your starting point.", sourceSectionIds=section_ids, sourceBlockIds=block_ids))
 
         # Never persist a contextless meta interaction.  If a future provider
         # emits one, replace it with a grounded explanation from this section

@@ -2,7 +2,7 @@ import json
 
 from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, public_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
-from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
+from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ProblemStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
 from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event, _grounded_example
@@ -186,6 +186,22 @@ def test_required_concept_evidence_is_case_insensitive():
         option_id=None,
     )
     assert result.result == "correct"
+
+    application = ProblemStep(
+        id="application",
+        type="problem",
+        title="Apply",
+        prompt="Apply the relationship.",
+        responseType="short_answer",
+        acceptedAnswers=["Mechanical energy changes form while the total remains constant."],
+        requiredConcepts=["Mechanical", "Energy", "Constant"],
+        solution="Mechanical energy changes form while the total remains constant.",
+    )
+    assert evaluate_step(
+        application,
+        response="Potential and kinetic are forms of mechanical energy, whose total stays constant.",
+        option_id=None,
+    ).result == "correct"
 
 def test_generated_remediation_uses_meaningful_required_concepts():
     failed = MultipleChoiceStep(
