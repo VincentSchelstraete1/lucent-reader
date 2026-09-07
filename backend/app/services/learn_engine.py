@@ -305,7 +305,12 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
             source_text = " ".join([title, big_idea, *takeaways, json.dumps(comps, default=str)])
             safe_steps.append(candidate if not student_facing_quality_issues(candidate, source_text) else TeachStep(id=grounded_id, type="teach", title=f"Understand {title}", content=big_idea, sourceSectionIds=section_ids, sourceBlockIds=block_ids))
         steps = safe_steps
-        outcome = {"understand": f"Explain how {title} works.", "solve": f"Apply {title} to a new step.", "memorize": f"Recall the essential facts about {title}.", "exam": f"Recognize and use {title} under exam conditions."}[goal]
+        # The objective outcome is also the authoritative evidence target for
+        # autonomous practice, review, and transfer.  Keep it as the section's
+        # substantive source-derived relationship; an instructional template
+        # such as "Explain how <title> works" makes later grading reward title
+        # repetition rather than understanding of the material.
+        outcome = big_idea
         objectives.append(LearningObjective(id=_bounded_plan_id("objective", section_identity), title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
 
     if not objectives:
