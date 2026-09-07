@@ -7,6 +7,7 @@ import pytest
 from app.retrieval_eval.dataset import fixture_corpus_hash, load_retrieval_dataset, load_retrieval_dataset_bundle
 from app.retrieval_eval.evaluation import RetrievalResult, compare_failures, evaluate_retrieval
 from app.retrieval_eval.seeding import seed_retrieval_dataset
+from app.retrieval_eval.support import AnthropicSupportDecisionProvider
 from app.services.embeddings import DeterministicEmbeddingProvider
 from tests.conftest import TestSessionLocal
 
@@ -127,6 +128,23 @@ def test_failure_comparison_reports_fixed_and_regressed(tmp_path):
     assert changes["regressions"] == ["unsupported"]
 
 
+def test_anthropic_support_decision_rejects_unavailable_source_ids(monkeypatch):
+    from app.services import anthropic_service
+
+    monkeypatch.setattr(anthropic_service, "_run_structured_tool", lambda *args, **kwargs: {
+        "answerSupported": True,
+        "sourceBlockIds": ["invented-block"],
+        "reasonCode": "direct_support",
+    })
+    decision = AnthropicSupportDecisionProvider().decide(
+        query="What happens at the turning point?",
+        selected_blocks=[{"blockIds": ["pendulum-turning"], "excerpt": "Speed is zero."}],
+    )
+    assert decision.answer_supported is False
+    assert decision.source_block_ids == ()
+    assert decision.reason_code == "invalid_source_reference"
+
+
 def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkeypatch):
     from scripts import evaluate_retrieval as cli
 
@@ -148,6 +166,7 @@ def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkey
         "--split", "development",
         "--config", str(config_path),
         "--provider", "fake",
+        "--support-provider", "fake",
         "--output", str(output_path),
     ])
     assert cli.main() == 0
@@ -155,11 +174,13 @@ def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkey
     artifact = json.loads(output_path.read_text())
     assert artifact["version"] == "rag-eval-run-v1"
     assert artifact["metadata"]["semanticQuality"] is False
+    assert artifact["metadata"]["supportProvider"] == "fake"
     assert artifact["metadata"]["corpusSizeBlocks"] == 16
     assert artifact["summary"]["total"] == 20
     assert len(artifact["rows"]) == 20
     assert all(row["rawRankedBlockIds"] and row["selectedBlocks"] for row in artifact["rows"])
     assert all("excerpt" in block for row in artifact["rows"] for block in row["selectedBlocks"])
+    assert all(row["supportDecision"]["reasonCode"] == "fake_presence" for row in artifact["rows"])
     assert "do not measure semantic quality" in output_path.with_suffix(".md").read_text()
 
     candidate_path = tmp_path / "candidate.json"
@@ -169,6 +190,7 @@ def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkey
         "--split", "development",
         "--config", str(config_path),
         "--provider", "fake",
+        "--support-provider", "fake",
         "--output", str(candidate_path),
         "--baseline", str(output_path),
     ])

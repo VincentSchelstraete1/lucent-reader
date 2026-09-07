@@ -18,8 +18,9 @@ from app.models.source import Source
 from app.retrieval_eval.dataset import dataset_hash, load_retrieval_dataset_bundle
 from app.retrieval_eval.evaluation import RetrievalResult, evaluate_retrieval
 from app.retrieval_eval.seeding import config_hash
+from app.retrieval_eval.support import AnthropicSupportDecisionProvider, DeterministicPresenceSupportProvider
 from app.services.embeddings import DeterministicEmbeddingProvider, VoyageEmbeddingProvider, set_embedding_provider
-from app.services.retrieval import RetrievalStatus, SourceQuery, retrieve_source
+from app.services.retrieval import SourceQuery, retrieve_source
 
 
 def _jsonable(value):
@@ -73,6 +74,12 @@ def _row_payload(row) -> dict:
         "answerSupported": row.result.answer_supported,
         "status": row.result.status,
         "failureCode": row.result.failure_code,
+        "supportDecision": {
+            "provider": row.result.support_provider,
+            "answerSupported": row.result.answer_supported,
+            "sourceBlockIds": list(row.result.support_block_ids),
+            "reasonCode": row.result.support_reason,
+        },
         "metrics": {
             "recallAt1": row.recall_at_1,
             "recallAt3": row.recall_at_3,
@@ -117,6 +124,7 @@ def main() -> int:
     parser.add_argument("--split", choices=("development", "holdout"), required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--provider", choices=("fake", "voyage"), required=True)
+    parser.add_argument("--support-provider", choices=("fake", "anthropic"), required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--baseline")
     args = parser.parse_args()
@@ -125,6 +133,11 @@ def main() -> int:
     full_dataset_hash = dataset_hash(list(dataset.examples))
     examples = [item for item in dataset.examples if item.split == args.split]
     provider = DeterministicEmbeddingProvider() if args.provider == "fake" else VoyageEmbeddingProvider()
+    support_provider = (
+        DeterministicPresenceSupportProvider()
+        if args.support_provider == "fake"
+        else AnthropicSupportDecisionProvider()
+    )
     config = _load_config(args.config, dataset_hash_value=full_dataset_hash, provider=provider)
     document_config = config.get("documents") or {}
     top_k = int((config.get("retrieval") or {}).get("topK", 5))
@@ -147,24 +160,29 @@ def main() -> int:
             context = retrieve_source(db, user_id=user_id, document_id=document_id,
                 expected_generation=source_index.generation_id,
                 query=SourceQuery("evaluation", example.query), top_k=top_k)
+            selected_blocks = tuple({
+                "blockIds": block.block_ids,
+                "rank": block.rank,
+                "score": block.score,
+                "selection": block.selection,
+                "source": block.source,
+                "excerpt": block.text,
+            } for block in context.blocks)
+            support = support_provider.decide(query=example.query, selected_blocks=selected_blocks)
             return RetrievalResult(
                 ranked_block_ids=tuple(block.block_ids[0] for block in context.blocks),
-                answer_supported=context.status == RetrievalStatus.SUPPORTED,
+                answer_supported=support.answer_supported,
                 latency_ms=context.timings_ms.get("total", 0.0),
                 raw_ranked_block_ids=tuple(context.raw_ranked_block_ids),
                 embedding_latency_ms=context.timings_ms.get("query_embedding", 0.0),
                 search_latency_ms=context.timings_ms.get("search", 0.0),
                 status=context.status.value,
-                selected_blocks=tuple({
-                    "blockIds": block.block_ids,
-                    "rank": block.rank,
-                    "score": block.score,
-                    "selection": block.selection,
-                    "source": block.source,
-                    "excerpt": block.text,
-                } for block in context.blocks),
+                selected_blocks=selected_blocks,
                 omitted_block_ids=tuple(context.omitted_block_ids),
                 failure_code=context.failure_code,
+                support_block_ids=support.source_block_ids,
+                support_reason=support.reason_code,
+                support_provider=support_provider.name,
             )
 
         try:
@@ -191,13 +209,15 @@ def main() -> int:
             "provider": provider.metadata.provider,
             "model": provider.metadata.model,
             "dimensions": provider.metadata.dimensions,
+            "supportProvider": support_provider.name,
+            "supportModel": support_provider.model,
             "embeddingInputVersion": "learning-block-input-v1",
             "queryVersion": "source-query-v1",
             "retrievalVersion": "exact-cosine-v1",
             "split": args.split,
             "corpusSizeBlocks": sum(int(item["blockCount"]) for item in document_config.values()),
             "latencyMethodology": (config.get("retrieval") or {}).get("latencyMethodology"),
-            "semanticQuality": provider.metadata.provider != "fake",
+            "semanticQuality": provider.metadata.provider != "fake" and support_provider.name != "fake",
         },
         "config": config,
         "summary": summary_payload,

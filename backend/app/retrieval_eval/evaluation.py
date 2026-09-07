@@ -19,6 +19,9 @@ class RetrievalResult:
     selected_blocks: tuple[dict, ...] = ()
     omitted_block_ids: tuple[str, ...] = ()
     failure_code: str | None = None
+    support_block_ids: tuple[str, ...] = ()
+    support_reason: str | None = None
+    support_provider: str | None = None
 
 
 Strategy = Callable[[RetrievalEvalExample], RetrievalResult]
