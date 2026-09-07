@@ -123,6 +123,18 @@ def test_ask_another_question_recomposes_active_scene(client):
     assert any(block.get("kind") == "practice" for block in scene["blocks"])
 
 
+def test_ask_question_difficulty_intents_shape_grounded_followups(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    simpler = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me a simpler question"}).json()
+    simple = next(block["step"] for block in simpler["scene"]["blocks"] if block["kind"] == "practice")
+    assert simple["type"] == "multiple_choice"
+    harder = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me a harder question"}).json()
+    hard = next(block["step"] for block in harder["scene"]["blocks"] if block["kind"] == "practice")
+    assert hard["type"] == "short_answer"
+    assert "new situation" in hard["prompt"]
+
+
 def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/visual"}).json()
     document = client.post("/documents", json={"source_id": source["id"], "title": "Mechanism material", "content": "A source-grounded comparison."}).json()

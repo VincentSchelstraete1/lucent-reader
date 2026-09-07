@@ -275,7 +275,7 @@ def _ask_scope(message: str, objective: dict, context: dict) -> str:
     # Learner-initiated tutoring requests are scoped to the active concept even
     # when they contain no subject noun ("give me an example", "show me").
     # This is a relevance decision, not a pedagogical shortcut.
-    if any(phrase in message.lower() for phrase in ("another way", "different explanation", "give me an example", "show me", "another question", "different question", "don't understand", "do not understand", "not sure", "why was my answer wrong")):
+    if any(phrase in message.lower() for phrase in ("another way", "different explanation", "give me an example", "show me", "another question", "different question", "simpler question", "harder question", "walk me through", "give me a hint", "don't understand", "do not understand", "not sure", "why was my answer wrong")):
         return "IN_SCOPE_CURRENT_CONCEPT"
     concept_terms = set(re.findall(r"[a-z0-9]{3,}", (objective.get("title", "") + " " + objective.get("outcome", "")).lower()))
     source_terms = set(re.findall(r"[a-z0-9]{3,}", context.get("text", "").lower()))
@@ -424,7 +424,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     elif "example" in lowered:
         ask_action, ask_strategy, ask_kind, ask_label = "give_example", "CONCRETE_EXAMPLE", "example", "Example"
     elif "simpler" in lowered and "question" in lowered:
-        ask_action, ask_strategy, ask_kind, ask_label = "simplify_explanation", "GUIDED_REASONING", "explanation", "Let's simplify it"
+        ask_action, ask_strategy, ask_kind, ask_label = "simplify_explanation", "SCAFFOLDED_PRACTICE", "explanation", "Let's simplify it"
     elif any(term in lowered for term in ("another way", "different", "explain")):
         ask_action, ask_strategy, ask_kind, ask_label = "give_analogy", "ANALOGY", "analogy", "Another way to see it"
     else:
@@ -535,7 +535,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     ask_fallback = TutorDecision(
         hypothesis="Learner requested an explanation in the current concept context.", diagnosis="UNCERTAINTY", confidence=0.55,
         pedagogicalGoal="BUILD_INTUITION", pedagogicalStrategy=ask_strategy, teachingAction=ask_action, targetConcept=objective.get("id", "concept"),
-            interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool={"clarify_definition": "explain_concept"}.get(ask_action, ask_action), arguments={"conceptId": objective.get("id", "concept")})],
+            interactionType=getattr(current_step, "type", None), scaffoldLevel=ask_concept.get("scaffold", "FULL"), actions=[TutorToolCall(tool={"clarify_definition": "explain_concept", "simplify_explanation": "explain_concept"}.get(ask_action, ask_action), arguments={"conceptId": objective.get("id", "concept")})],
         expectedEvidence="The learner can restate the explanation or apply it in the next check.", transitionMessage="I’m adapting the explanation to your question.", rationale="Learner-initiated clarification in the active concept.",
         scenePlan=TutorScenePlan(blocks=[fallback_block], expectedEvidence=["The learner can connect the explanation to the source concept."] , completionCondition="The learner can explain the concept using the source-supported relationship."),
     )
