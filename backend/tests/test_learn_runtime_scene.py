@@ -554,6 +554,14 @@ def test_application_success_composes_transfer_before_objective_completion():
     assert session.status == "active"
     assert private and private["interaction"]["id"].startswith("transfer-")
     assert "new situation" in private["interaction"]["prompt"]
+    scene, private = process_tutor_event(session, {"id": "transfer-answer", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "In a new situation, force still equals mass times acceleration."}})
+    assert session.status == "completed"
+    assert session.ended_reason == "evidence_sufficient"
+    assert private is None
+    concept = session.state["concepts"][0]
+    assert concept["applicationEvidence"] >= 1
+    assert concept["independentSuccesses"] >= 1
+    assert concept["transferEvidence"] >= 1
 
 
 def test_explanation_success_composes_independent_application_when_missing():

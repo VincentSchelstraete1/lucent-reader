@@ -918,7 +918,6 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             concept["correct"] = int(concept.get("correct", 0)) + 1
             evidence_counter = "independentSuccesses" if independent else "assistedSuccesses"
             concept[evidence_counter] = int(concept.get(evidence_counter, 0)) + 1
-            concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 or not _objective_evidence_sufficient(objective, concept) else "DEMONSTRATED"
             evidence_key = {
                 "multiple_choice": "recognitionEvidence",
                 "prediction": "applicationEvidence",
@@ -936,6 +935,10 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 concept[evidence_key] = int(concept.get(evidence_key, 0)) + 1
             if transfer:
                 concept["transferEvidence"] = int(concept.get("transferEvidence", 0)) + 1
+            # Decide mastery only after every counter earned by this response
+            # has been applied. Otherwise the final transfer response leaves
+            # the concept DEVELOPING until an unrelated extra turn.
+            concept["state"] = "DEVELOPING" if int(concept.get("correct", 0)) < 2 or not _objective_evidence_sufficient(objective, concept) else "DEMONSTRATED"
         elif evaluation.result == "partially_correct":
             concept["partiallyCorrect"] = int(concept.get("partiallyCorrect", 0)) + 1; concept["state"] = "DEVELOPING"
         elif evaluation.result == "incorrect":
