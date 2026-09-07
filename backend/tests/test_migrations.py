@@ -29,7 +29,7 @@ def test_alembic_upgrade_head_on_empty_database():
         engine = create_engine(migration_url)
         try:
             tables = set(inspect(engine).get_table_names())
-            assert {"users", "web_sessions", "sources", "extension_grants", "extension_refresh_tokens"} <= tables
+            assert {"users", "web_sessions", "sources", "extension_grants", "extension_refresh_tokens", "document_source_indexes", "learning_blocks"} <= tables
         finally:
             engine.dispose()
     finally:

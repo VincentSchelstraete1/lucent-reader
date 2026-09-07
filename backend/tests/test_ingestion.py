@@ -38,13 +38,14 @@ def _simple_pdf(*page_texts: str, include_image: bool = False) -> bytes:
 
 
 def _raw_document(filename: str = "lecture.pdf") -> RawDocument:
-    block = RawContentBlock("page-1-block-1", 1, "text", (72, 72, 200, 90), 0, "Page one")
+    body = "Page one explains how oscillating systems exchange potential and kinetic energy while conserving total energy."
+    block = RawContentBlock("page-1-block-1", 1, "text", (72, 72, 200, 90), 0, body)
     return RawDocument(
         source_type="pdf",
         filename=filename,
         page_count=1,
         markdown="# Extracted\n\nRaw body",
-        pages=[RawPage(1, "Page one\n", [block])],
+        pages=[RawPage(1, f"{body}\n", [block])],
         images=[],
         extraction_metadata={"page_extractor": "stub"},
     )
@@ -84,7 +85,7 @@ def test_valid_pdf_returns_structured_document_and_persists_learning_note(client
     assert result["page_count"] == 1
     assert result["markdown"] == "# Extracted\n\nRaw body"
     assert result["pages"][0]["page_number"] == 1
-    assert result["pages"][0]["blocks"][0]["text"] == "Page one"
+    assert result["pages"][0]["blocks"][0]["text"].startswith("Page one explains")
     assert result["images"] == []
     assert stub_ingestor.calls == [(pdf, "lecture.pdf")]
     assert isinstance(result["source_id"], int)

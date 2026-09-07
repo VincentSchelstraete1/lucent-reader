@@ -4,9 +4,11 @@ from app.schemas.document import DocumentCreateRequest, DocumentResponse, Docume
 from app.schemas.note import NoteResponse
 from app.database import get_db
 from app.models.document import Document
+from app.models.learning_block import DocumentSourceIndex
 from app.models.note import Note
 from app.models.quiz import Quiz, QuizAttempt
 from app.models.source import Source
+from app.schemas.ingestion import SourceIndexStatusResponse
 from app.services.anthropic_service import generate_structured_note
 from sqlalchemy import select
 from app.auth_dependencies import get_current_user, require_csrf
@@ -51,6 +53,34 @@ def get_document(document_id: int, db = Depends(get_db), user: User = Depends(ge
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+@router.get("/documents/{document_id}/source-index", response_model=SourceIndexStatusResponse)
+def get_document_source_index(document_id: int, db=Depends(get_db), user: User = Depends(get_current_user)):
+    document = db.execute(
+        select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)
+    ).scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    source_index = db.get(DocumentSourceIndex, document_id)
+    if source_index is None:
+        return SourceIndexStatusResponse(
+            document_id=document_id,
+            status="NOT_INDEXED",
+            block_count=0,
+            embedded_count=0,
+            coverage_warnings=["Re-upload this document to prepare it for grounded learning."],
+            retryable=False,
+        )
+    return SourceIndexStatusResponse(
+        document_id=document_id,
+        generation_id=source_index.generation_id,
+        status=source_index.status,
+        block_count=source_index.block_count,
+        embedded_count=source_index.embedded_count,
+        coverage_warnings=list(source_index.coverage_warnings or []),
+        retryable=source_index.status in {"PENDING", "FAILED"},
+    )
 
 @router.delete("/documents/{document_id}", response_model=DocumentResponse, dependencies=[Depends(require_csrf)])
 def delete_document(document_id: int, db = Depends(get_db), user: User = Depends(get_current_user)):

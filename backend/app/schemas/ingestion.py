@@ -1,4 +1,5 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -261,6 +262,8 @@ class PdfIngestionResponse(BaseModel):
     source_id: int | None = None
     document_id: int | None = None
     note_id: int | None = None
+    source_generation: UUID | None = None
+    source_index_status: Literal["PENDING", "INDEXING", "READY", "FAILED"] | None = None
     teaching_depth: Literal["concise", "balanced", "detailed"] = Field(default="balanced", alias="teachingDepth")
 
     @classmethod
@@ -338,3 +341,13 @@ class ProgressivePollResponse(BaseModel):
     status: Literal["processing", "complete", "failed"]
     sections: list[ProgressiveSectionResponse]
     result: PdfIngestionResponse | None = None
+
+
+class SourceIndexStatusResponse(BaseModel):
+    document_id: int
+    generation_id: UUID | None = None
+    status: Literal["NOT_INDEXED", "PENDING", "INDEXING", "READY", "FAILED"]
+    block_count: int
+    embedded_count: int
+    coverage_warnings: list[str] = Field(default_factory=list)
+    retryable: bool

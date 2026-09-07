@@ -29,6 +29,7 @@ from app.normalization import NormalizedDocument, normalize_document
 from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
+from app.services.source_index import SourceCorpusInvalid, index_document, persist_source_corpus
 from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, TeachingDepth, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
 from sqlalchemy import select
 
@@ -139,10 +140,17 @@ def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> Pd
     else:
         document.content = response.markdown
 
+    try:
+        source_index = persist_source_corpus(db, document_id=document.id, response=response)
+    except SourceCorpusInvalid as exc:
+        db.rollback()
+        raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "source_not_substantive", str(exc)) from exc
+
     payload = json.dumps({
         "filename": response.filename,
         "sourceType": response.source_type,
         "teachingDepth": response.teaching_depth,
+        "sourceGeneration": str(source_index.generation_id),
         "sectionNotes": [note.model_dump(by_alias=True) for note in response.section_notes],
     })
     note = db.execute(select(Note).where(
@@ -167,6 +175,8 @@ def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> Pd
         "source_id": source.id,
         "document_id": document.id,
         "note_id": note.id,
+        "source_generation": source_index.generation_id,
+        "source_index_status": source_index.status,
     })
 
 
@@ -219,6 +229,7 @@ async def _read_office_upload(upload: UploadFile, *, format_label: str) -> bytes
     dependencies=[Depends(require_csrf)],
 )
 async def ingest_pdf(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db = Depends(get_db),
@@ -254,7 +265,9 @@ async def ingest_pdf(
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
-    return _persist_learning_note(db, user_id=user.id, response=response)
+    persisted = _persist_learning_note(db, user_id=user.id, response=response)
+    background_tasks.add_task(index_document, persisted.document_id, persisted.source_generation)
+    return persisted
 
 async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semantic_generator) -> None:
     job = _PROGRESSIVE_JOBS[job_id]
@@ -272,6 +285,7 @@ async def _run_progressive_job(job_id: str, extracted, blocks, decisions, semant
     })
     with SessionLocal() as db:
         result = _persist_learning_note(db, user_id=job["user_id"], response=result)
+    await run_in_threadpool(index_document, result.document_id, result.source_generation)
     job["result"] = result
     job["status"] = "complete"
 
@@ -325,6 +339,7 @@ async def poll_progressive_pdf(job_id: str, _user: User = Depends(get_current_us
     dependencies=[Depends(require_csrf)],
 )
 async def ingest_docx(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db = Depends(get_db),
@@ -352,7 +367,9 @@ async def ingest_docx(
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
-    return _persist_learning_note(db, user_id=user.id, response=response)
+    persisted = _persist_learning_note(db, user_id=user.id, response=response)
+    background_tasks.add_task(index_document, persisted.document_id, persisted.source_generation)
+    return persisted
 
 
 @router.post(
@@ -361,6 +378,7 @@ async def ingest_docx(
     dependencies=[Depends(require_csrf)],
 )
 async def ingest_pptx(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db = Depends(get_db),
@@ -388,4 +406,6 @@ async def ingest_pptx(
     blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
-    return _persist_learning_note(db, user_id=user.id, response=response)
+    persisted = _persist_learning_note(db, user_id=user.id, response=response)
+    background_tasks.add_task(index_document, persisted.document_id, persisted.source_generation)
+    return persisted
