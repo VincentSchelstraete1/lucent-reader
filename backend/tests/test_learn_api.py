@@ -150,6 +150,26 @@ def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(clien
     assert second.json()["scene"].get("visualState", {}).get("stage", 0) >= first_stage
 
 
+def test_ask_show_visual_can_add_a_new_grounded_visual_surface(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/multi-visual"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Paired mechanisms", "content": "Two source-grounded views explain the mechanism."}).json()
+    note = {"title": "Paired mechanisms", "sectionNotes": [
+        {"id": "s-one", "title": "First view", "bigIdea": "The first mechanism increases output.", "sourceBlockIds": ["b-one"], "keyTakeaways": ["First mechanism"], "components": [{"kind": "comparison", "title": "Increase pathway", "dimensions": ["effect"], "items": [{"id": "a", "name": "Input", "values": {"effect": "increases output"}}, {"id": "b", "name": "Result", "values": {"effect": "higher output"}}]}, {"kind": "flow", "title": "Limiting pathway", "stages": [{"id": "start", "label": "Input"}, {"id": "end", "label": "Limited output"}]}]},
+        {"id": "s-two", "title": "Second view", "bigIdea": "The second mechanism limits output.", "sourceBlockIds": ["b-two"], "keyTakeaways": ["Second mechanism"], "components": [{"kind": "comparison", "title": "Limiting pathway", "dimensions": ["effect"], "items": [{"id": "c", "name": "Input", "values": {"effect": "limits output"}}, {"id": "d", "name": "Result", "values": {"effect": "lower output"}}]}]},
+    ]}
+    client.post("/notes", json={"title": "Paired note", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    first = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
+    assert first.status_code == 200
+    before_count = sum(block.get("kind") in {"visual", "animation"} for block in first.json()["scene"]["blocks"])
+    second = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
+    assert second.status_code == 200
+    scene = second.json()["scene"]
+    after_count = sum(block.get("kind") in {"visual", "animation"} for block in scene["blocks"])
+    assert after_count > before_count, {"before": first.json(), "after": second.json()}
+    assert second.json()["visualAction"]["type"] == "add_visual"
+
+
 def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
     document = _document_with_note(client)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "solve", "familiarity": "new"}).json()

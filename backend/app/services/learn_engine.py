@@ -104,8 +104,18 @@ def _source_ids(section: dict) -> tuple[list[str], list[str]]:
 def synthesize_visual_spec(component: dict, title: str, section_ids: list[str], block_ids: list[str]) -> VisualSpec | None:
     """Translate grounded SectionNote structure into the constrained visual DSL."""
     kind = str(component.get("kind", ""))
-    raw_nodes = component.get("nodes") or component.get("items") or []
     generated_edges: list[dict] = []
+    raw_nodes = component.get("nodes") or component.get("items") or []
+    # Flow components commonly store their semantic nodes as ordered stages.
+    # Normalize those stages into the same constrained visual DSL so a flow
+    # can be selected as a genuinely new grounded view by Ask Lucent.
+    if not raw_nodes and kind == "flow":
+        raw_nodes = [
+            {"id": stage.get("id") or f"stage-{index}", "label": stage.get("label") or stage.get("title"), "detail": stage.get("detail") or stage.get("explanation")}
+            for index, stage in enumerate(component.get("stages") or []) if isinstance(stage, dict)
+        ]
+        for index in range(len(raw_nodes) - 1):
+            generated_edges.append({"source": str(raw_nodes[index]["id"]), "target": str(raw_nodes[index + 1]["id"]), "label": "leads to"})
     if kind == "structure" and not raw_nodes:
         root = component.get("root") or {}
         # Flatten nested containment into explicit relationships. This gives

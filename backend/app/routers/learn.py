@@ -459,7 +459,9 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         current_title = str(getattr(visual_candidate.visual_spec, "title", ""))
         alternate = None
         for section in (payload.get("sectionNotes") or []):
-            for component in (section.get("components") or []) if isinstance(section, dict) else []:
+            nested_content = section.get("content") if isinstance(section, dict) and isinstance(section.get("content"), dict) else {}
+            components = (section.get("components") or nested_content.get("components") or []) if isinstance(section, dict) else []
+            for component in components:
                 if not isinstance(component, dict) or str(component.get("kind")) not in {"comparison", "flow", "relationship_map", "structure"}:
                     continue
                 title = str(component.get("title") or section.get("title") or "Concept visual")
@@ -539,13 +541,18 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         # above still controls whether a visual can actually be introduced.
         if requested_visual and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
             ask_kind, ask_label = "visual", "Watch"
-            visual_action = _visual_request_action(visual_candidate)
-            if getattr(visual_candidate, "visual_spec", None) is not None:
-                visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
-            if getattr(visual_candidate, "visual_ref", None) is not None:
-                visual_action["visualRef"] = visual_candidate.visual_ref
-            elif getattr(visual_candidate, "type", None) == "walkthrough":
-                visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
+            # Keep a previously synthesized ``add_visual`` operation intact.
+            # The fallback below is only needed when no concrete operation was
+            # selected; otherwise it would silently turn a new visual request
+            # back into a stage-advance on the existing visual.
+            if visual_action is None:
+                visual_action = _visual_request_action(visual_candidate)
+                if getattr(visual_candidate, "visual_spec", None) is not None:
+                    visual_action["visualSpec"] = visual_candidate.visual_spec.model_dump(by_alias=True)
+                if getattr(visual_candidate, "visual_ref", None) is not None:
+                    visual_action["visualRef"] = visual_candidate.visual_ref
+                elif getattr(visual_candidate, "type", None) == "walkthrough":
+                    visual_action["visualRef"] = {"sectionId": visual_candidate.section_id, "componentIndex": visual_candidate.component_index}
     # Do not let retrieval/tool narration become the example itself.  When the
     # provider returns a generic promise to retrieve an example (or otherwise
     # fails to include a concrete source detail), derive a concise example from
