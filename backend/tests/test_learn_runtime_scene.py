@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, build_tutor_observation, completion_met, ensure_runtime_state, process_tutor_event, push_prerequisite_branch, return_from_prerequisite, select_target_objective, _legacy_scene
-from app.schemas.learn import ConceptEvidence
+from app.schemas.learn import ConceptEvidence, VisualSpec
 from app.routers.learn import _initial_state
 
 
@@ -207,6 +207,15 @@ def test_ask_message_can_add_grounded_visual_reference_to_teaching_only_scene():
     assert scene is not None
     visual_blocks = [block for block in scene.blocks if block.kind == "visual"]
     assert visual_blocks and visual_blocks[0].visual_ref == {"sectionId": "s1", "componentIndex": 0}
+
+def test_ask_message_can_add_a_new_visual_alongside_existing_visual():
+    session = _session()
+    process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    spec = VisualSpec(type="process_flow", title="Energy flow", purpose="See the conversion.", nodes=[{"id": "a", "label": "Potential"}, {"id": "b", "label": "Kinetic"}], edges=[{"source": "a", "target": "b"}], stages=[])
+    first = apply_scene_message(session, message="Show me visually", answer="Here is a grounded view.", source_section_ids=["s1"], visual_action={"type": "add_visual", "newVisual": True, "stage": 0, "visualSpec": spec.model_dump(by_alias=True)})
+    scene = apply_scene_message(session, message="Show me a different visual", answer="Here is another grounded view.", source_section_ids=["s1"], visual_action={"type": "add_visual", "newVisual": True, "stage": 0, "visualSpec": spec.model_dump(by_alias=True)})
+    assert scene is not None
+    assert first is not None and len([block for block in scene.blocks if block.kind == "visual"]) >= 2
 
 
 def test_visual_event_persists_canonical_stage_and_highlight():

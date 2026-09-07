@@ -451,6 +451,29 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
                 if spec is not None:
                     visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual", objective.get("id"), section.get("id")), "visual_spec": spec, "visual_ref": None, "type": "teach"})()
                     break
+    # An explicit visual request may ask for a genuinely different view even
+    # when the scene already has one. Prefer another source-backed component
+    # from the active material and add it as a new visual surface; never invent
+    # arbitrary provider JSON or silently reuse the identical spec.
+    if requested_visual and visual_candidate is not None and getattr(visual_candidate, "visual_spec", None) is not None:
+        current_title = str(getattr(visual_candidate.visual_spec, "title", ""))
+        alternate = None
+        for section in (payload.get("sectionNotes") or []):
+            for component in (section.get("components") or []) if isinstance(section, dict) else []:
+                if not isinstance(component, dict) or str(component.get("kind")) not in {"comparison", "flow", "relationship_map", "structure"}:
+                    continue
+                title = str(component.get("title") or section.get("title") or "Concept visual")
+                if title != current_title:
+                    alternate = (section, component)
+                    break
+            if alternate:
+                break
+        if alternate:
+            section, component = alternate
+            spec = synthesize_visual_spec(component, str(section.get("title") or objective.get("title") or "Concept visual"), [str(section.get("id"))], [str(item) for item in section.get("sourceBlockIds", [])])
+            if spec is not None:
+                visual_candidate = type("GroundedVisualCandidate", (), {"id": _bounded_id("visual-new", objective.get("id"), section.get("id")), "visual_spec": spec, "visual_ref": None, "type": "teach"})()
+                visual_action = {"type": "add_visual", "stepId": visual_candidate.id, "stage": 0, "visualSpec": spec.model_dump(by_alias=True), "newVisual": True}
     if (ask_kind == "visual" or requested_visual) and visual_action is None and visual_candidate is not None and (getattr(visual_candidate, "visual_spec", None) is not None or getattr(visual_candidate, "visual_ref", None) is not None or getattr(visual_candidate, "type", None) == "walkthrough"):
         visual_action = _visual_request_action(visual_candidate)
         if getattr(visual_candidate, "visual_spec", None) is not None:
