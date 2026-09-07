@@ -258,7 +258,10 @@
 .flashcard-answer span { color: #6c746e; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; }
 .flashcard-answer strong { font-weight: 500; }
 .flashcard-instruction { color: #6c746e; text-align: center; font-size: .78rem; margin: .6rem 0 0; }
-.flashcards-workspace .step-controls { width: min(100%, 540px); margin: .75rem auto 0; justify-content: space-between; }
+.flashcards-workspace .step-controls { width: min(100%, 540px); margin: .75rem auto 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.flashcards-workspace .step-controls > :first-child { justify-self: start; }
+.flashcards-workspace .step-controls > :nth-child(2) { justify-self: center; }
+.flashcards-workspace .step-controls > :last-child { justify-self: end; }
 .flashcards-focus-mode .flashcard { width: min(100%, 680px); }
 .flashcards-focus-mode .step-controls { width: min(100%, 680px); }
 .golden-experience { margin-top: 3rem; border-top: 1px solid #d8d2c5; padding-top: 1.5rem; }
