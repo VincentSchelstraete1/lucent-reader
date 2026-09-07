@@ -124,6 +124,19 @@ def test_legacy_session_backfill_creates_runtime_v2_scene_idempotently():
     assert again_private == private
 
 
+def test_rebuilt_review_scene_preserves_reduced_scaffold_presentation():
+    session = _session()
+    ensure_runtime_state(session)
+    session.state["concepts"][0]["scaffold"] = "PARTIAL"
+    session.state["concepts"][0]["scaffoldingLevel"] = "PARTIAL"
+    session.state["usedTeachingIds"] = ["teach"]
+    session.state["revisitQueue"] = ["energy"]
+    scene, private = _legacy_scene(session, session.plan["objectives"][0])
+    assert private is not None
+    assert any(block.kind == "practice" for block in scene.blocks)
+    assert not any(block.kind == "explanation" for block in scene.blocks)
+
+
 def test_correct_response_does_not_represent_same_unanswered_interaction():
     session = _session()
     scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})

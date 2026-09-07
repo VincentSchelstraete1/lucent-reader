@@ -200,7 +200,14 @@ def _legacy_scene(session, objective: dict[str, Any]) -> tuple[LearningScene, di
         or raw.get("type") in {"teach", "walkthrough"}
         or str(raw.get("id")) not in answered
     ]
-    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=available_steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept={}, state=state)
+    active_concept = next(
+        (
+            item for item in state.get("concepts", [])
+            if str(item.get("conceptId")) == str(objective.get("id"))
+        ),
+        {"conceptId": str(objective.get("id")), "scaffold": "FULL"},
+    )
+    scene = compose_learning_scene(session_id=str(session.id), objective=objective, steps=available_steps, step_index=cursor, current_step=parsed, action=None, decision=None, concept=active_concept, state=state)
     scene = scene.model_copy(update={"revision": max(1, int(scene.revision or 0))})
     scene_data = scene.model_dump(by_alias=True)
     # The scene compiler can keep an authored teaching asset visible while
