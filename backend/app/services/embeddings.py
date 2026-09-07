@@ -72,9 +72,18 @@ class VoyageEmbeddingProvider:
         try:
             self._timeout = float(os.getenv("RAG_EMBEDDING_TIMEOUT_SECONDS", "20"))
             dimensions = int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "512"))
+            self._max_retries = int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3"))
+            self._retry_backoff = float(os.getenv("RAG_EMBEDDING_RETRY_BACKOFF_SECONDS", "0.25"))
+            self._rate_limit_backoff = float(os.getenv("RAG_EMBEDDING_RATE_LIMIT_BACKOFF_SECONDS", "20.5"))
         except ValueError as exc:
             raise EmbeddingUnavailable("Embedding provider configuration is invalid") from exc
-        if self._timeout <= 0 or dimensions <= 0:
+        if (
+            self._timeout <= 0
+            or dimensions <= 0
+            or self._max_retries < 0
+            or self._retry_backoff < 0
+            or not 0 < self._rate_limit_backoff <= 60
+        ):
             raise EmbeddingUnavailable("Embedding provider configuration is invalid")
         self.metadata = EmbeddingMetadata("voyage", os.getenv("RAG_EMBEDDING_MODEL", "voyage-3-lite"), dimensions)
 
@@ -82,7 +91,9 @@ class VoyageEmbeddingProvider:
         values = validate_inputs(texts)
         body = None
         last_error: Exception | None = None
-        for attempt in range(3):
+        attempts = self._max_retries + 1
+        for attempt in range(attempts):
+            retry_delay = self._retry_backoff * (2**attempt)
             try:
                 response = httpx.post(
                     "https://api.voyageai.com/v1/embeddings",
@@ -99,10 +110,17 @@ class VoyageEmbeddingProvider:
                 if exc.response.status_code in {400, 401, 403, 404}:
                     raise EmbeddingUnavailable("Embedding provider configuration was rejected") from exc
                 last_error = exc
+                if exc.response.status_code == 429:
+                    retry_after = exc.response.headers.get("retry-after", "").strip()
+                    try:
+                        retry_delay = float(retry_after) if retry_after else self._rate_limit_backoff
+                    except ValueError:
+                        retry_delay = self._rate_limit_backoff
+                    retry_delay = min(60.0, max(self._rate_limit_backoff, retry_delay))
             except (TypeError, ValueError) as exc:
                 raise EmbeddingInvalidResponse("Embedding provider returned malformed data") from exc
-            if attempt < 2:
-                time.sleep(0.25 * (2**attempt))
+            if attempt < attempts - 1:
+                time.sleep(retry_delay)
         if body is None:
             raise EmbeddingUnavailable("Embedding provider is temporarily unavailable") from last_error
 

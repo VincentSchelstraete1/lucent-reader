@@ -133,7 +133,14 @@ def evaluate_retrieval(examples: list[RetrievalEvalExample], strategy: Strategy)
     supported = [row for row in rows if row.example.supported]
     unsupported = [row for row in rows if not row.example.supported]
     raw_rankings = [row.result.raw_ranked_block_ids or row.result.ranked_block_ids for row in supported]
-    failures = [row for row in rows if (row.example.supported and (row.recall_at_5 or 0) < 1) or (not row.example.supported and row.result.answer_supported)]
+    failures = [
+        row for row in rows
+        if (
+            row.example.supported
+            and ((row.recall_at_5 or 0) < 1 or not row.result.answer_supported)
+        )
+        or (not row.example.supported and row.result.answer_supported)
+    ]
     latencies = [row.result.latency_ms for row in rows]
     return RetrievalEvaluation(
         total=len(rows), supported=len(supported), unsupported=len(unsupported),

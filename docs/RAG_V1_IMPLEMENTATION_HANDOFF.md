@@ -13,7 +13,7 @@ Branch: `feature/public-auth-flow`
 - `84f542d` — complete indexed-session Ask/quiz convergence and learner-facing source-index readiness handling.
 - `462155a` — locked, redistributable Stage 1/Stage 2 benchmark manifests with strict source/gold validation and expanded metrics.
 - `e810376` — reproducible local fixture seeding, raw/final retriever instrumentation, and the complete evaluation CLI/artifact contract.
-- Current checkpoint — explicit support/answerability-provider boundary so retrieval status or similarity cannot silently count as semantic support.
+- Current checkpoint — live Voyage/Anthropic Stage 2 development gate, calibrated retrieval policy, bounded free-tier rate-limit handling, and retained support-decision failures.
 
 ## Plan status
 
@@ -28,19 +28,18 @@ Branch: `feature/public-auth-flow`
 
 ### Current phase
 
-Phase 6 is complete for offline/reproducibility mechanics and pending its external live-provider gates. The repository contains an original CC0 fixture corpus spanning physics/PDF, humanities/DOCX, and computer architecture/PPTX. Stage 1 has 24 queries across two domains; Stage 2 extends it to 50 queries across three domains with a locked 38-development/12-holdout split. Every supported gold evidence set has validated source block IDs and exact quotation offsets (plus pages for PDF evidence), including conjunctive multi-block requirements. An explicitly non-production seeder creates isolated owned documents and a hash-locked config. The CLI now requires dataset/split/config/embedding-provider/support-provider/output, supports retained-baseline comparison, and emits JSON plus Markdown with raw/final rankings, excerpts, omissions, explicit support decisions, failure IDs, metadata, macros, and embedding/search/total latency. The support model validates cited IDs against retrieved blocks. The measured Voyage + Anthropic-support baseline remains pending because Voyage is unconfigured and external fixture transmission was not authorized by the execution environment.
+Phase 6 is complete, including the authorized external live-provider gate. The original CC0 Stage 2 corpus was indexed with Voyage `voyage-3-lite` at 512 dimensions and evaluated with Anthropic support decisions. The reliable development baseline achieved Recall@5 `1.000`, MRR `0.936`, complete evidence@5 `1.000`, and zero false support. A first run exposed the no-payment project's 3-RPM limit; bounded 429 backoff now prevents throttling from becoming false retrieval failure. The evaluator also retains supported false refusals as failures. Phase 7 development work is frozen at top-k 5 and calibrated minimum similarity `0.50556`; the candidate preserves the baseline quality/safety metrics with two explicit conservative false refusals. The one allowed locked holdout run is next.
 
 ### Remaining work from `docs/RAG_V1_TECHNICAL_PLAN.md`
 
-1. Close the Phase 6 external gate: configure an approved `VOYAGE_API_KEY`, seed Stage 2 with `--provider voyage`, run the explicit development baseline, manually inspect retained failures, and preserve the artifact. Do not use the fake metrics as semantic quality.
-2. Phase 7: from that live baseline, run one-variable retrieval experiments, record keep/revert decisions, freeze configuration/answerability policy, and evaluate the locked holdout once at the candidate gate.
-3. Phase 8: execute both fresh uploaded-source browser journeys, verify visible claims and unsupported behavior against original pages, and capture refresh/auth/provenance evidence.
-4. Phase 9: delete only retrieval paths made obsolete by RAG (including the temporary generated-note fallback after legacy migration), update operations/configuration docs, run disposable-database migration smoke, full backend/frontend validation, and final browser regression.
+1. Complete Phase 7 by evaluating the locked 12-query holdout exactly once with the frozen candidate and recording the result without tuning against it.
+2. Phase 8: execute both fresh uploaded-source browser journeys, verify visible claims and unsupported behavior against original pages, and capture refresh/auth/provenance evidence.
+3. Phase 9: delete only retrieval paths made obsolete by RAG (including the temporary generated-note fallback after legacy migration), update operations/configuration docs, run disposable-database migration smoke, full backend/frontend validation, and final browser regression.
 
 ## Known limitations and blockers
 
-- `VOYAGE_API_KEY` is not configured locally. This prevents the required live provider smoke and measured semantic baseline; the offline runner/seeding work is complete.
-- The attempted explicit Anthropic support/abstention run was rejected by the execution environment because it would transmit the CC0 fixture queries/excerpts externally without payload-specific user authorization. No call was made and this restriction was not bypassed.
+- The no-payment Voyage project is limited to 3 RPM and 10K TPM. Bounded backoff makes evaluation reliable, but measured total p95 latency is about 62 seconds under this tier; exact search p95 remains below 1 ms.
+- Two supported development queries are conservatively refused by the support judge despite retrieving the gold block first: `s07-narrator-author` and `c05-direct-placement`. They remain explicit retained failures; the declared recall/MRR and zero-false-support gates still pass.
 - Provider retention/processing approval and benchmark redistribution rights are external release gates and have not been established.
 - No learner-facing browser acceptance is claimed for RAG V1 yet.
 - A measured live baseline, frozen thresholds/configuration, and controlled experiment log do not yet exist.
@@ -66,4 +65,4 @@ Phase 6 is complete for offline/reproducibility mechanics and pending its extern
 
 ## Recommended next action
 
-The exact next action is the explicit live-provider gate: obtain payload-specific authorization to send the checked-in CC0 Stage 2 queries/excerpts to Voyage and Anthropic, configure an approved `VOYAGE_API_KEY`, seed Stage 2 with `--provider voyage`, then run `scripts/evaluate_retrieval.py` on the development split with `--support-provider anthropic`. Inspect and classify every retained failure before changing one retrieval variable. Do not inspect the locked holdout until a candidate configuration and answerability policy are frozen.
+Run the locked Stage 2 holdout exactly once with the frozen hash-locked Voyage/Anthropic candidate. Record the result without tuning against holdout, then proceed to the two fresh uploaded-source browser journeys.

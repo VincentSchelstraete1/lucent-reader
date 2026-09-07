@@ -14,6 +14,7 @@ from app.models.source import Source
 from app.retrieval_eval.dataset import RetrievalDataset, dataset_hash
 from app.services.embeddings import EmbeddingProvider
 from app.services.source_index import EMBEDDING_INPUT_VERSION, embedding_input_for
+from app.services.retrieval import DEFAULT_MIN_SIMILARITY
 
 
 _EVAL_NAMESPACE = uuid.UUID("ee80f3d2-08de-4b09-8f5f-ec0b185ed2a8")
@@ -144,7 +145,11 @@ def seed_retrieval_dataset(db, *, dataset: RetrievalDataset, provider: Embedding
             "model": provider.metadata.model,
             "dimensions": provider.metadata.dimensions,
         },
-        "retrieval": {"topK": 5, "latencyMethodology": "warm-process; uncached query embeddings"},
+        "retrieval": {
+            "topK": 5,
+            "minSimilarity": DEFAULT_MIN_SIMILARITY if provider.metadata.provider == "voyage" else -1.0,
+            "latencyMethodology": "warm-process; uncached query embeddings",
+        },
         "documents": documents,
     }
     config["configHash"] = config_hash(config)

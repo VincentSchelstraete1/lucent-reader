@@ -20,6 +20,17 @@ from app.services.embeddings import EmbeddingError, get_embedding_provider
 from app.services.source_index import embedding_input_for
 
 
+QUERY_VERSION = "source-query-v1"
+RETRIEVAL_VERSION = "exact-cosine-v1"
+RETRIEVAL_POLICY_VERSION = "rag-retrieval-policy-v1"
+# Calibrated on the locked Stage 2 development split for voyage-3-lite,
+# 512 dimensions, learning-block-input-v1, and QUERY_VERSION above.
+DEFAULT_MIN_SIMILARITY = 0.50556
+CALIBRATED_PROVIDER = "voyage"
+CALIBRATED_MODEL = "voyage-3-lite"
+CALIBRATED_DIMENSIONS = 512
+
+
 class RetrievalStatus(StrEnum):
     SUPPORTED = "SUPPORTED"
     WEAK = "WEAK"
@@ -135,7 +146,8 @@ def _empty_context(status: RetrievalStatus, *, document_id: int, generation_id: 
 
 
 def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_generation: uuid.UUID | None,
-                    query: SourceQuery, anchor_block_ids: Sequence[str] = (), top_k: int = 5) -> RetrievedSourceContext:
+                    query: SourceQuery, anchor_block_ids: Sequence[str] = (), top_k: int = 5,
+                    min_similarity: float | None = None) -> RetrievedSourceContext:
     started = time.perf_counter()
     fingerprint = hashlib.sha256(query.text.encode("utf-8")).hexdigest()[:16]
     owned = db.execute(select(Document.id).join(Source).where(Document.id == document_id, Source.user_id == user_id)).scalar_one_or_none()
@@ -226,11 +238,25 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
             rank=len(output) + 1, score=score, selection=selection, excerpt_end=len(excerpt)))
         used += len(excerpt)
 
-    threshold_text = os.getenv("RAG_MIN_SIMILARITY", "").strip()
-    threshold = float(threshold_text) if threshold_text else None
+    if min_similarity is None:
+        threshold_text = os.getenv("RAG_MIN_SIMILARITY", "").strip()
+        calibrated_index = (
+            source_index.provider == CALIBRATED_PROVIDER
+            and source_index.model == CALIBRATED_MODEL
+            and source_index.dimensions == CALIBRATED_DIMENSIONS
+        )
+        threshold = (
+            float(threshold_text)
+            if threshold_text
+            else DEFAULT_MIN_SIMILARITY if calibrated_index else -1.0
+        )
+    else:
+        threshold = float(min_similarity)
+    if not -1.0 <= threshold <= 1.0:
+        raise ValueError("RAG minimum similarity must be between -1 and 1")
     semantic_scores = [block.score for block in output if block.score is not None]
     status = RetrievalStatus.SUPPORTED if output else RetrievalStatus.WEAK
-    if threshold is not None and semantic_scores and max(semantic_scores) < threshold and not any(block.selection == "anchor" for block in output):
+    if semantic_scores and max(semantic_scores) < threshold and not any(block.selection == "anchor" for block in output):
         status = RetrievalStatus.WEAK
     selected_ids = {block_id for block in output for block_id in block.block_ids}
     return RetrievedSourceContext(status=status, document_id=document_id, generation_id=source_index.generation_id,

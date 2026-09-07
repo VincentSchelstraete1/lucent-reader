@@ -52,6 +52,7 @@ _SUPPORT_SCHEMA = {
 class AnthropicSupportDecisionProvider:
     name = "anthropic"
     model = "claude-haiku-4-5-20251001"
+    policy_version = "rag-source-support-v1"
 
     def decide(self, *, query: str, selected_blocks: Sequence[dict]) -> SupportDecision:
         from app.services.anthropic_service import _run_structured_tool
@@ -78,4 +79,6 @@ class AnthropicSupportDecisionProvider:
         supported = bool(raw.get("answerSupported"))
         if not set(cited) <= available or (supported and not cited):
             return SupportDecision(False, (), "invalid_source_reference")
+        if not supported:
+            cited = ()
         return SupportDecision(supported, cited, str(raw.get("reasonCode") or "missing_fact"))

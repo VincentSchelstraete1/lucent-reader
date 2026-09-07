@@ -18,9 +18,17 @@ from app.models.source import Source
 from app.retrieval_eval.dataset import dataset_hash, load_retrieval_dataset_bundle
 from app.retrieval_eval.evaluation import RetrievalResult, evaluate_retrieval
 from app.retrieval_eval.seeding import config_hash
-from app.retrieval_eval.support import AnthropicSupportDecisionProvider, DeterministicPresenceSupportProvider
+from app.retrieval_eval.support import AnthropicSupportDecisionProvider, DeterministicPresenceSupportProvider, SupportDecision
 from app.services.embeddings import DeterministicEmbeddingProvider, VoyageEmbeddingProvider, set_embedding_provider
-from app.services.retrieval import SourceQuery, retrieve_source
+from app.services.retrieval import (
+    DEFAULT_MIN_SIMILARITY,
+    QUERY_VERSION,
+    RETRIEVAL_POLICY_VERSION,
+    RETRIEVAL_VERSION,
+    RetrievalStatus,
+    SourceQuery,
+    retrieve_source,
+)
 
 
 def _jsonable(value):
@@ -141,8 +149,11 @@ def main() -> int:
     config = _load_config(args.config, dataset_hash_value=full_dataset_hash, provider=provider)
     document_config = config.get("documents") or {}
     top_k = int((config.get("retrieval") or {}).get("topK", 5))
+    min_similarity = float((config.get("retrieval") or {}).get("minSimilarity", DEFAULT_MIN_SIMILARITY))
     if not 1 <= top_k <= 8:
         raise ValueError("Evaluation topK must be between 1 and 8")
+    if not -1.0 <= min_similarity <= 1.0:
+        raise ValueError("Evaluation minSimilarity must be between -1 and 1")
     set_embedding_provider(provider)
 
     with SessionLocal() as db:
@@ -159,7 +170,8 @@ def main() -> int:
                 raise ValueError(f"Corpus hash mismatch for {example.id}")
             context = retrieve_source(db, user_id=user_id, document_id=document_id,
                 expected_generation=source_index.generation_id,
-                query=SourceQuery("evaluation", example.query), top_k=top_k)
+                query=SourceQuery("evaluation", example.query), top_k=top_k,
+                min_similarity=min_similarity)
             selected_blocks = tuple({
                 "blockIds": block.block_ids,
                 "rank": block.rank,
@@ -168,7 +180,11 @@ def main() -> int:
                 "source": block.source,
                 "excerpt": block.text,
             } for block in context.blocks)
-            support = support_provider.decide(query=example.query, selected_blocks=selected_blocks)
+            support = (
+                SupportDecision(False, (), "below_similarity_cutoff")
+                if context.status == RetrievalStatus.WEAK
+                else support_provider.decide(query=example.query, selected_blocks=selected_blocks)
+            )
             return RetrievalResult(
                 ranked_block_ids=tuple(block.block_ids[0] for block in context.blocks),
                 answer_supported=support.answer_supported,
@@ -211,9 +227,12 @@ def main() -> int:
             "dimensions": provider.metadata.dimensions,
             "supportProvider": support_provider.name,
             "supportModel": support_provider.model,
+            "supportPolicyVersion": getattr(support_provider, "policy_version", "presence-v1"),
             "embeddingInputVersion": "learning-block-input-v1",
-            "queryVersion": "source-query-v1",
-            "retrievalVersion": "exact-cosine-v1",
+            "queryVersion": QUERY_VERSION,
+            "retrievalVersion": RETRIEVAL_VERSION,
+            "retrievalPolicyVersion": RETRIEVAL_POLICY_VERSION,
+            "minSimilarity": min_similarity,
             "split": args.split,
             "corpusSizeBlocks": sum(int(item["blockCount"]) for item in document_config.values()),
             "latencyMethodology": (config.get("retrieval") or {}).get("latencyMethodology"),

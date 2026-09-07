@@ -70,6 +70,34 @@ def test_exact_retrieval_is_document_scoped_ranked_and_provenanced(client):
     assert context.timings_ms["total"] >= context.timings_ms["search"]
 
 
+def test_calibrated_similarity_marks_unanchored_weak_context(client):
+    owner, document_id, generation, provider = _seed_index(client)
+    set_embedding_provider(provider)
+    try:
+        with TestSessionLocal() as db:
+            weak = retrieve_source(
+                db,
+                user_id=owner,
+                document_id=document_id,
+                expected_generation=generation,
+                query=SourceQuery("ask", "unrelated electric charge biography"),
+                min_similarity=1.0,
+            )
+            anchored = retrieve_source(
+                db,
+                user_id=owner,
+                document_id=document_id,
+                expected_generation=generation,
+                query=SourceQuery("ask", "unrelated electric charge biography"),
+                anchor_block_ids=["b1"],
+                min_similarity=1.0,
+            )
+    finally:
+        set_embedding_provider(None)
+    assert weak.status == RetrievalStatus.WEAK
+    assert anchored.status == RetrievalStatus.SUPPORTED
+
+
 def test_anchors_are_bounded_first_and_missing_anchor_marks_incomplete(client):
     owner, document_id, generation, provider = _seed_index(client)
     set_embedding_provider(provider)

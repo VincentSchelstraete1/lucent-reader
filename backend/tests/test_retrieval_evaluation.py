@@ -108,6 +108,7 @@ def test_metrics_separate_supported_retrieval_and_unsupported_abstention(tmp_pat
     assert summary.raw_recall_at_3 == 1.0
     assert summary.false_support_rate == 0.0
     assert summary.correct_abstention_rate == 1.0
+    assert summary.supported_false_refusal_rate == 0.0
     assert summary.p50_latency_ms == 20
     assert summary.p95_latency_ms == 30
     assert summary.p50_embedding_latency_ms == 4
@@ -128,6 +129,17 @@ def test_failure_comparison_reports_fixed_and_regressed(tmp_path):
     assert changes["regressions"] == ["unsupported"]
 
 
+def test_supported_false_refusal_is_retained_as_failure(tmp_path):
+    path = tmp_path / "dataset.json"
+    path.write_text(json.dumps(_manifest(tmp_path)))
+    examples = load_retrieval_dataset(path)
+    summary = evaluate_retrieval(examples, lambda example: RetrievalResult(
+        tuple(next(iter(example.gold)).block_ids) if example.supported else ("nearby",),
+        False,
+    ))
+    assert {row.example.id for row in summary.failures} == {"supported-one", "supported-multi"}
+
+
 def test_anthropic_support_decision_rejects_unavailable_source_ids(monkeypatch):
     from app.services import anthropic_service
 
@@ -143,6 +155,29 @@ def test_anthropic_support_decision_rejects_unavailable_source_ids(monkeypatch):
     assert decision.answer_supported is False
     assert decision.source_block_ids == ()
     assert decision.reason_code == "invalid_source_reference"
+
+
+def test_anthropic_support_decision_clears_refusal_citations(monkeypatch):
+    from app.services import anthropic_service
+
+    def decide(prompt, *args, **kwargs):
+        return {
+            "answerSupported": False,
+            "sourceBlockIds": ["cache-direct"],
+            "reasonCode": "missing_fact",
+        }
+
+    monkeypatch.setattr(anthropic_service, "_run_structured_tool", decide)
+    decision = AnthropicSupportDecisionProvider().decide(
+        query="How many possible cache lines can hold a block?",
+        selected_blocks=[{
+            "blockIds": ["cache-direct"],
+            "excerpt": "Each memory block can occupy exactly one cache line.",
+        }],
+    )
+
+    assert decision.answer_supported is False
+    assert decision.source_block_ids == ()
 
 
 def test_local_seed_and_cli_emit_reproducible_complete_artifact(tmp_path, monkeypatch):
