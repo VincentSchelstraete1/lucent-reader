@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningSceneBlock, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ShortAnswerStep, TeachBackStep, TeachStep
+from app.schemas.learn import LearnPlan, LearnStep, LearningScene, LearningSceneBlock, LearningVisualState, ScenePrivateState, TutorAction, TutorDecision, TutorObservation, ProblemStep, ShortAnswerStep, TeachBackStep, TeachStep
 
 RUNTIME_VERSION = 2
 PLAN_SEMANTICS_VERSION = 2
@@ -1200,6 +1200,31 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             # source-grounded application/transfer check in memory. This is
             # deliberately scene-local: authored plan steps remain assets,
             # never a finite progression cursor.
+            if int(concept.get("applicationEvidence", 0) or 0) == 0:
+                outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
+                application_id = bounded_id("independent-application", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))
+                application_step = ProblemStep(
+                    id=application_id,
+                    type="problem",
+                    title="Apply it without the worked path",
+                    prompt=f"In a concrete case involving {objective.get('title', 'this concept')}, predict what changes and explain why using the relationship you learned.",
+                    responseType="short_answer",
+                    acceptedAnswers=[outcome],
+                    solution=outcome,
+                    hints=[],
+                    feedbackIncorrect=f"Use this central relationship in the case: {outcome[:260]}",
+                    sourceSectionIds=list(objective.get("sourceSectionIds", [])),
+                    sourceBlockIds=list(objective.get("sourceBlockIds", [])),
+                )
+                application_action = TutorAction(id=bounded_id("action", concept_id, application_id), type="ask_free_response", conceptId=concept_id, stepId=application_id, rationale="Collect independent application evidence before transfer.")
+                application_decision = TutorDecision(targetConcept=concept_id, teachingAction="ask_free_response", pedagogicalGoal="TEST_APPLICATION", pedagogicalStrategy="RETRIEVAL_PRACTICE", scaffoldLevel="INDEPENDENT", nextStepId=application_id, transitionMessage="Now use the relationship without the worked path.", rationale="The learner has explanation evidence but still needs independent application evidence.")
+                concept["scaffold"] = "INDEPENDENT"
+                concept["scaffoldingLevel"] = "INDEPENDENT"
+                state["concepts"] = [concept if item.get("conceptId") == concept_id else item for item in state.get("concepts", [])]
+                session.state = state
+                rendered = compose_learning_scene(session_id=str(session.id), objective=objective, steps=steps, step_index=0, current_step=application_step, action=application_action, decision=application_decision, concept=concept, state=state, feedback=getattr(evaluation, "student_message", None) or "Good. Now apply the idea without the worked path.", feedback_kind="correct", evaluation=evaluation)
+                private_next = _private_for_rendered_scene(rendered, objective_id=concept_id, decision=application_decision, fallback_step=application_step, objective=objective)
+                return persist_scene_revision(session, rendered, private_next, event_id=event_id_value, db=db), private_next
             if int(concept.get("transferEvidence", 0) or 0) == 0 and int(concept.get("independentSuccesses", 0) or 0) > 0 and concept.get("scaffold") in {"INDEPENDENT", "TRANSFER"}:
                 outcome = str(objective.get("outcome") or objective.get("bottleneck") or objective.get("title") or "this concept")
                 transfer_id = bounded_id("transfer", concept_id, int(concept.get("attempts", 0)), int(scene.revision or 0))

@@ -554,3 +554,30 @@ def test_application_success_composes_transfer_before_objective_completion():
     assert session.status == "active"
     assert private and private["interaction"]["id"].startswith("transfer-")
     assert "new situation" in private["interaction"]["prompt"]
+
+
+def test_explanation_success_composes_independent_application_when_missing():
+    objective = {
+        "id": "energy",
+        "title": "Energy conservation",
+        "outcome": "Mechanical energy changes form while the total remains constant.",
+        "steps": [
+            {
+                "id": "explain",
+                "type": "teach_back",
+                "title": "Explain",
+                "prompt": "Explain the relationship.",
+                "requiredConcepts": ["mechanical", "energy", "constant"],
+                "sourceSectionIds": ["s"],
+                "sourceBlockIds": ["b"],
+            }
+        ],
+    }
+    session = SimpleNamespace(id="application-session", plan={"objectives": [objective]}, state={}, objective_index=0, step_index=0, status="active", goal="understand")
+    scene, _ = process_tutor_event(session, {"id": "start", "type": "CONTINUE"})
+    scene, private = process_tutor_event(session, {"id": "explain-answer", "type": "RESPONSE", "interactionId": scene.response_interaction_id, "response": {"response": "Mechanical energy remains constant."}})
+    assert private is not None
+    assert private["interaction"]["id"].startswith("independent-application-")
+    assert private["interaction"]["type"] == "problem"
+    assert private["interaction"]["hints"] == []
+    assert not any(block.kind == "explanation" for block in scene.blocks)
