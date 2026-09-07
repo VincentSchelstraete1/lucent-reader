@@ -21,7 +21,7 @@ from app.models.note import Note
 from app.models.source import Source
 from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest, VisualEdge, VisualAnimation
 from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues, synthesize_visual_spec
-from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene
+from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene, _objective
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import retrieve_note_context
 from app.services.adaptive_policy import content_policy
@@ -598,6 +598,7 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
     ask_state["lastAskLucent"] = {"question": request.message[:240], "answer": answer[:900]}
     session.state = ask_state
     replacement_step = None
+    inline_step = None
     # A request for another question is a scene re-composition, not another
     # chat paragraph. Choose an unanswered practice asset from the active
     # objective and replace only the practice block in the same scene.
@@ -620,9 +621,18 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             alternatives = [ShortAnswerStep(id=_bounded_id("ask-practice", session.id, objective.get("id"), len(answered) + 1), type="short_answer", title=(f"Transfer {objective.get('title', 'this idea')}" if harder else f"Apply {objective.get('title', 'this idea')}"), prompt=prompt, acceptedAnswers=[outcome], sourceSectionIds=list(objective.get("sourceSectionIds", [])), sourceBlockIds=list(objective.get("sourceBlockIds", [])))]
         if alternatives:
             replacement = alternatives[0]
-            replacement_step = replacement
-            _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_scene_recompose", metadata={"request": "different_question", "replacementId": replacement.id, "previousId": getattr(current_step, "id", None)})
-            visual_action = None
+            if simpler:
+                replacement_step = replacement
+                event_request = "simpler_question"
+            else:
+                # Additional/harder questions belong to Ask Lucent and must
+                # not steal the primary response target.  They are persisted
+                # as a separate inline interaction on the same scene.
+                inline_step = replacement
+                event_request = "harder_question" if harder else "another_question"
+            _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_scene_recompose", metadata={"request": event_request, "inlineId": getattr(inline_step, "id", None), "replacementId": getattr(replacement_step, "id", None), "previousId": getattr(current_step, "id", None)})
+            if replacement_step is not None:
+                visual_action = None
             scene_kind, ask_label = "tutor_message", "Try"
     scene_kind = ask_kind if ask_kind in {"example", "counterexample", "analogy", "explanation"} else "tutor_message"
     process_tutor_event(session, {
@@ -635,10 +645,39 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         "blockKind": scene_kind,
         "blockLabel": ask_label,
         "replacementStep": replacement_step.model_dump(by_alias=True) if replacement_step is not None else None,
+        "inlineInteraction": inline_step.model_dump(by_alias=True) if inline_step is not None else None,
     }, db=db)
     scene_response = _session_payload(session)
     db.commit()
-    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, scene=scene_response.scene)
+    return AskLucentResponse(answer=answer[:1800], scope=scope, sourceSectionIds=context.get("sourceSectionIds", []), sourceBlockIds=context.get("sourceBlockIds", []), tool=tool, visualAction=visual_action, inlineInteraction=scene_response.scene.inline_interaction if scene_response.scene else None, scene=scene_response.scene)
+
+
+@router.post("/learn-sessions/{session_id}/ask-interactions/{interaction_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
+def submit_ask_interaction(session_id: UUID, interaction_id: str, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
+    """Evaluate an Ask Lucent inline question without replacing primary practice."""
+    from app.services.learn_engine import evaluate_step
+    session = _get_owned_session(db, session_id, user)
+    _ensure_session_runtime(db, session)
+    scene = load_current_scene(session)
+    inline = scene.inline_interaction if scene else None
+    if inline is None or str(inline.id) != str(interaction_id):
+        raise HTTPException(status_code=409, detail="That Ask Lucent interaction is no longer active")
+    objective = _objective(session.plan or {}, scene.objective_id) if scene else None
+    if objective is None:
+        raise HTTPException(status_code=409, detail="The learning objective is no longer active")
+    step = _parse_step(inline.model_dump(by_alias=True))
+    response = request.response
+    response_text = response.get("response") if isinstance(response, dict) else response
+    option_id = response.get("optionId") if isinstance(response, dict) else request.option_id
+    ordered_ids = response.get("orderedIds") if isinstance(response, dict) else request.ordered_ids
+    evaluation = evaluate_step(step, response=response_text, option_id=option_id, ordered_ids=ordered_ids)
+    feedback = "That’s right—your answer matches the idea we’re practicing." if evaluation.result == "correct" else "Not quite. Recheck the explanation above and look for the relationship it emphasizes."
+    feedback_block = LearningSceneBlock(id=_bounded_id("ask-feedback", session.id, interaction_id, scene.revision), kind="feedback", label="Feedback", content=feedback, sourceSectionIds=list(scene.source_section_ids), sourceBlockIds=list(scene.source_block_ids))
+    updated = scene.model_copy(update={"inline_interaction": None, "blocks": [*scene.blocks, feedback_block][-6:]})
+    private = (session.state or {}).get("currentScenePrivate")
+    persist_scene_revision(session, updated, private, event_id=_bounded_id("ask-response", session.id, interaction_id), db=db)
+    db.commit()
+    return _session_payload(session)
 
 def _initial_state(db, user: User, document_id: int, plan: dict) -> dict:
     # A newly-created session (including an explicit restart) must begin with

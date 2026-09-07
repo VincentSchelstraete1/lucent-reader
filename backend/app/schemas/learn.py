@@ -554,6 +554,7 @@ class AskLucentResponse(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds")
     tool: Literal["retrieve_source", "inspect_current_concept", "show_visual", "change_visual_stage", "request_explanation", "request_example", "none"] = "none"
     visual_action: dict | None = Field(default=None, alias="visualAction")
+    inline_interaction: LearnStepView | None = Field(default=None, alias="inlineInteraction")
     scene: LearningScene | None = None
 
 class AskLucentToolCall(BaseModel):
@@ -625,6 +626,10 @@ class LearningScene(BaseModel):
     source_block_ids: list[str] = Field(default_factory=list, alias="sourceBlockIds", max_length=12)
     visual_state: LearningVisualState = Field(default_factory=LearningVisualState, alias="visualState")
     response_interaction_id: str | None = Field(default=None, alias="responseInteractionId", max_length=60)
+    # Optional tutor-generated practice shown inside Ask Lucent.  It is
+    # deliberately separate from responseInteractionId so the primary lesson
+    # interaction remains authoritative and its evidence target is unchanged.
+    inline_interaction: LearnStepView | None = Field(default=None, alias="inlineInteraction")
     progress: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     @model_validator(mode="before")

@@ -126,6 +126,18 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   )
   const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
   const primaryVisual = visualBlocks.at(-1)
+  const visualAnchor = visualBlocks[0]
+  // Keep the current reframe attached to the Watch surface.  Scene blocks are
+  // persisted in tutor-event order, but a reframe is part of the visual
+  // intervention rather than a separate lesson card.  Reordering only the
+  // learner-facing projection avoids changing scene authority or persistence.
+  const reframeBlock = [...blocks].reverse().find((block) =>
+    ["tutor_message", "explanation", "analogy"].includes(block.kind) &&
+    /another way|reframe|ask lucent/i.test(`${String(block.label ?? "")} ${String(block.title ?? "")}`),
+  )
+  const orderedBlocks = reframeBlock && primaryVisual && visualAnchor
+    ? blocks.filter((block) => block.id !== reframeBlock.id).flatMap((block) => block.id === visualAnchor.id ? [block, reframeBlock] : [block])
+    : blocks
   let visualRendered = false
   if (!blocks.length) return null
   const fallbackBlocks = blocks
@@ -163,7 +175,7 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     .replace(/\s{2,}/g, " ")
     .trim()
   return <div className="learn-scene-support" aria-label="Tutor teaching">
-    {fallbackBlocks.map((block) => {
+    {orderedBlocks.map((block) => {
       if (block.kind === "visual") {
         if (visualRendered || !primaryVisual || block.id !== visualBlocks[0]?.id) return null
         visualRendered = true
@@ -183,9 +195,12 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
   </div>
 }
 
-function AskLucentInline({ askOpen, setAskOpen, askMessage, setAskMessage, askLoading, askAnswer, onAsk, onHint, practiceAvailable }: { askOpen: boolean; setAskOpen: (value: boolean) => void; askMessage: string; setAskMessage: (value: string) => void; askLoading: boolean; askAnswer: any; onAsk: (message?: string) => void; onHint?: () => void; practiceAvailable?: boolean }) {
+function AskLucentInline({ askOpen, setAskOpen, askMessage, setAskMessage, askLoading, askAnswer, onAsk, onHint, practiceAvailable, inlineInteraction, onInlineSubmit }: { askOpen: boolean; setAskOpen: (value: boolean) => void; askMessage: string; setAskMessage: (value: string) => void; askLoading: boolean; askAnswer: any; onAsk: (message?: string) => void; onHint?: () => void; practiceAvailable?: boolean; inlineInteraction?: any; onInlineSubmit?: (response: { response?: string; optionId?: string }) => void }) {
+  const [inlineAnswer, setInlineAnswer] = useState("")
+  const [inlineOption, setInlineOption] = useState("")
   const quickActions = practiceAvailable ? ["Give me a hint", "Walk me through it", "Ask me a simpler question", "Ask me a harder question"] : ["Explain differently", "Show me visually", "Give me an example", "Why does this matter?"]
-  return <div className="learn-ask-lucent"><button type="button" className="learn-ask-toggle" onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen}>Ask Lucent</button>{askOpen && <div className="learn-ask-panel"><p className="learn-ask-context">Ask the tutor about what you are seeing.</p><div className="learn-ask-quick-actions">{quickActions.map((action) => <button key={action} type="button" className="learn-ask-quick" onClick={() => action === "Give me a hint" ? onHint?.() : onAsk(action)}>{action}</button>)}</div><div className="learn-ask-row"><input aria-label="Ask Lucent a question" value={askMessage} onChange={(event) => setAskMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onAsk() }} placeholder="Ask about this idea…" /><button className="btn btn-primary" type="button" onClick={() => onAsk()} disabled={askLoading || !askMessage.trim()}>{askLoading ? "Thinking…" : "Ask"}</button></div>{askLoading && <div className="learn-ask-loading" role="status" aria-label="Lucent is thinking"><span /><span /><span /></div>}{askAnswer && !askAnswer.scene && <div className="learn-ask-answer" role="status"><p>{askAnswer.answer}</p></div>}</div>}</div>
+  const submitInline = () => { if (!inlineInteraction || !onInlineSubmit) return; onInlineSubmit(inlineInteraction.options?.length ? { optionId: inlineOption } : { response: inlineAnswer }); setInlineAnswer(""); setInlineOption("") }
+  return <div className="learn-ask-lucent"><button type="button" className="learn-ask-toggle" onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen}>Ask Lucent</button>{askOpen && <div className="learn-ask-panel"><p className="learn-ask-context">Ask the tutor about what you are seeing.</p><div className="learn-ask-quick-actions">{quickActions.map((action) => <button key={action} type="button" className="learn-ask-quick" onClick={() => action === "Give me a hint" ? onHint?.() : onAsk(action)}>{action}</button>)}</div><div className="learn-ask-row"><input aria-label="Ask Lucent a question" value={askMessage} onChange={(event) => setAskMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onAsk() }} placeholder="Ask about this idea…" /><button className="btn btn-primary" type="button" onClick={() => onAsk()} disabled={askLoading || !askMessage.trim()}>{askLoading ? "Thinking…" : "Ask"}</button></div>{askLoading && <div className="learn-ask-loading" role="status" aria-label="Lucent is thinking"><span /><span /><span /></div>}{askAnswer && !askAnswer.scene && <div className="learn-ask-answer" role="status"><p>{askAnswer.answer}</p></div>}{inlineInteraction && <div className="learn-ask-inline-interaction" role="region" aria-label="Additional practice"><p className="learn-scene-block-label">Extra practice</p><h3>{inlineInteraction.title}</h3>{inlineInteraction.prompt && <p>{inlineInteraction.prompt}</p>}{inlineInteraction.options?.length > 0 ? <div className="learn-options">{inlineInteraction.options.map((option: any) => <button type="button" key={option.id} className={inlineOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setInlineOption(option.id)}>{option.label}</button>)}</div> : <input className="learn-answer" aria-label="Answer the extra question" value={inlineAnswer} onChange={(event) => setInlineAnswer(event.target.value)} placeholder="Your answer" />}<button className="btn btn-primary" type="button" disabled={inlineInteraction.options?.length ? !inlineOption : !inlineAnswer.trim()} onClick={submitInline}>Check answer</button></div>}</div>}</div>
 }
 
 export function LearnView({ note, documentId, onBack }: { note: SectionNote; documentId: number | null | undefined; onBack: () => void }) {
@@ -309,6 +324,14 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
     finally { setAskLoading(false) }
   }
+  async function submitAskInteraction(response: { response?: string; optionId?: string }) {
+    const inline = session?.scene?.inlineInteraction
+    if (!session || !inline) return
+    setLoading(true); setError(null)
+    try { setSession(await api.submitAskInteraction(session.id, inline.id, response)) }
+    catch (e) { setError(e instanceof Error ? e.message : "That extra practice could not be checked right now.") }
+    finally { setLoading(false) }
+  }
   async function setVisualStage(stage: number) {
     if (!session?.scene) return
     try { const updated = await api.learnVisualEvent(session.id, { sceneId: session.scene.id, sceneRevision: session.scene.revision, event: "set_stage", stage }); setSession(updated) }
@@ -336,7 +359,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     <p className="note-kicker">Watch</p><h2 id="learn-heading" ref={headingRef} tabIndex={-1}>{session.scene?.objective ?? note.title}</h2>
     <div className="learn-scene-shell">
       <article className="learn-step"><LearningSceneView session={session} note={note} onVisualStageChange={setVisualStage} /><div className="learn-step-actions"><button className="btn" type="button" onClick={stop}>Stop for now</button><button className="btn btn-primary" type="button" onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button></div></article>
-      <AskLucentInline askOpen={askOpen} setAskOpen={setAskOpen} askMessage={askMessage} setAskMessage={setAskMessage} askLoading={askLoading} askAnswer={askAnswer} onAsk={askLucent} onHint={requestHint} />
+      <AskLucentInline askOpen={askOpen} setAskOpen={setAskOpen} askMessage={askMessage} setAskMessage={setAskMessage} askLoading={askLoading} askAnswer={askAnswer} onAsk={askLucent} onHint={requestHint} inlineInteraction={session.scene?.inlineInteraction} onInlineSubmit={submitAskInteraction} />
     </div>
     {error && <p className="error" role="alert">{error}</p>}
   </section>
@@ -356,7 +379,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     <h2 id="learn-heading" ref={headingRef} tabIndex={-1}>{session.objectiveTitle ?? note.title}</h2>
     <div className="learn-progress" role="progressbar" aria-valuemin={0} aria-valuemax={session.objectiveCount} aria-valuenow={session.objectiveIndex + 1}><span style={{ width: `${((session.objectiveIndex + 1) / Math.max(1, session.objectiveCount)) * 100}%` }} /></div>
     <div className="learn-scene-shell"><article className="learn-step"><LearningSceneView session={session} note={note} onVisualStageChange={setVisualStage} /><div className={`learn-scene-practice${teachingOnly ? " teaching-only" : ""}`}><div className="learn-action-kicker">{stateLabel}</div><h3>{step.title}</h3>{step.prompt && <p className="learn-question">{step.prompt}</p>}{step.options.length > 0 && !isStructured && <div className="learn-options">{step.options.map((option) => <button type="button" key={option.id} className={selectedOption === option.id ? "learn-option selected" : "learn-option"} onClick={() => setSelectedOption(option.id)}>{option.label}</button>)}</div>}{isStructured && <div className="learn-structured-response">{step.items.map((item) => <label key={item.id}>{item.label}<select aria-label={item.label} value={structuredAnswers[item.id] ?? ""} onChange={(event) => setStructuredAnswers((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Choose a match…</option>{step.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>)}</div>}{step.items.length > 0 && step.type === "ordering" && <div className="learn-ordering">{orderedIds.map((id, index) => { const item = step.items.find((candidate) => candidate.id === id); return <div className="learn-ordering-item" key={id}><span>{index + 1}. {item?.label ?? id}</span><button type="button" disabled={index === 0} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next })} aria-label="Move up">↑</button><button type="button" disabled={index === orderedIds.length - 1} onClick={() => setOrderedIds((ids) => { const next = [...ids]; [next[index], next[index + 1]] = [next[index + 1], next[index],] ; return next })} aria-label="Move down">↓</button></div>})}</div>}{requiresResponse && !isStructured && step.options.length === 0 && step.items.length === 0 && <input className="learn-answer" aria-label="Your answer" value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && answer.trim()) respond(submitResponse) }} placeholder="Type your response" />}{hint && <p className="learn-hint" role="status"><strong>Hint {session.hintsUsed}:</strong> {hint}</p>}{session.feedback && !sceneHasFeedback && <p className={`learn-feedback ${session.feedbackKind ?? "info"}`} role="status">{session.feedback}</p>}<div className="learn-step-actions">{step.hintsAvailable > 0 && <button className="btn" type="button" onClick={requestHint}>Hint</button>}<button className="btn" type="button" onClick={stop}>Stop for now</button>{requiresResponse ? <button className="btn btn-primary" type="button" disabled={loading || !canSubmit} onClick={() => respond(submitResponse, selectedOption ?? undefined)}>{loading ? "Checking…" : "Submit"}</button> : <button className="btn btn-primary" type="button" disabled={loading} onClick={() => respond()}>{loading ? "Saving…" : "Continue"}</button>}</div></div></article>
-    <AskLucentInline askOpen={askOpen} setAskOpen={setAskOpen} askMessage={askMessage} setAskMessage={setAskMessage} askLoading={askLoading} askAnswer={askAnswer} onAsk={askLucent} onHint={requestHint} practiceAvailable={Boolean(step)} />
+    <AskLucentInline askOpen={askOpen} setAskOpen={setAskOpen} askMessage={askMessage} setAskMessage={setAskMessage} askLoading={askLoading} askAnswer={askAnswer} onAsk={askLucent} onHint={requestHint} practiceAvailable={Boolean(step)} inlineInteraction={session.scene?.inlineInteraction} onInlineSubmit={submitAskInteraction} />
     </div>
     {error && <p className="error" role="alert">{error}</p>}
   </section>

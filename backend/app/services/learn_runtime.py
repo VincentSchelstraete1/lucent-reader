@@ -626,6 +626,21 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             block_label=str(payload.get("blockLabel") or "Ask Lucent"),
             db=db,
         )
+        inline_raw = payload.get("inlineInteraction")
+        if updated is not None and isinstance(inline_raw, dict):
+            try:
+                inline = _coerce_step(inline_raw, _objective(session.plan or {}, updated.objective_id) or {})
+                updated = updated.model_copy(update={"inline_interaction": public_step(inline)})
+                # Keep the primary private interaction untouched.  The inline
+                # Ask question is an interruption, not a second progression
+                # cursor; its answer is evaluated by the dedicated Ask
+                # interaction endpoint.
+                current_private = _state(session).get("currentScenePrivate")
+                updated = persist_scene_revision(session, updated, current_private, event_id=bounded_id("ask-inline", session.id, inline.id), db=db)
+                return updated, current_private
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Ask inline interaction rejected: %s", exc)
         replacement_raw = payload.get("replacementStep")
         if updated is not None and isinstance(replacement_raw, dict):
             try:

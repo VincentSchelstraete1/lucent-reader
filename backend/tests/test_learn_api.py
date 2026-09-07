@@ -111,7 +111,7 @@ def test_ask_example_replaces_provider_retrieval_narration_with_grounded_content
     finally:
         set_tutor_provider(None)
 
-def test_ask_another_question_recomposes_active_scene(client):
+def test_ask_another_question_adds_inline_interaction_without_replacing_primary(client):
     document = _document_with_note(client)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
     before = session["scene"]
@@ -119,8 +119,10 @@ def test_ask_another_question_recomposes_active_scene(client):
     assert response.status_code == 200
     scene = response.json()["scene"]
     assert scene["revision"] > before["revision"]
-    assert scene.get("responseInteractionId") != before.get("responseInteractionId")
-    assert any(block.get("kind") == "practice" for block in scene["blocks"])
+    assert scene.get("responseInteractionId") == before.get("responseInteractionId")
+    assert scene.get("inlineInteraction")
+    assert scene["inlineInteraction"]["id"] != before.get("responseInteractionId")
+    assert any(block.get("kind") == "practice" and block.get("step", {}).get("id") == before.get("responseInteractionId") for block in scene["blocks"])
 
 
 def test_ask_question_difficulty_intents_shape_grounded_followups(client):
@@ -130,9 +132,24 @@ def test_ask_question_difficulty_intents_shape_grounded_followups(client):
     simple = next(block["step"] for block in simpler["scene"]["blocks"] if block["kind"] == "practice")
     assert simple["type"] == "multiple_choice"
     harder = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me a harder question"}).json()
-    hard = next(block["step"] for block in harder["scene"]["blocks"] if block["kind"] == "practice")
+    hard = harder["scene"]["inlineInteraction"]
     assert hard["type"] == "short_answer"
     assert "new situation" in hard["prompt"]
+    assert harder["scene"]["responseInteractionId"] == simpler["scene"]["responseInteractionId"]
+
+
+def test_ask_inline_interaction_can_be_checked_without_advancing_primary(client):
+    document = _document_with_note(client)
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    before_id = session["scene"]["responseInteractionId"]
+    asked = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Ask me another question"}).json()
+    inline = asked["scene"]["inlineInteraction"]
+    checked = client.post(f"/learn-sessions/{session['id']}/ask-interactions/{inline['id']}/responses", json={"response": "Core idea"})
+    assert checked.status_code == 200
+    result = checked.json()
+    assert result["scene"]["responseInteractionId"] == before_id
+    assert result["scene"].get("inlineInteraction") is None
+    assert any(block["kind"] == "feedback" for block in result["scene"]["blocks"])
 
 
 def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(client):
