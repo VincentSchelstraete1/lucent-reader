@@ -1,0 +1,444 @@
+{
+ "version": "rag-v1-origin-holdout",
+ "documents": [
+  {
+   "alias": "origin",
+   "sourceFixture": "sources/origin.json",
+   "corpusHash": "6d578033ccd8a70bc039be8240688b94bc7c3324c0a89a4894ff66ba63bb90e3",
+   "domain": "evolutionary_biology",
+   "sourceType": "pdf"
+  }
+ ],
+ "examples": [
+  {
+   "id": "o01-cabbage-true",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-cabbage",
+   "split": "holdout",
+   "category": "factual",
+   "query": "How many of the 233 seedling cabbages turned out true to their kind?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0143"
+     ],
+     "quote": "233 seedling cabbages",
+     "offsetStart": 215,
+     "offsetEnd": 236
+    }
+   ]
+  },
+  {
+   "id": "o02-tucotuco-blind",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-tucotuco",
+   "split": "holdout",
+   "category": "factual",
+   "query": "What did dissection show was the cause of blindness in the tuco-tuco Darwin kept alive?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0208"
+     ],
+     "quote": "inflammation of the nictitating membrane",
+     "offsetStart": 559,
+     "offsetEnd": 599
+    }
+   ]
+  },
+  {
+   "id": "o03-compensation-law",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-compensation",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "What did Geoffroy and Goethe's law of compensation claim about growth?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0221"
+     ],
+     "quote": "nature is forced to economise on the other side",
+     "offsetStart": 178,
+     "offsetEnd": 225
+    }
+   ]
+  },
+  {
+   "id": "o04-ns-not-variability",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-ns-meaning",
+   "split": "holdout",
+   "category": "misconception",
+   "query": "Does natural selection itself cause variations to appear?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0117"
+     ],
+     "quote": "natural selection induces variability, whereas it implies only the preservation",
+     "offsetStart": 108,
+     "offsetEnd": 187
+    }
+   ]
+  },
+  {
+   "id": "o05-wolf-illustration",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-wolf",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "In the wolf illustration, which individuals are preserved and why?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0130"
+     ],
+     "quote": "the swiftest and slimmest wolves have the best chance of surviving",
+     "offsetStart": 530,
+     "offsetEnd": 596
+    }
+   ]
+  },
+  {
+   "id": "o06-electric-organs",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-electric",
+   "split": "holdout",
+   "category": "factual",
+   "query": "Which organs does Darwin call a special difficulty because their use is not even known?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0286"
+     ],
+     "quote": "electric organs of fishes",
+     "offsetStart": 191,
+     "offsetEnd": 216
+    }
+   ]
+  },
+  {
+   "id": "o07-malthus-doctrine",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-malthus",
+   "split": "holdout",
+   "category": "prerequisite",
+   "query": "Whose doctrine does Darwin apply to the whole animal and vegetable kingdoms?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0094"
+     ],
+     "quote": "doctrine of Malthus applied with manifold force",
+     "offsetStart": 711,
+     "offsetEnd": 758
+    }
+   ]
+  },
+  {
+   "id": "o08-overproduction",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-malthus",
+   "split": "holdout",
+   "category": "paraphrase",
+   "query": "Why does the rate at which organisms reproduce make competition unavoidable?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0094"
+     ],
+     "quote": "more individuals are produced than can possibly survive",
+     "offsetStart": 448,
+     "offsetEnd": 503
+    }
+   ]
+  },
+  {
+   "id": "o09-large-stock",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-largestock",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "Why can a large number of individuals of a species be necessary for its preservation?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0104"
+     ],
+     "quote": "large stock of individuals of the same species",
+     "offsetStart": 36,
+     "offsetEnd": 82
+    }
+   ]
+  },
+  {
+   "id": "o10-ns-slowness",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-slowness",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "Why does Darwin accept that natural selection generally acts with extreme slowness?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0156"
+     ],
+     "quote": "It can act only when there are places in the natural polity of a district",
+     "offsetStart": 74,
+     "offsetEnd": 147
+    }
+   ]
+  },
+  {
+   "id": "o11-pigeon-fertile",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-pigeon",
+   "split": "holdout",
+   "category": "factual",
+   "query": "Are hybrids between the most distinct pigeon breeds fertile?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0039"
+     ],
+     "quote": "breeds of the pigeon are perfectly fertile",
+     "offsetStart": 53,
+     "offsetEnd": 95
+    }
+   ]
+  },
+  {
+   "id": "o12-individual-diffs",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-individual",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "What are individual differences and why do they matter for selection?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0065"
+     ],
+     "quote": "afford materials for natural selection to act on",
+     "offsetStart": 504,
+     "offsetEnd": 552
+    }
+   ]
+  },
+  {
+   "id": "o13-variety-to-species",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-gradation",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "What is the progression from individual differences up to species?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0078"
+     ],
+     "quote": "leading to sub-species, and then to species",
+     "offsetStart": 405,
+     "offsetEnd": 448
+    }
+   ]
+  },
+  {
+   "id": "o14-divergence-benefit",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-divergence",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "What advantage do more diversified descendants gain?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0169"
+     ],
+     "quote": "encroach on places occupied by other beings",
+     "offsetStart": 229,
+     "offsetEnd": 272
+    }
+   ]
+  },
+  {
+   "id": "o15-sexual-selection",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-sexual",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "How does sexual selection assist ordinary natural selection?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0195"
+     ],
+     "quote": "most vigorous and best adapted males the greatest number of offspring",
+     "offsetStart": 248,
+     "offsetEnd": 317
+    }
+   ]
+  },
+  {
+   "id": "o16-land-to-aquatic",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-transition",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "How does Darwin answer the objection that a land carnivore could not become aquatic?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0260"
+     ],
+     "quote": "carnivorous animals presenting close intermediate grades",
+     "offsetStart": 359,
+     "offsetEnd": 415
+    }
+   ]
+  },
+  {
+   "id": "o17-collateral-descendants",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-gradations",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "If lineal progenitors are unavailable, where should we look for an organ's gradations?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0273"
+     ],
+     "quote": "collateral descendants from the same parent-form",
+     "offsetStart": 270,
+     "offsetEnd": 318
+    }
+   ]
+  },
+  {
+   "id": "o18-trifling-organs",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-trifling",
+   "split": "holdout",
+   "category": "conceptual",
+   "query": "Why do organs of now-trifling importance still exist in living species?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0299"
+     ],
+     "quote": "high importance to an early progenitor",
+     "offsetStart": 70,
+     "offsetEnd": 108
+    }
+   ]
+  },
+  {
+   "id": "o19-reversion-claim",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-reversion",
+   "split": "holdout",
+   "category": "misconception",
+   "query": "Do domestic varieties always revert to their ancestral stock when they run wild?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0026"
+     ],
+     "quote": "invariably revert in character to their aboriginal stocks",
+     "offsetStart": 168,
+     "offsetEnd": 225
+    }
+   ]
+  },
+  {
+   "id": "o20-climate-tolerance",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-climate",
+   "split": "holdout",
+   "category": "ask_style",
+   "query": "Can you explain why domesticated animals cope with such different climates?",
+   "supported": true,
+   "gold": [
+    {
+     "blockIds": [
+      "origin-0212"
+     ],
+     "quote": "withstanding the most different climates",
+     "offsetStart": 318,
+     "offsetEnd": 358
+    }
+   ]
+  },
+  {
+   "id": "o90-dna-structure",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-unsup",
+   "split": "holdout",
+   "category": "unsupported",
+   "query": "What is the double-helix molecular structure of DNA?",
+   "supported": false,
+   "gold": []
+  },
+  {
+   "id": "o91-crispr",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-unsup",
+   "split": "holdout",
+   "category": "unsupported",
+   "query": "How does CRISPR-Cas9 edit a genome?",
+   "supported": false,
+   "gold": []
+  },
+  {
+   "id": "o92-mtdna-rate",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-unsup",
+   "split": "holdout",
+   "category": "unsupported",
+   "query": "What is the mutation rate of human mitochondrial DNA per generation?",
+   "supported": false,
+   "gold": []
+  },
+  {
+   "id": "o93-lactase-gene",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-unsup",
+   "split": "holdout",
+   "category": "unsupported",
+   "query": "Which chromosome carries the human lactase-persistence allele?",
+   "supported": false,
+   "gold": []
+  },
+  {
+   "id": "o94-chisq",
+   "documentAlias": "origin",
+   "queryFamilyId": "o-unsup",
+   "split": "holdout",
+   "category": "unsupported",
+   "query": "How do you compute a p-value for a chi-squared goodness-of-fit test?",
+   "supported": false,
+   "gold": []
+  }
+ ]
+}
