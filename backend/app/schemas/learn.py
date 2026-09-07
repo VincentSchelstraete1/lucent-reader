@@ -637,12 +637,6 @@ class LearningScene(BaseModel):
             value.setdefault("visualState", {})
         return value
 
-    @property
-    def response_step_id(self) -> str | None:
-        """Compatibility accessor; this legacy name is never serialized."""
-        return self.response_interaction_id
-
-
 class LearnSessionResponse(BaseModel):
     id: str
     document_id: int = Field(alias="documentId")

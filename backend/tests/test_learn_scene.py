@@ -29,7 +29,7 @@ def _scene(*, step_index=1, decision=None):
 def test_scene_coalesces_teaching_and_practice_with_one_response_target():
     scene = _scene()
     assert [block.kind for block in scene.blocks] == ["explanation", "practice"]
-    assert scene.response_step_id == "predict-speed"
+    assert scene.response_interaction_id == "predict-speed"
     assert sum(bool(block.step) for block in scene.blocks) == 1
     assert scene.source_block_ids == ["block-energy"]
 
@@ -41,7 +41,7 @@ def test_scene_plan_can_choose_a_different_grounded_candidate():
         scenePlan=TutorScenePlan(blocks=[{"kind": "practice", "label": "Predict", "stepId": "predict-speed"}]),
     )
     scene = _scene(decision=decision)
-    assert scene.response_step_id == "predict-speed"
+    assert scene.response_interaction_id == "predict-speed"
     assert any(block.kind == "practice" for block in scene.blocks)
 
 
