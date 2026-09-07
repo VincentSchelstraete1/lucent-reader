@@ -1,4 +1,6 @@
-from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
+import json
+
+from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, public_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
 from app.services.retrieval import retrieve_note_context
@@ -116,6 +118,27 @@ def test_matching_and_labeling_grade_partial_evidence():
     assert evaluate_step(matching, response='{"a":"1","b":"wrong"}', option_id=None).result == "partially_correct"
     labeling = LabelingStep(id="l", type="labeling", title="Label", prompt="Label", targets=[{"id":"x","label":"X"},{"id":"y","label":"Y"}], labels=[{"id":"1","label":"One"},{"id":"2","label":"Two"}], answerMap={"x":"1","y":"2"})
     assert evaluate_step(labeling, response='{"x":"1","y":"2"}', option_id=None).result == "correct"
+
+
+def test_matching_public_options_use_bounded_ids_and_still_grade_correctly():
+    first = "Air resistance and pivot friction transform mechanical energy to thermal energy " * 3
+    second = "Potential energy becomes kinetic energy as the pendulum moves downward " * 3
+    matching = MatchingStep(
+        id="long-matching",
+        type="matching",
+        title="Match the energy changes",
+        prompt="Match each situation to its effect.",
+        pairs=[{"id": "real", "label": "Real pendulum"}, {"id": "ideal", "label": "Ideal pendulum"}],
+        matches={"real": first, "ideal": second},
+    )
+
+    view = public_step(matching)
+
+    assert all(option.id.startswith("match-") and len(option.id) <= 40 for option in view.options)
+    assert all(len(option.label) <= 160 for option in view.options)
+    assert all(option.id not in {first, second} for option in view.options)
+    submitted = json.dumps({"real": view.options[0].id, "ideal": view.options[1].id})
+    assert evaluate_step(matching, response=submitted, option_id=None).result == "correct"
 
 def test_retrieval_returns_grounded_section_and_block_references():
     result = retrieve_note_context({"sectionNotes":[{"id":"s1","bigIdea":"Protons build a gradient.","sourceBlockIds":["b1"]},{"id":"s2","bigIdea":"Unrelated history.","sourceBlockIds":["b2"]}]}, "proton gradient")

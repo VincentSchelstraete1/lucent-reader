@@ -93,7 +93,7 @@ def test_section_request_uses_bounded_output_and_no_retries(monkeypatch):
         model_section_note(section, model_version="test-policy")
     assert seen["max_retries"] == 0
     assert seen["timeout"] == 20
-    assert args_seen[3] == 1600
+    assert args_seen[3] == 2400
 
 
 def test_model_structure_without_root_is_rejected(monkeypatch):
@@ -123,7 +123,7 @@ def test_model_structure_without_root_is_rejected(monkeypatch):
     {"kind": "relationship_map", "title": "Map", "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "edges": [{"source": "a", "target": "b", "relation": "uses"}], "sourceBlockIds": ["b"]},
     {"kind": "comparison", "title": "Compare", "items": [{"id": "a", "name": "A", "values": {"cost": "low"}}, {"id": "b", "name": "B", "values": {"cost": "high"}}], "dimensions": ["cost"], "sourceBlockIds": ["b"]},
     {"kind": "worked_example", "title": "Example", "problem": "Problem", "steps": [{"order": 1, "description": "Step"}], "result": "Result", "interpretation": "Meaning", "sourceBlockIds": ["b"]},
-    {"kind": "equation", "title": "Equation", "equation": "x = 1", "sourceBlockIds": ["b"]},
+    {"kind": "equation", "title": "Equation", "equation": "x = 1", "whyItMatters": "It connects the quantities.", "sourceBlockIds": ["b"]},
     {"kind": "callout", "title": "Note", "text": "Important", "sourceBlockIds": ["b"]},
     {"kind": "takeaway", "title": "Remember", "takeaway": "Key point", "sourceBlockIds": ["b"]},
 ])

@@ -18,7 +18,11 @@ from .schema import LearningObject, PlainTextObject
 
 _SECTION_CACHE: dict[str, SectionNote] = {}
 logger = logging.getLogger(__name__)
-SECTION_NOTE_MAX_TOKENS = 1600
+# A substantive multi-part section can require more than 1,600 output tokens
+# solely to satisfy the bounded discriminated component schema.  The lower cap
+# caused otherwise grounded output to truncate and collapse to a one-sentence
+# fallback in the real upload flow.
+SECTION_NOTE_MAX_TOKENS = 2400
 SECTION_NOTE_TIMEOUT_SECONDS = 20
 
 
@@ -309,6 +313,7 @@ class EquationComponent(_TypedComponent):
     substitution: str | None = None
     result: str | None = None
     interpretation: str | None = None
+    why_it_matters: str | None = Field(default=None, alias="whyItMatters")
 
 
 class CalloutComponent(_TypedComponent):

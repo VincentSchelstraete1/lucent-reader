@@ -37,6 +37,17 @@ def _bounded_plan_id(prefix: str, *parts: object) -> str:
     return f"{prefix}-{digest}"
 
 
+def _matching_option_id(value: Any) -> str:
+    """Return a stable, bounded public ID for a private matching answer.
+
+    Generated matching values are learner-facing source text and may be much
+    longer than the public option-ID contract. Keep that text as the label and
+    expose only an opaque deterministic identifier to the browser.
+    """
+    digest = hashlib.sha256(_clean(value).encode()).hexdigest()[:16]
+    return f"match-{digest}"
+
+
 def _components(section: dict) -> list[dict]:
     return [item for item in section.get("components", []) if isinstance(item, dict)]
 
@@ -311,7 +322,10 @@ def public_step(step: LearnStep, hints_used: int = 0) -> LearnStepView:
     data = step.model_dump(by_alias=True, exclude_none=True)
     options = data.get("options", [])
     if data["type"] == "matching":
-        options = [{"id": str(value), "label": str(value)} for value in dict.fromkeys((data.get("matches") or {}).values())]
+        options = [
+            {"id": _matching_option_id(value), "label": _option_label(value)}
+            for value in dict.fromkeys((data.get("matches") or {}).values())
+        ]
     if data["type"] == "labeling": options = data.get("labels", []); data["items"] = data.get("targets", [])
     visual_ref = data.get("visualRef")
     if data["type"] == "walkthrough":
@@ -364,7 +378,11 @@ def evaluate_step(step: LearnStep, *, response: str | None, option_id: str | Non
     if isinstance(step, MatchingStep):
         try: submitted = json.loads(response or "{}")
         except json.JSONDecodeError: submitted = {}
-        hits = sum(1 for key, value in step.matches.items() if str(submitted.get(key)) == str(value)); result = "correct" if hits == len(step.matches) else "partially_correct" if hits else "incorrect"
+        hits = sum(
+            1
+            for key, value in step.matches.items()
+            if str(submitted.get(key)) in {str(value), _matching_option_id(value)}
+        ); result = "correct" if hits == len(step.matches) else "partially_correct" if hits else "incorrect"
         return LearnEvaluation(result=result, confidence=0.95 if result == "correct" else 0.7, evidence=f"Matched {hits} of {len(step.matches)} relationships.", misconception=None if result == "correct" else "Some relationships need to be distinguished.", remediationCategory="simplify" if result != "correct" else "none")
     if isinstance(step, LabelingStep):
         try: submitted = json.loads(response or "{}")
