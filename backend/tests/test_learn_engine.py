@@ -3,7 +3,6 @@ import json
 from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, public_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
 from app.schemas.learn import LearnEvaluation, MultipleChoiceStep, OrderingStep, ProblemStep, ShortAnswerStep, VisualSpec, MatchingStep, LabelingStep, FillBlankStep, TeachBackStep, WorkedStepStep, TutorDecision, TutorObservation
-from app.services.retrieval import retrieve_note_context
 from app.schemas.learn import AskLucentModelResponse
 from app.routers.learn import _ask_rate_allowed, _ask_scope, _record_tutor_event, _grounded_example
 
@@ -144,11 +143,6 @@ def test_matching_public_options_use_bounded_ids_and_still_grade_correctly():
     reversed_result = evaluate_step(matching, response=reversed_submission, option_id=None)
     assert reversed_result.result == "incorrect"
     assert "reversed" in (reversed_result.student_message or "").casefold()
-
-def test_retrieval_returns_grounded_section_and_block_references():
-    result = retrieve_note_context({"sectionNotes":[{"id":"s1","bigIdea":"Protons build a gradient.","sourceBlockIds":["b1"]},{"id":"s2","bigIdea":"Unrelated history.","sourceBlockIds":["b2"]}]}, "proton gradient")
-    assert result["sourceSectionIds"] == ["s1"]
-    assert result["sourceBlockIds"] == ["b1"]
 
 def test_goal_plan_includes_structured_interactions():
     note = {"title": "Learning set", "sectionNotes": [

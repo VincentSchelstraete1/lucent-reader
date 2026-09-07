@@ -24,7 +24,7 @@ from app.services.learn_engine import build_learn_plan, contains_source_diagnost
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene, _objective
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
 from app.services.retrieval import (
-    RetrievalStatus, SourceContextUnavailable, build_source_query, retrieve_note_context, retrieve_source,
+    RetrievalStatus, SourceContextUnavailable, build_source_query, retrieve_source,
     serialize_source_context,
 )
 from app.models.learning_block import DocumentSourceIndex
@@ -55,23 +55,6 @@ def _owned_document(db, document_id: int, user: User) -> Document:
 
 def _latest_note(db, document_id: int) -> Note | None:
     return db.execute(select(Note).where(Note.document_id == document_id, Note.content_type == "section_note").order_by(Note.updated_at.desc())).scalars().first()
-
-def _objective_context(payload: dict, objective: dict, context: dict) -> dict:
-    """Keep Ask Lucent grounded to the active objective's source sections.
-
-    Retrieval ranks sections for recall, but the objective is the authoritative
-    scope for an interruption.  Without this narrowing, a generic question
-    such as "explain another way" can pull unrelated sections into the scene.
-    """
-    allowed = {str(value) for value in (objective.get("sourceSectionIds") or [])}
-    if not allowed:
-        return context
-    sections = [item for item in (payload.get("sectionNotes") or []) if str(item.get("id")) in allowed]
-    if not sections:
-        return context
-    text = "\n\n".join(str(item.get("bigIdea", "")) for item in sections if item.get("bigIdea"))
-    block_ids = [str(block) for item in sections for block in (item.get("sourceBlockIds") or [])]
-    return {**context, "text": text, "sourceSectionIds": [str(item.get("id")) for item in sections], "sourceBlockIds": block_ids[:12]}
 
 def _grounded_example(payload: dict, objective: dict, context: dict) -> str | None:
     """Build a concrete, source-grounded example for Ask Lucent fallbacks.
@@ -126,6 +109,17 @@ def _grounded_central_statement(objective: dict, context: dict) -> str:
     then fall back to a cleaned objective claim so a simpler question always
     presents a factual statement rather than an instruction.
     """
+    title = str(objective.get("title") or "this concept").strip()
+    outcome = str(objective.get("outcome") or objective.get("bottleneck") or "").strip()
+    action_prefix = re.match(r"^(?:explain|describe|apply|recall|recognize|identify|state|understand)\s+(?:how\s+)?", outcome, flags=re.I)
+    # Current plans persist the section's source-backed big idea as outcome.
+    # Prefer that scoped proposition when it is declarative; retrieved context
+    # intentionally includes titles/ancestry for embedding quality, which must
+    # not leak into a learner-facing answer choice.
+    if outcome and not action_prefix and len(outcome) >= 20:
+        match = re.search(r"^(.{20,}?[^.!?](?:[.!?]|$))", outcome, re.S)
+        candidate = (match.group(1) if match else outcome).strip()
+        return candidate[:160].rstrip()
     source = str(context.get("text") or "").strip()
     if source:
         # Keep the first complete source sentence when possible; this avoids
@@ -134,8 +128,6 @@ def _grounded_central_statement(objective: dict, context: dict) -> str:
         candidate = (match.group(1) if match else source).strip()
         if len(candidate) >= 20:
             return candidate[:160].rstrip()
-    title = str(objective.get("title") or "this concept").strip()
-    outcome = str(objective.get("outcome") or objective.get("bottleneck") or "").strip()
     cleaned = re.sub(r"^(?:explain|describe|apply|recall|recognize|identify|state|understand)\s+(?:how\s+)?", "", outcome, flags=re.I).strip(" .")
     if cleaned and cleaned.casefold() != title.casefold():
         return f"{title}: {cleaned}."[:160]
@@ -394,10 +386,14 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
             raise HTTPException(status_code=503, detail={"code": retrieved.status.value.lower(), "message": "The source is temporarily unavailable. Your learning scene is unchanged."})
         context = retrieved.legacy_dict()
     else:
-        # Runtime-v2 sessions created before source indexing remain readable
-        # during migration; Phase 9 removes this generated-note compatibility.
-        context = retrieve_note_context(payload, f"{objective.get('title', '')} {request.message}")
-        context = _objective_context(payload, objective, context)
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "source_not_indexed",
+                "message": "This older learning session has no indexed source. Re-upload the material and start a new session.",
+            },
+        )
     scope = _ask_scope(request.message, objective, context)
     _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="ask_request", metadata={"scope": scope, "sourceSectionIds": context.get("sourceSectionIds", [])})
     if retrieved is not None and retrieved.status == RetrievalStatus.WEAK:

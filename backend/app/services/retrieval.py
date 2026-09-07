@@ -281,18 +281,3 @@ def serialize_source_context(context: RetrievedSourceContext, *, max_chars: int 
         payload[0]["text"] = payload[0]["text"][: max(0, max_chars - overhead - 4)].rsplit(" ", 1)[0]
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return encoded
-
-
-def retrieve_note_context(note_payload: dict, query: str, limit: int = 3) -> dict:
-    """Legacy generated-note lookup retained only until Ask integration phase."""
-    import re
-    terms = {term for term in re.findall(r"[a-z0-9]{3,}", query.casefold())}
-    scored = []
-    for section in note_payload.get("sectionNotes", []):
-        text = " ".join([str(section.get("title", "")), str(section.get("bigIdea", "")), *map(str, section.get("keyTakeaways", []))])
-        score = len(terms & set(re.findall(r"[a-z0-9]{3,}", text.casefold())))
-        scored.append((score, section))
-    selected = [item for item in sorted(scored, key=lambda item: item[0], reverse=True) if item[0] > 0][:limit]
-    return {"text": "\n\n".join(str(item[1].get("bigIdea", "")) for item in selected),
-        "sourceSectionIds": [str(item[1].get("id")) for item in selected],
-        "sourceBlockIds": [str(block) for item in selected for block in item[1].get("sourceBlockIds", [])]}

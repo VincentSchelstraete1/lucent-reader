@@ -1,22 +1,75 @@
 import json
 import re
+import hashlib
+import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
+from app.services.embeddings import DeterministicEmbeddingProvider, set_embedding_provider
 from app.services.learn_tutor import set_tutor_provider
 from app.services.learn_engine import build_remediation_step
 from app.schemas.learn import MultipleChoiceStep
+from tests.conftest import TestSessionLocal
+
+
+@pytest.fixture(autouse=True)
+def _offline_source_embeddings():
+    provider = DeterministicEmbeddingProvider()
+    set_embedding_provider(provider)
+    try:
+        yield
+    finally:
+        set_embedding_provider(None)
+
+
+def _save_indexed_note(client, document: dict, *, title: str, note: dict):
+    generation = uuid.uuid4()
+    note = dict(note)
+    note["sourceGeneration"] = str(generation)
+    provider = DeterministicEmbeddingProvider()
+    records = []
+    for ordinal, section in enumerate(note.get("sectionNotes", [])):
+        block_id = str((section.get("sourceBlockIds") or [f"block-{ordinal}"])[0])
+        text = " ".join(filter(None, [str(section.get("title") or ""), str(section.get("bigIdea") or ""), *map(str, section.get("keyTakeaways") or [])])).strip()
+        records.append((ordinal, block_id, str(section.get("id") or f"section-{ordinal}"), text))
+    vectors = provider.embed_documents([record[3] for record in records])
+    with TestSessionLocal() as db:
+        db.add(DocumentSourceIndex(
+            document_id=document["id"], generation_id=generation,
+            corpus_hash=hashlib.sha256("|".join(record[3] for record in records).encode()).hexdigest(),
+            normalization_version="test-v1", segmentation_version="test-v1",
+            status="READY", provider=provider.metadata.provider, model=provider.metadata.model,
+            dimensions=provider.metadata.dimensions, block_count=len(records), embedded_count=len(records),
+            indexed_at=datetime.now(timezone.utc),
+        ))
+        for (ordinal, block_id, section_id, text), vector in zip(records, vectors):
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            db.add(PersistedLearningBlock(
+                document_id=document["id"], block_id=block_id, generation_id=generation,
+                ordinal=ordinal, block_type="text", title=title, text=text,
+                character_count=len(text), heading_ancestry=[], normalized_block_ids=[block_id],
+                section_ids=[section_id], source={"page_start": ordinal + 1, "page_end": ordinal + 1},
+                segmentation={"method": "test", "version": "test-v1"}, attachments=[],
+                content_hash=digest, embedding_input_hash=digest, embedding=vector,
+                embedded_at=datetime.now(timezone.utc),
+            ))
+        db.commit()
+    return client.post("/notes", json={
+        "title": title, "content_type": "section_note", "document_id": document["id"],
+        "content": json.dumps(note),
+    })
 
 
 def _document_with_note(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/learn"}).json()
     document = client.post("/documents", json={"source_id": source["id"], "title": "Learn material", "content": "Grounded material."}).json()
-    client.post("/notes", json={
-        "title": "Learn note", "content_type": "section_note", "document_id": document["id"],
-        "content": json.dumps({"title": "Learn material", "sectionNotes": [{
+    _save_indexed_note(client, document, title="Learn note", note={"title": "Learn material", "sectionNotes": [{
             "id": "s1", "title": "Core idea", "bigIdea": "A source-grounded idea.", "sourceBlockIds": ["b1"],
             "keyTakeaways": ["The idea matters."], "components": [],
-        }]}),
-    })
+        }]})
     return document
 
 
@@ -105,11 +158,27 @@ def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):
     finally:
         set_tutor_provider(None)
 
+
+def test_legacy_unindexed_session_cannot_use_generated_notes_as_ask_evidence(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/legacy"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Legacy material", "content": "Original source was not indexed."}).json()
+    client.post("/notes", json={
+        "title": "Legacy generated note", "content_type": "section_note", "document_id": document["id"],
+        "content": json.dumps({"title": "Legacy", "sectionNotes": [{
+            "id": "s1", "title": "Generated summary", "bigIdea": "This model prose must not become evidence.",
+            "sourceBlockIds": ["missing-block"], "keyTakeaways": ["Generated only"], "components": [],
+        }]}),
+    })
+    session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
+    response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Explain this"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "source_not_indexed"
+
 def test_ask_example_replaces_provider_retrieval_narration_with_grounded_content(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/satire"}).json()
     document = client.post("/documents", json={"source_id": source["id"], "title": "Satire material", "content": "A source-grounded comparison."}).json()
     note = {"title": "Satire", "sectionNotes": [{"id": "satire", "title": "Satire as critique", "bigIdea": "Satire exposes hypocrisy through exaggerated sincere claims.", "sourceBlockIds": ["b1"], "components": [{"kind": "comparison", "items": [{"id": "surface", "name": "surface statement", "values": {"role": "sounds sincere"}}, {"id": "critique", "name": "underlying critique", "values": {"role": "exposes hypocrisy"}}]}]}]}
-    client.post("/notes", json={"title": "Satire", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    _save_indexed_note(client, document, title="Satire", note=note)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
     def fake_provider(_prompt, tool_name, _schema, **_kwargs):
         if tool_name == "ask_lucent":
@@ -194,7 +263,7 @@ def test_ask_show_visual_synthesizes_grounded_visual_from_source_component(clien
             ]}],
         }],
     }
-    client.post("/notes", json={"title": "Mechanism note", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    _save_indexed_note(client, document, title="Mechanism note", note=note)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
     response = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
     assert response.status_code == 200
@@ -215,7 +284,7 @@ def test_ask_show_visual_can_add_a_new_grounded_visual_surface(client):
         {"id": "s-one", "title": "First view", "bigIdea": "The first mechanism increases output.", "sourceBlockIds": ["b-one"], "keyTakeaways": ["First mechanism"], "components": [{"kind": "comparison", "title": "Increase pathway", "dimensions": ["effect"], "items": [{"id": "a", "name": "Input", "values": {"effect": "increases output"}}, {"id": "b", "name": "Result", "values": {"effect": "higher output"}}]}, {"kind": "flow", "title": "Limiting pathway", "stages": [{"id": "start", "label": "Input"}, {"id": "end", "label": "Limited output"}]}]},
         {"id": "s-two", "title": "Second view", "bigIdea": "The second mechanism limits output.", "sourceBlockIds": ["b-two"], "keyTakeaways": ["Second mechanism"], "components": [{"kind": "comparison", "title": "Limiting pathway", "dimensions": ["effect"], "items": [{"id": "c", "name": "Input", "values": {"effect": "limits output"}}, {"id": "d", "name": "Result", "values": {"effect": "lower output"}}]}]},
     ]}
-    client.post("/notes", json={"title": "Paired note", "content_type": "section_note", "document_id": document["id"], "content": json.dumps(note)})
+    _save_indexed_note(client, document, title="Paired note", note=note)
     session = client.post(f"/documents/{document['id']}/learn-sessions", json={"goal": "understand", "familiarity": "new"}).json()
     first = client.post(f"/learn-sessions/{session['id']}/ask", json={"message": "Show me visually"})
     assert first.status_code == 200
@@ -258,13 +327,10 @@ def test_model_tutor_replans_to_a_bounded_grounded_candidate(client):
 def _document_with_two_sections(client):
     source = client.post("/sources", json={"type": "website", "url": "https://example.com/two-sections"}).json()
     document = client.post("/documents", json={"source_id": source["id"], "title": "Two-section material", "content": "Grounded material."}).json()
-    client.post("/notes", json={
-        "title": "Two-section note", "content_type": "section_note", "document_id": document["id"],
-        "content": json.dumps({"title": "Two-section material", "sectionNotes": [
+    _save_indexed_note(client, document, title="Two-section note", note={"title": "Two-section material", "sectionNotes": [
             {"id": "s1", "title": "First idea", "bigIdea": "The first source-grounded idea.", "sourceBlockIds": ["b1"], "keyTakeaways": ["The first idea matters."], "components": []},
             {"id": "s2", "title": "Second idea", "bigIdea": "The second source-grounded idea.", "sourceBlockIds": ["b2"], "keyTakeaways": ["The second idea matters."], "components": []},
-        ]}),
-    })
+        ]})
     return document
 
 
@@ -310,7 +376,10 @@ def test_ask_lucent_uses_the_active_scenes_objective_not_the_stale_index(client)
     assert seen_prompts, "the ask model should have been called"
     combined = " ".join(seen_prompts)
     assert "Second idea" in combined
-    assert "First idea" not in combined
+    # Retrieval may include a semantically related neighboring source block,
+    # but the authoritative observation/decision target must be the scene's
+    # second objective rather than the stale objective_index column.
+    assert second_objective_id in combined
 
 
 def test_objective_progress_reflects_the_active_scene_not_the_stale_index(client):

@@ -58,3 +58,19 @@ Candidate development result:
 - Retained failures: `s07-narrator-author`, `c05-direct-placement`
 
 The candidate clears the declared V1 development gates. The two false refusals are retained as known conservative limitations rather than relabeled as retrieval misses.
+
+## Locked holdout result
+
+Artifact: `stage2-voyage-holdout-final.json`
+
+The frozen candidate was evaluated once on the locked 12-query holdout (7 supported, 5 unsupported). No configuration was changed after observing it.
+
+- Recall@1/3/5: `0.643 / 1.000 / 1.000`
+- MRR / complete evidence@5: `0.905 / 1.000`
+- False support / correct abstention: `0.000 / 1.000`
+- Supported false refusal: `0.429` (3/7)
+- Search p50/p95: `0.41 / 0.81 ms`
+- Total p50/p95: `153.97 / 62033.56 ms`
+- Retained false refusals: `s10-every-joke`, `c12-hit-miss-compare`, `c18-mapping-performance`
+
+Decision: **accept the frozen retrieval candidate for V1 retrieval safety/ranking, while retaining conservative support refusal as a measured limitation.** The declared Recall@5, MRR, complete-evidence, and zero-false-support gates pass. The false refusals are not tuned against this holdout; improving the support decision requires a new development experiment and a new untouched holdout.
