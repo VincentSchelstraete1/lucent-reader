@@ -118,7 +118,9 @@ TUTOR_DECISION_SCHEMA = {
                         "required": ["kind", "label"],
                     },
                 },
-                "responseStepId": {"type": ["string", "null"], "maxLength": 60},
+                # The authoritative scene exposes responseInteractionId; the
+                # old responseStepId cursor field is intentionally not part of
+                # the tutor contract anymore.
                 "expectedEvidence": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
                 "completionCondition": {"type": ["string", "null"], "maxLength": 240},
             },
