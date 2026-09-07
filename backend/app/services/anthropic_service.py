@@ -231,20 +231,28 @@ def _run_structured_tool(
     include_metadata: bool = False,
 ) -> dict | StructuredToolResult:
     request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
-    message = request_client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=max_tokens,
-        tools=[
-            {
-                "name": tool_name,
-                "description": f"Return the {tool_name} structured data for the given content.",
-                "input_schema": schema
-            }
-        ],
-        tool_choice={"type": "tool", "name": tool_name},
-        messages=[{"role": "user", "content": prompt}],
-        **({"timeout": timeout} if timeout is not None else {})
-    )
+    try:
+        message = request_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=max_tokens,
+            tools=[
+                {
+                    "name": tool_name,
+                    "description": f"Return the {tool_name} structured data for the given content.",
+                    "input_schema": schema
+                }
+            ],
+            tool_choice={"type": "tool", "name": tool_name},
+            messages=[{"role": "user", "content": prompt}],
+            **({"timeout": timeout} if timeout is not None else {})
+        )
+    except Exception as exc:
+        logger.warning(
+            "structured_generation_failed tool=%s stage=request exception_type=%s outcome=raise",
+            tool_name,
+            type(exc).__name__,
+        )
+        raise
 
     usage = getattr(message, "usage", None)
     logger.info(
@@ -259,6 +267,11 @@ def _run_structured_tool(
 
     tool_input = next((block.input for block in message.content if block.type == "tool_use"), None)
     if getattr(message, "stop_reason", None) == "max_tokens":
+        logger.warning(
+            "structured_generation_failed tool=%s stage=truncated exception_type=%s outcome=raise",
+            tool_name,
+            "StructuredToolTruncatedError",
+        )
         raise StructuredToolTruncatedError(
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
@@ -277,6 +290,11 @@ def _run_structured_tool(
             )
         return tool_input
 
+    logger.warning(
+        "structured_generation_failed tool=%s stage=missing_tool_output exception_type=%s outcome=raise",
+        tool_name,
+        "ValueError",
+    )
     raise ValueError("Model did not return structured tool output")
 
 

@@ -17,6 +17,15 @@ This handoff tracks the phased move from the accepted RAG V1 implementation to a
 
 The paid Voyage tier was already established before this phase and was not changed.
 
+### Phase 2 — Tier 2 reliability hardening: complete
+
+- **Safe provider-failure observability:** structured Anthropic generation, tutor diagnosis/decision/Ask, semantic section generation, Ask interaction validation, legacy learning-object fallback, and step-through runtime failures now log bounded operation/stage, exception class, and outcome fields. Prompt text, document/source content, learner responses, generated validation payloads, exception messages, and tracebacks are excluded from these failure logs. Existing retrieval and source-index lifecycle logging from `84cde27` remains the canonical RAG instrumentation and was not duplicated.
+- **Bounded progressive-job lifecycle:** terminal in-memory ingestion jobs remain inspectable for 30 minutes by default and are then evicted. The store is capped at 200 entries by default; active jobs are never discarded, and new work receives a safe `503 ingestion_capacity_reached` response at capacity. Configure these bounds with `PROGRESSIVE_JOB_TTL_SECONDS` and `PROGRESSIVE_JOB_MAX_ENTRIES`; invalid values fail startup.
+- **Duplicate authentication work removed:** cookie sessions and bearer users are cached only on the current request after their normal database validation/touch. A CSRF-protected write that resolves both `require_csrf` and `get_current_user` now performs one session query and one idle-expiry touch/commit. Revocation, status, idle/absolute expiry, origin, token hashing, cookie/header matching, and bearer validation are unchanged.
+- **Paid-tier Voyage retry policy:** the default is now two retries after the initial request with a one-second fallback for rate limits, replacing the free-tier-oriented 20.5-second delay. Numeric and HTTP-date `Retry-After` values are honored and bounded to 60 seconds; explicit environment overrides remain supported.
+
+The progressive job registry is intentionally still process-local. Polling therefore requires affinity to the API process that accepted the upload, and in-flight state is lost on a process restart. Moving this lifecycle to shared durable infrastructure is a future scaling concern, not part of this phase.
+
 ## Validation evidence
 
 - Focused backend hardening/ingestion/note/quiz suite: 65 passed.
@@ -31,6 +40,17 @@ The paid Voyage tier was already established before this phase and was not chang
   - submitted the grounded correct interaction and observed feedback plus the next authoritative scene/Continue state.
 - Full backend suite: 411 passed, 7 existing warnings.
 
+### Phase 2 validation evidence
+
+- Focused provider/auth/job-lifecycle/RAG/Learn suite: passed.
+- Full backend suite: 419 passed, 7 existing dependency deprecation warnings.
+- Full frontend suite: 128 passed.
+- Production frontend build: passed (the existing large-chunk warning remains).
+- PostgreSQL migration state: `0010_persist_learning_blocks (head)` for both current revision and repository head.
+- Updated backend restarted successfully; `GET http://127.0.0.1:8000/docs` returned HTTP 200.
+- The authenticated write contract remains covered end-to-end by the security/API suite, including valid CSRF acceptance, invalid/missing CSRF rejection, and the new assertion that cookie-session resolution/touch occurs only once per request.
+- Native browser smoke could not be repeated at this checkpoint because the local Mac was locked and the browser-control surface could not unlock it. No product/browser failure was observed; the Phase 1 CC0 browser evidence above remains the latest interactive smoke.
+
 ## Audit/source note
 
 `AUDIT_REPORT.md` was not present in the repository, any branch history, or the supplied attachment directory at this checkpoint. Phase 1 was therefore reconciled against the explicit Tier 1 findings in the user-provided productionization objective and the current code/history. No absent-audit claim was treated as additional scope.
@@ -41,4 +61,4 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
 
 ## Next phase (do not begin without explicit instruction)
 
-Phase 2 covers the scoped Tier 2 reliability work: safe provider-failure observability, bounded lifecycle cleanup for in-memory progressive jobs, duplicate auth-session work where it can be fixed without weakening security, and paid-tier Voyage retry tuning. It must preserve this phase and the accepted RAG/Learn browser behavior.
+Phase 3 is the next productionization phase. Begin only after explicit instruction, preserving the Phase 1/2 reliability boundaries and the accepted RAG/Learn behavior.

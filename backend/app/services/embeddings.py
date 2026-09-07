@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import hashlib
 import math
 import os
@@ -72,9 +74,9 @@ class VoyageEmbeddingProvider:
         try:
             self._timeout = float(os.getenv("RAG_EMBEDDING_TIMEOUT_SECONDS", "20"))
             dimensions = int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "512"))
-            self._max_retries = int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "3"))
+            self._max_retries = int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "2"))
             self._retry_backoff = float(os.getenv("RAG_EMBEDDING_RETRY_BACKOFF_SECONDS", "0.25"))
-            self._rate_limit_backoff = float(os.getenv("RAG_EMBEDDING_RATE_LIMIT_BACKOFF_SECONDS", "20.5"))
+            self._rate_limit_backoff = float(os.getenv("RAG_EMBEDDING_RATE_LIMIT_BACKOFF_SECONDS", "1"))
         except ValueError as exc:
             raise EmbeddingUnavailable("Embedding provider configuration is invalid") from exc
         if (
@@ -111,12 +113,8 @@ class VoyageEmbeddingProvider:
                     raise EmbeddingUnavailable("Embedding provider configuration was rejected") from exc
                 last_error = exc
                 if exc.response.status_code == 429:
-                    retry_after = exc.response.headers.get("retry-after", "").strip()
-                    try:
-                        retry_delay = float(retry_after) if retry_after else self._rate_limit_backoff
-                    except ValueError:
-                        retry_delay = self._rate_limit_backoff
-                    retry_delay = min(60.0, max(self._rate_limit_backoff, retry_delay))
+                    retry_after = _retry_after_seconds(exc.response.headers.get("retry-after", ""))
+                    retry_delay = self._rate_limit_backoff if retry_after is None else retry_after
             except (TypeError, ValueError) as exc:
                 raise EmbeddingInvalidResponse("Embedding provider returned malformed data") from exc
             if attempt < attempts - 1:
@@ -138,6 +136,24 @@ class VoyageEmbeddingProvider:
 
     def embed_query(self, text: str) -> list[float]:
         return self._embed([text], input_type="query")[0]
+
+
+def _retry_after_seconds(value: str, *, now: datetime | None = None) -> float | None:
+    """Parse the standard Retry-After seconds or HTTP-date form, bounded to 60s."""
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    try:
+        return min(60.0, max(0.0, float(candidate)))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(candidate)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            current = now or datetime.now(timezone.utc)
+            return min(60.0, max(0.0, (retry_at - current).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 class DeterministicEmbeddingProvider:

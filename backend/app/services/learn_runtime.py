@@ -818,8 +818,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
                 updated = persist_scene_revision(session, updated, current_private, event_id=bounded_id("ask-inline", session.id, inline.id), db=db)
                 return updated, current_private
             except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("Ask inline interaction rejected: %s", exc)
+                logger.warning("ask_interaction_rejected stage=inline exception_type=%s outcome=preserve_scene", type(exc).__name__)
         replacement_raw = payload.get("replacementStep")
         if updated is not None and isinstance(replacement_raw, dict):
             try:
@@ -835,8 +834,7 @@ def process_tutor_event(session, event: Any, *, db=None, source_blocks: list[dic
             except Exception as exc:
                 # Invalid Ask replacement is ignored; the conversational scene
                 # remains authoritative and usable.
-                import logging
-                logging.getLogger(__name__).warning("Ask replacement rejected: %s", exc)
+                logger.warning("ask_interaction_rejected stage=replacement exception_type=%s outcome=preserve_scene", type(exc).__name__)
         return updated or scene, _state(session).get("currentScenePrivate")
     objective = _objective(session.plan or {}, scene.objective_id)
     if objective is None:

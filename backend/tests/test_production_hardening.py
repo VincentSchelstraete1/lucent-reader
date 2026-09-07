@@ -1,12 +1,15 @@
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from app.config import settings
 from app.database import engine
+from app.schemas.learn import LearnEvaluation
 import app.routers.ingestion as ingestion_router
 import app.services.anthropic_service as anthropic_service
+import app.services.learn_tutor as learn_tutor
 
 
 def test_shared_anthropic_client_has_bounded_defaults():
@@ -85,3 +88,81 @@ def test_progressive_job_failure_becomes_terminal_without_leaking_details(monkey
         assert logged["args"] == (job_id, "RuntimeError")
     finally:
         ingestion_router._PROGRESSIVE_JOBS.pop(job_id, None)
+
+
+def test_terminal_progressive_jobs_are_evicted_after_ttl(monkeypatch):
+    original = dict(ingestion_router._PROGRESSIVE_JOBS)
+    monkeypatch.setattr(ingestion_router, "settings", replace(settings, progressive_job_ttl_seconds=10))
+    ingestion_router._PROGRESSIVE_JOBS.clear()
+    ingestion_router._PROGRESSIVE_JOBS.update({
+        "expired": {"status": "complete", "finished_at": 10.0},
+        "recent": {"status": "failed", "finished_at": 95.0},
+        "active": {"status": "processing", "finished_at": None},
+    })
+    try:
+        ingestion_router._prune_progressive_jobs(now=100.0)
+        assert set(ingestion_router._PROGRESSIVE_JOBS) == {"recent", "active"}
+    finally:
+        ingestion_router._PROGRESSIVE_JOBS.clear()
+        ingestion_router._PROGRESSIVE_JOBS.update(original)
+
+
+def test_progressive_ingestion_rejects_new_work_at_active_job_cap(client, monkeypatch):
+    original = dict(ingestion_router._PROGRESSIVE_JOBS)
+    monkeypatch.setattr(ingestion_router, "settings", replace(settings, progressive_job_max_entries=1))
+    ingestion_router._PROGRESSIVE_JOBS.clear()
+    ingestion_router._PROGRESSIVE_JOBS["active"] = {"status": "processing", "finished_at": None}
+    try:
+        response = client.post(
+            "/ingestion/progressive",
+            files={"file": ("fixture.pdf", b"%PDF-1.4\nfixture", "application/pdf")},
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "ingestion_capacity_reached"
+    finally:
+        ingestion_router._PROGRESSIVE_JOBS.clear()
+        ingestion_router._PROGRESSIVE_JOBS.update(original)
+
+
+def test_structured_provider_failure_log_excludes_prompt_and_exception_text(monkeypatch):
+    class Messages:
+        def create(self, **kwargs):
+            raise RuntimeError("private prompt fragment")
+
+    fake_client = SimpleNamespace(messages=Messages())
+    logged = {}
+    monkeypatch.setattr(anthropic_service, "client", fake_client)
+    monkeypatch.setattr(anthropic_service.logger, "warning", lambda message, *args: logged.update(message=message, args=args))
+
+    with pytest.raises(RuntimeError):
+        anthropic_service._run_structured_tool("SECRET SOURCE", "test_tool", {}, 10)
+
+    assert logged["args"] == ("test_tool", "RuntimeError")
+    assert "SECRET SOURCE" not in str(logged)
+    assert "private prompt fragment" not in str(logged)
+
+
+def test_tutor_provider_failure_is_logged_safely_and_uses_fallback(monkeypatch):
+    fallback = LearnEvaluation(result="incorrect", confidence=0.5, evidence="fallback", remediationCategory="simplify")
+    logged = {}
+
+    def fail_provider(*args, **kwargs):
+        raise RuntimeError("private learner response")
+
+    monkeypatch.setattr(learn_tutor.logger, "warning", lambda message, *args: logged.update(message=message, args=args))
+    learn_tutor.set_tutor_provider(fail_provider)
+    try:
+        result = learn_tutor.diagnose_response(
+            prompt="SECRET PROMPT",
+            expected="expected",
+            response="private response",
+            source_context="private source",
+            fallback=fallback,
+        )
+    finally:
+        learn_tutor.set_tutor_provider(None)
+
+    assert result is fallback
+    assert logged["args"] == ("diagnose_response", "request_or_validation", "RuntimeError")
+    assert "SECRET PROMPT" not in str(logged)
+    assert "private learner response" not in str(logged)

@@ -7,12 +7,23 @@ category; it cannot mutate session state or emit executable UI code.
 from __future__ import annotations
 
 import os
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from app.schemas.learn import AskLucentModelResponse, LearnEvaluation, TutorDecision, TutorObservation
 
 _PROVIDER: Callable[..., Any] | None = None
+logger = logging.getLogger(__name__)
+
+
+def _log_provider_fallback(operation: str, stage: str, exception: Exception | None = None) -> None:
+    logger.warning(
+        "tutor_provider_fallback operation=%s stage=%s exception_type=%s outcome=fallback",
+        operation,
+        stage,
+        type(exception).__name__ if exception is not None else "none",
+    )
 
 def set_tutor_provider(provider: Callable[..., Any] | None) -> None:
     """Inject a structured provider for deterministic tests or local fakes."""
@@ -52,6 +63,7 @@ def diagnose_response(*, prompt: str, expected: str, response: str, source_conte
         return fallback
     provider = _provider()
     if provider is None:
+        _log_provider_fallback("diagnose_response", "provider_unavailable")
         return fallback
     try:
         raw = provider(
@@ -73,7 +85,8 @@ def diagnose_response(*, prompt: str, expected: str, response: str, source_conte
             "learn_response_evaluation", DIAGNOSIS_SCHEMA, max_tokens=420, max_retries=0,
         )
         return LearnEvaluation.model_validate(raw)
-    except Exception:
+    except Exception as exc:
+        _log_provider_fallback("diagnose_response", "request_or_validation", exc)
         return fallback
 
 ASK_LUCENT_SCHEMA = {
@@ -144,6 +157,7 @@ def ask_lucent_model(*, question: str, context: dict) -> AskLucentModelResponse 
         return None
     provider = _provider()
     if provider is None:
+        _log_provider_fallback("ask_lucent", "provider_unavailable")
         return None
     try:
         prompt = (
@@ -160,7 +174,8 @@ def ask_lucent_model(*, question: str, context: dict) -> AskLucentModelResponse 
         )
         raw = provider(prompt, "ask_lucent", ASK_LUCENT_SCHEMA, max_tokens=700, timeout=12, max_retries=0)
         return AskLucentModelResponse.model_validate(raw)
-    except Exception:
+    except Exception as exc:
+        _log_provider_fallback("ask_lucent", "request_or_validation", exc)
         return None
 
 
@@ -173,6 +188,7 @@ def choose_tutor_decision(*, observation: TutorObservation | None = None, contex
         return fallback
     provider = _provider()
     if provider is None:
+        _log_provider_fallback("tutor_decision", "provider_unavailable")
         return fallback
     try:
         prompt = (
@@ -191,23 +207,30 @@ def choose_tutor_decision(*, observation: TutorObservation | None = None, contex
         decision = TutorDecision.model_validate(raw)
         allowed_concepts = set(context.get("allowedConceptIds", []))
         if decision.target_concept not in allowed_concepts and decision.target_concept != context.get("conceptId"):
+            _log_provider_fallback("tutor_decision", "target_concept_rejected")
             return fallback
         if allowed_step_ids is not None and decision.next_step_id is not None and decision.next_step_id not in allowed_step_ids:
+            _log_provider_fallback("tutor_decision", "next_step_rejected")
             return fallback
         if decision.scene_plan is not None and allowed_step_ids is not None:
             for block in decision.scene_plan.blocks:
                 if block.step_id is not None and str(block.step_id) not in allowed_step_ids:
+                    _log_provider_fallback("tutor_decision", "scene_step_rejected")
                     return fallback
         for call in decision.actions:
             args = call.arguments or {}
             if set(args) - {"stepId", "conceptId", "stage", "nodeId", "reason"}:
+                _log_provider_fallback("tutor_decision", "tool_arguments_rejected")
                 return fallback
             if args.get("stepId") is not None and allowed_step_ids is not None and str(args["stepId"]) not in allowed_step_ids:
+                _log_provider_fallback("tutor_decision", "tool_step_rejected")
                 return fallback
             if args.get("conceptId") is not None and str(args["conceptId"]) not in allowed_concepts:
+                _log_provider_fallback("tutor_decision", "tool_concept_rejected")
                 return fallback
         return decision
-    except Exception:
+    except Exception as exc:
+        _log_provider_fallback("tutor_decision", "request_or_validation", exc)
         return fallback
 
 

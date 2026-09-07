@@ -31,6 +31,8 @@ class Settings:
     database_max_overflow: int
     database_pool_recycle_seconds: int
     database_pool_timeout_seconds: int
+    progressive_job_ttl_seconds: int
+    progressive_job_max_entries: int
     session_idle_seconds: int = 60 * 60 * 24
     session_absolute_seconds: int = 60 * 60 * 24 * 30
 
@@ -91,6 +93,8 @@ def load_settings() -> Settings:
         database_max_overflow=int(os.getenv("DATABASE_MAX_OVERFLOW", "5")),
         database_pool_recycle_seconds=int(os.getenv("DATABASE_POOL_RECYCLE_SECONDS", "1800")),
         database_pool_timeout_seconds=int(os.getenv("DATABASE_POOL_TIMEOUT_SECONDS", "15")),
+        progressive_job_ttl_seconds=int(os.getenv("PROGRESSIVE_JOB_TTL_SECONDS", "1800")),
+        progressive_job_max_entries=int(os.getenv("PROGRESSIVE_JOB_MAX_ENTRIES", "200")),
     )
     if settings.pdf_upload_max_bytes <= 0:
         raise RuntimeError("PDF_UPLOAD_MAX_BYTES must be greater than zero")
@@ -106,6 +110,10 @@ def load_settings() -> Settings:
         raise RuntimeError("DATABASE_POOL_RECYCLE_SECONDS must be greater than zero")
     if settings.database_pool_timeout_seconds <= 0:
         raise RuntimeError("DATABASE_POOL_TIMEOUT_SECONDS must be greater than zero")
+    if settings.progressive_job_ttl_seconds <= 0:
+        raise RuntimeError("PROGRESSIVE_JOB_TTL_SECONDS must be greater than zero")
+    if settings.progressive_job_max_entries <= 0:
+        raise RuntimeError("PROGRESSIVE_JOB_MAX_ENTRIES must be greater than zero")
     settings.validate()
     return settings
 
