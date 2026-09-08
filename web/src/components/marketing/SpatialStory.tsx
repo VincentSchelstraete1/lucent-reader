@@ -1,4 +1,18 @@
+/**
+ * SpatialStory.tsx
+ *
+ * Desktop (full motion):
+ *   Mounts a @react-three/fiber <Canvas> that fills the 100svh sticky frame.
+ *   HTML overlays (headline, CTAs, stage copy) are absolutely positioned above
+ *   the canvas.  The interactive document card stack is also an HTML overlay
+ *   on the right side, fading out when the camera enters the paper canyon.
+ *
+ * Mobile / prefers-reduced-motion:
+ *   Renders the existing CSS card-stack layout (no WebGL canvas).
+ *   All motion is handled by Framer Motion on DOM elements.
+ */
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { Canvas } from "@react-three/fiber"
 import { Link } from "react-router-dom"
 import {
   motion,
@@ -9,23 +23,22 @@ import {
   type MotionValue,
 } from "framer-motion"
 import { useReducedMotion } from "../../lib/useReducedMotion"
+import { HeroScene } from "./HeroScene"
 import styles from "./marketing.module.css"
 
 const ProductDemo = lazy(() =>
   import("./LucentProductDemo").then(m => ({ default: m.LucentProductDemo }))
 )
 
-const layers = ["Source material", "Simplify", "Explain", "Visualize", "Practice"]
+const LAYERS = ["Source material", "Simplify", "Explain", "Visualize", "Practice"]
 
-/**
- * Build an extended keyframe track that clamps before the first point and
- * after the last point so Framer Motion never interpolates back to the
- * underlying style after the final keyframe.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// useTimeline — clamped keyframe interpolation for Framer Motion MotionValues
+// ─────────────────────────────────────────────────────────────────────────────
 function useTimeline(
   progress: MotionValue<number>,
   points: number[],
-  values: number[]
+  values: number[],
 ) {
   return useTransform(
     progress,
@@ -38,11 +51,13 @@ function useTimeline(
       ...(points[0] > 0 ? [values[0]] : []),
       ...values,
       ...(points[points.length - 1] < 1 ? [values[values.length - 1]] : []),
-    ]
+    ],
   )
 }
 
-// ── DocumentPage (original, unchanged) ────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DocumentPage — one card in the interactive stack (static + canvas case)
+// ─────────────────────────────────────────────────────────────────────────────
 function DocumentPage({
   index,
   activeCard,
@@ -56,9 +71,11 @@ function DocumentPage({
   reduced: boolean
   onNext: () => void
 }) {
-  const offset = index - activeCard
-  const active = offset === 0
-  const clickable = activeCard < layers.length - 1 && (active || (!staticStory && offset === 1))
+  const offset   = index - activeCard
+  const active   = offset === 0
+  const clickable =
+    activeCard < LAYERS.length - 1 && (active || (!staticStory && offset === 1))
+
   return (
     <motion.div
       data-paper-layer={index}
@@ -67,9 +84,9 @@ function DocumentPage({
       aria-hidden={!active && !clickable ? true : undefined}
       initial={false}
       animate={{
-        x: active ? 0 : offset < 0 ? -60 : offset * 38,
-        y: active ? 0 : offset < 0 ? 12 : -offset * 9,
-        z: active ? 100 : offset < 0 ? 160 : 100 - offset * 85,
+        x:       active ? 0 : offset < 0 ? -60 : offset * 38,
+        y:       active ? 0 : offset < 0 ? 12  : -offset * 9,
+        z:       active ? 100 : offset < 0 ? 160 : 100 - offset * 85,
         rotateY: active ? (staticStory ? 0 : -5) : offset < 0 ? -108 : -10,
         rotateX: active ? 0 : 3,
         rotateZ: active ? (staticStory ? 0 : -1) : -5 + offset,
@@ -78,23 +95,29 @@ function DocumentPage({
       transition={{ duration: reduced ? 0 : 0.55, ease: [0.22, 0.68, 0.2, 1] }}
     >
       <div className={styles.pageTopline}>
-        <span>{index ? "Lucent / " + layers[index] : "Biology / Reading notes"}</span>
+        <span>{index ? "Lucent / " + LAYERS[index] : "Biology / Reading notes"}</span>
         <span>0{index + 1}</span>
       </div>
-      <p className={styles.paperKicker}>{index ? layers[index] : "Cellular quality control"}</p>
+      <p className={styles.paperKicker}>
+        {index ? LAYERS[index] : "Cellular quality control"}
+      </p>
       <h2>
         {index === 0 ? (<>When a cell<br />finds damage.</>) :
          index === 1 ? (<>The essential<br />idea.</>) :
          index === 2 ? (<>Detection is<br />only the start.</>) :
          index === 3 ? (<>See the<br />connection.</>) :
-         (<>Put the idea<br />to work.</>)}
+                       (<>Put the idea<br />to work.</>)}
       </h2>
       <p>
-        {index === 0 ? "Cells continually monitor their proteins. When a protein loses its working shape, a control signal coordinates the response." :
-         index === 1 ? "Finding damage is not the same as fixing it. A signal connects what the cell detects to what it does next." :
-         index === 2 ? "Think of a smoke alarm: it detects a problem and calls for action. It does not put out the fire itself." :
-         index === 3 ? "Follow the signal from detection to a protective response." :
-         "A cell detects damage, but its signal is blocked. Would detection alone protect the cell?"}
+        {index === 0
+          ? "Cells continually monitor their proteins. When a protein loses its working shape, a control signal coordinates the response."
+          : index === 1
+          ? "Finding damage is not the same as fixing it. A signal connects what the cell detects to what it does next."
+          : index === 2
+          ? "Think of a smoke alarm: it detects a problem and calls for action. It does not put out the fire itself."
+          : index === 3
+          ? "Follow the signal from detection to a protective response."
+          : "A cell detects damage, but its signal is blocked. Would detection alone protect the cell?"}
       </p>
       <div className={styles.paperRule} />
       {index === 3 ? (
@@ -107,14 +130,18 @@ function DocumentPage({
         <>
           <p className={styles.paperDetail}>
             {index === 0
-              ? "The response may repair or remove a faulty protein, preventing it from disrupting other processes. Detection, signalling, and response each play a different part in protecting the cell."
+              ? "The response may repair or remove a faulty protein, preventing it from disrupting other processes."
               : index === 4
               ? "Look for the missing connection between noticing the damage and responding to it."
               : "Understanding the relationship matters more than remembering each label on its own."}
           </p>
           <div className={styles.paperLines}><i /><i /><i /><i /></div>
           <div className={styles.paperNote}>
-            {index === 0 ? "01 — Detect. Signal. Respond." : index === 4 ? "Reason from what you know." : "Same source. A clearer explanation."}
+            {index === 0
+              ? "01 — Detect. Signal. Respond."
+              : index === 4
+              ? "Reason from what you know."
+              : "Same source. A clearer explanation."}
           </div>
         </>
       )}
@@ -122,7 +149,7 @@ function DocumentPage({
         <button
           type="button"
           className={styles.pageTurnTarget}
-          aria-label={`Show ${layers[activeCard + 1]} page`}
+          aria-label={`Show ${LAYERS[activeCard + 1]} page`}
           onClick={onNext}
         />
       )}
@@ -130,119 +157,228 @@ function DocumentPage({
   )
 }
 
-// ── FanPage ────────────────────────────────────────────────────────────────
-// One page in the Stage 3 interior document-space spread.
-// Each FanPage is its own component so all useTransform calls are at the
-// top level of a component (Rules of Hooks compliant).
-function FanPage({
-  index,
-  total,
-  fanProgress,
-}: {
-  index: number
-  total: number
-  fanProgress: MotionValue<number>
-}) {
-  const t = index / (total - 1)      // 0..1
-  const c = t - 0.5                  // −0.5..0.5  (negative = left, positive = right)
-  const absC = Math.abs(c)
+// ─────────────────────────────────────────────────────────────────────────────
+// DocumentCardStack — the right-side card stack overlay (Stages 1-2, canvas)
+// ─────────────────────────────────────────────────────────────────────────────
+function DocumentCardStack({ reduced }: { reduced: boolean }) {
+  const [activeCard, setActiveCard] = useState(0)
+  const tiltX      = useSpring(0, { stiffness: 160, damping: 25 })
+  const tiltY      = useSpring(0, { stiffness: 160, damping: 25 })
+  const gesture    = useRef<{ x: number; y: number } | null>(null)
+  const suppress   = useRef(false)
 
-  // Pages sweep out to ±74 degrees at full open
-  const rotateY = useTransform(fanProgress, (p) => c * p * 148)
-  // Outer pages recede in Z, centre pages stay close to camera
-  const z = useTransform(fanProgress, (p) => -(28 + absC * p * 360))
-  // Slight horizontal nudge so pages don't all share the exact same XY origin
-  const x = useTransform(fanProgress, (p) => c * p * 32)
-  const opacity = useTransform(fanProgress, (p) => {
-    const entering = Math.min(1, p * 5)
-    // Very outermost pages (near 74 deg) fade — they go nearly edge-on
-    const edgeFade = absC > 0.44 ? Math.max(0, 1 - (absC - 0.44) / 0.06) : 1
-    const brightness = 0.55 + (1 - absC) * 0.45
-    return entering * brightness * edgeFade
+  function turn(dir: number) {
+    setActiveCard(c => Math.max(0, Math.min(LAYERS.length - 1, c + dir)))
+  }
+
+  return (
+    <>
+      <motion.div
+        className={styles.documentStack}
+        style={reduced ? undefined : { rotateX: tiltX, rotateY: tiltY }}
+        onPointerMove={e => {
+          if (reduced || e.pointerType !== "mouse") return
+          const b = e.currentTarget.getBoundingClientRect()
+          tiltX.set((0.5 - (e.clientY - b.top)  / b.height) * 5)
+          tiltY.set(((e.clientX - b.left) / b.width - 0.5)   * 5)
+        }}
+        onPointerLeave={() => { tiltX.set(0); tiltY.set(0) }}
+        onPointerDown={e => {
+          suppress.current = false
+          gesture.current  = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null
+        }}
+        onPointerCancel={() => { gesture.current = null }}
+        onPointerUp={e => {
+          const start = gesture.current; gesture.current = null
+          if (!start) return
+          const dx = e.clientX - start.x, dy = e.clientY - start.y
+          if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+            suppress.current = true; turn(dx < 0 ? 1 : -1)
+          }
+        }}
+        onClickCapture={e => {
+          if (suppress.current) { e.preventDefault(); e.stopPropagation(); suppress.current = false }
+        }}
+      >
+        {[4, 3, 2, 1, 0].map(i => (
+          <DocumentPage
+            key={i} index={i} activeCard={activeCard}
+            staticStory={false} reduced={reduced}
+            onNext={() => turn(1)}
+          />
+        ))}
+      </motion.div>
+
+      <div className={styles.capabilityLabels} aria-hidden="true">
+        <span style={{ transform: "translateZ(40px)" }}>Simplify</span>
+        <span style={{ transform: "translateZ(20px)" }}>Explain</span>
+        <span style={{ transform: "translateZ(60px)" }}>Visualize</span>
+        <span style={{ transform: "translateZ(10px)" }}>Practice</span>
+        <span style={{ transform: "translateZ(50px)" }}>Learn</span>
+      </div>
+
+      <div className={styles.pageControls} aria-label="Explore the source pages">
+        <button type="button" aria-label="Previous source page"
+          disabled={activeCard === 0} onClick={() => turn(-1)}>←</button>
+        <span aria-live="polite">{activeCard + 1} / {LAYERS.length} · {LAYERS[activeCard]}</span>
+        <button type="button" aria-label="Next source page"
+          disabled={activeCard === LAYERS.length - 1} onClick={() => turn(1)}>→</button>
+      </div>
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CanvasHero — desktop WebGL experience (mounted inside the sticky frame)
+// ─────────────────────────────────────────────────────────────────────────────
+function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null> }) {
+  const reduced   = useReducedMotion()
+  const scrollRef = useRef<number>(0)
+  const [beat, setBeat] = useState(0)
+
+  const { scrollYProgress: p } = useScroll({
+    target: storyRef as any,
+    offset: ["start start", "end end"],
   })
 
-  return (
-    <motion.div
-      className={styles.fanPage}
-      style={{ rotateY, z, x, opacity }}
-    />
-  )
-}
+  // Feed scroll progress into R3F's shared ref (read in useFrame — no re-renders)
+  useMotionValueEvent(p, "change", v => {
+    scrollRef.current = v
+    setBeat(v < 0.46 ? 0 : v < 0.62 ? 1 : v < 0.88 ? 2 : 3)
+  })
 
-const FAN_COUNT = 22
+  // ── Overlay opacity values ────────────────────────────────────────────────
+  const stage1Opacity   = useTimeline(p, [0, 0.38, 0.47],        [1, 1, 0])
+  const cardStackOp     = useTimeline(p, [0, 0.38, 0.50],        [1, 1, 0])
+  const stage2Opacity   = useTimeline(p, [0.40, 0.46, 0.56, 0.62],[0, 1, 1, 0])
+  const stage4Opacity   = useTimeline(p, [0.88, 0.96],           [0, 1])
+  const scrollCueOp     = useTimeline(p, [0, 0.10, 0.20],        [1, 1, 0])
 
-// Renders the complete fanning page spread
-function PageFan({ fanProgress }: { fanProgress: MotionValue<number> }) {
-  return (
-    <div className={styles.pageFan} aria-hidden="true">
-      {Array.from({ length: FAN_COUNT }, (_, i) => (
-        <FanPage key={i} index={i} total={FAN_COUNT} fanProgress={fanProgress} />
-      ))}
-    </div>
-  )
-}
+  const STAGE_LABELS = ["Your material", "A clearer path", "Learn with Lucent", "Go further"]
 
-// ── MonolithTower ─────────────────────────────────────────────────────────
-// The distant paper-stack tower visible in Stages 1–2 and 4.
-// Uses a CSS 3D box: front face (paper surface) + right face (visible paper
-// edges via repeating-linear-gradient) to match the existing card aesthetic.
-function MonolithTower() {
   return (
-    <div className={styles.monolithBox}>
-      {/* Front face — readable top page */}
-      <div className={styles.monolithFront}>
-        <div className={styles.monolithContent}>
-          <div className={styles.monolithTopLine}>
-            <span>Reading notes</span>
-            <span>01</span>
+    <>
+      {/* ── WebGL Canvas ──────────────────────────────────────────────── */}
+      <Canvas
+        style={{ position: "absolute", inset: 0 }}
+        camera={{ position: [0, 85, 200], fov: 65, near: 0.5, far: 2000 }}
+        gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
+        dpr={[1, 1.5]}
+        shadows
+      >
+        <HeroScene scrollRef={scrollRef} />
+      </Canvas>
+
+      {/* ── HTML overlay — pointer-events:none; child elements opt-in ── */}
+      <div className={styles.heroOverlay}>
+        <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
+
+        {/* Stage 1: hero copy (left) */}
+        <motion.div
+          className={`${styles.storyCopy} ${styles.heroStoryCopy}`}
+          aria-hidden={beat !== 0}
+          style={{ opacity: stage1Opacity }}
+        >
+          <p className={styles.eyebrowLight}>Read. Understand. Go further.</p>
+          <h1 className={styles.storyHeadline}>
+            Turn any<br />material into<br /><em>understanding.</em>
+          </h1>
+          <p className={styles.storyBody}>
+            Your documents, opened up.<br />
+            Clear explanations, interactive visuals,<br />
+            and a tutor that helps the idea click.
+          </p>
+          <div className={styles.heroActions}>
+            <Link to="/signup" className={styles.btnLight}>
+              Get started <span aria-hidden="true">↗</span>
+            </Link>
+            <a href="#learn-in-action" className={styles.watchLink}>
+              <span aria-hidden="true">▷</span> Explore Lucent
+            </a>
           </div>
-          <strong className={styles.monolithHeading}>
-            When a cell<br />finds damage.
-          </strong>
-          <div className={styles.monolithPLines}>
-            <i style={{ width: "88%" }} /><i style={{ width: "95%" }} />
-            <i style={{ width: "76%" }} /><i style={{ width: "91%" }} />
-            <i style={{ width: "83%" }} /><i style={{ width: "61%" }} />
-          </div>
-          <div className={styles.monolithRule} />
-          <div className={styles.monolithPLines}>
-            <i style={{ width: "78%" }} /><i style={{ width: "85%" }} />
-            <i style={{ width: "70%" }} /><i style={{ width: "55%" }} />
-          </div>
+        </motion.div>
+
+        {/* Stage 1: card stack overlay (right) */}
+        <motion.div
+          className={styles.documentScene}
+          aria-hidden={beat !== 0}
+          style={{ opacity: cardStackOp, pointerEvents: beat === 0 ? "auto" : "none" }}
+        >
+          <DocumentCardStack reduced={reduced} />
+          <p className={styles.paperCaption} aria-hidden="true">
+            From pages<br />to progress.
+          </p>
+        </motion.div>
+
+        {/* Stage 2: clarity copy */}
+        <motion.div
+          className={`${styles.storyCopy} ${styles.clarityCopy}`}
+          aria-hidden={beat !== 1}
+          style={{ opacity: stage2Opacity }}
+        >
+          <p className={styles.eyebrowLight}>A calmer way to learn</p>
+          <h2 className={styles.storyHeading}>
+            Same material.<br /><em>A clearer path.</em>
+          </h2>
+          <p className={styles.storyBody}>
+            Read it. See it. Try it.<br />
+            Keep the explanation beside the question,<br />
+            so understanding has room to grow.
+          </p>
+        </motion.div>
+
+        {/* Stage 3: anchor for keyboard navigation (demo is inside Canvas portal) */}
+        <div
+          id="learn-in-action"
+          className={styles.demoAnchor}
+          tabIndex={-1}
+          aria-label="Interactive Lucent preview — embedded in 3D scene"
+        />
+
+        {/* Stage 4: resolution copy */}
+        <motion.section
+          className={styles.resolutionCopy}
+          aria-hidden={beat !== 3}
+          aria-label="Go further with Lucent"
+          style={{ opacity: stage4Opacity }}
+        >
+          <p className={styles.eyebrowLight}>Go further</p>
+          <h2>A little further<br />from the familiar.</h2>
+          <p>Bring your material.<br />Leave with a new way of seeing it.</p>
+          <Link to="/signup" className={styles.btnLight}>
+            Begin with your material <span aria-hidden="true">↗</span>
+          </Link>
+        </motion.section>
+
+        {/* Chrome */}
+        <motion.div
+          className={styles.scrollCue}
+          aria-hidden="true"
+          style={{ opacity: scrollCueOp }}
+        >
+          <span /> Scroll to explore
+        </motion.div>
+
+        <div className={styles.storyIndex} aria-hidden="true">
+          <span>0{beat + 1}</span><i />
+          <span>{STAGE_LABELS[beat]}</span>
         </div>
       </div>
-      {/* Right side face — stacked paper edges revealed by rotateY scroll */}
-      <div className={styles.monolithRight} />
-    </div>
+    </>
   )
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-
-export function SpatialStory() {
-  const ref = useRef<HTMLElement>(null)
-  const reduced = useReducedMotion()
-  const [compact, setCompact] = useState(
-    () => window.matchMedia("(max-width: 950px), (max-height: 620px)").matches
-  )
-  const [beat, setBeat] = useState(0)
-  const [loadDemo, setLoadDemo] = useState(false)
+// ─────────────────────────────────────────────────────────────────────────────
+// StaticSpatialStory — CSS card-stack fallback (mobile / reduced-motion)
+// Full DOM-based layout, no WebGL canvas.
+// ─────────────────────────────────────────────────────────────────────────────
+function StaticSpatialStory() {
   const [activeCard, setActiveCard] = useState(0)
-  const gesture = useRef<{ x: number; y: number } | null>(null)
-  const suppressClick = useRef(false)
-  const tiltX = useSpring(0, { stiffness: 160, damping: 25 })
-  const tiltY = useSpring(0, { stiffness: 160, damping: 25 })
-
-  const { scrollYProgress: p } = useScroll({ target: ref, offset: ["start start", "end end"] })
-
-  useEffect(() => {
-    const q = window.matchMedia("(max-width: 950px), (max-height: 620px)")
-    const upd = () => setCompact(q.matches)
-    q.addEventListener("change", upd)
-    return () => q.removeEventListener("change", upd)
-  }, [])
-
-  const staticStory = reduced || compact
+  const [loadDemo,   setLoadDemo  ] = useState(false)
+  const tiltX    = useSpring(0, { stiffness: 160, damping: 25 })
+  const tiltY    = useSpring(0, { stiffness: 160, damping: 25 })
+  const gesture  = useRef<{ x: number; y: number } | null>(null)
+  const suppress = useRef(false)
 
   useEffect(() => {
     if (window.location.hash !== "#learn-in-action") return
@@ -252,367 +388,182 @@ export function SpatialStory() {
     return () => cancelAnimationFrame(id)
   }, [])
 
-  useMotionValueEvent(p, "change", value => {
-    setBeat(value < 0.42 ? 0 : value < 0.62 ? 1 : value < 0.89 ? 2 : 3)
-    if (value > 0.40) setLoadDemo(true)
-  })
+  function turn(dir: number) {
+    setActiveCard(c => Math.max(0, Math.min(LAYERS.length - 1, c + dir)))
+  }
 
-  // ── PERSPECTIVE ORIGIN ───────────────────────────────────────────────────
-  // CRITICAL: must be declared at the top level of the component — NEVER
-  // inside a conditional or inline style prop (that would violate Rules of Hooks
-  // and silently break the animation).
-  //
-  // Y goes 28% → 50%: camera starts elevated (looking down), then levels out.
-  // This is what creates the "descent" illusion in Stage 1.
-  const perspOriginYNum = useTimeline(p, [0, 0.18, 0.42], [28, 50, 50])
-  // Build the CSS string outside the JSX (valid hook call site).
-  const perspectiveOriginVal = useTransform(perspOriginYNum, y => `50% ${y}%`)
+  return (
+    <div className={styles.storySticky} data-static-story="true">
+      <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
+      <div id="learn-in-action" className={styles.demoAnchor} tabIndex={-1} />
 
-  // ── STAGE 1: THE DESCENT (p: 0 → 0.18) ─────────────────────────────────
-  // Headline sits forward on Z — a physical signpost the camera flies past.
-  const heroZ       = useTimeline(p, [0, 0.14, 0.32, 0.41], [60, 20, 0, 0])
-  const heroY       = useTimeline(p, [0, 0.14, 0.32, 0.41], [-20, -7, 0, 0])
-  const heroOpacity = useTimeline(p, [0, 0.32, 0.41], [1, 1, 0])
+      {/* Stage 1: hero copy */}
+      <div className={`${styles.storyCopy} ${styles.heroStoryCopy}`}>
+        <p className={styles.eyebrowLight}>Read. Understand. Go further.</p>
+        <h1 className={styles.storyHeadline}>
+          Turn any<br />material into<br /><em>understanding.</em>
+        </h1>
+        <p className={styles.storyBody}>
+          Your documents, opened up.<br />
+          Clear explanations, interactive visuals,<br />
+          and a tutor that helps the idea click.
+        </p>
+        <div className={styles.heroActions}>
+          <Link to="/signup" className={styles.btnLight}>
+            Get started <span aria-hidden="true">↗</span>
+          </Link>
+          <a href="#learn-in-action" className={styles.watchLink}>
+            <span aria-hidden="true">▷</span> Explore Lucent
+          </a>
+        </div>
+      </div>
 
-  // ── STAGE 2: THE FOREST FLY-BY (p: 0.18 → 0.42) ────────────────────────
-  // Landscape rushes forward; document monolith approaches from Z = −1400.
-  const landscapeScale = useTimeline(p, [0, 0.18, 0.42, 0.62, 1], [1.04, 1.12, 1.58, 1.65, 1.68])
-  const landscapeY     = useTimeline(p, [0, 0.18, 0.42, 0.62, 1], [0, -6, -95, -108, -122])
-  const landscapeX     = useTimeline(p, [0, 0.18, 0.42, 0.62, 1], [0, -6, -98, -112, -138])
-  const foregroundY    = useTimeline(p, [0, 0.18, 0.42, 1], [0, 18, 205, 248])
-  const foregroundScale= useTimeline(p, [0, 0.18, 0.42, 1], [1.04, 1.12, 1.72, 1.82])
+      {/* Card stack */}
+      <div className={styles.documentScene}>
+        <motion.div
+          className={styles.documentStack}
+          onPointerDown={e => {
+            suppress.current = false
+            gesture.current  = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null
+          }}
+          onPointerCancel={() => { gesture.current = null }}
+          onPointerUp={e => {
+            const s = gesture.current; gesture.current = null
+            if (!s) return
+            const dx = e.clientX - s.x, dy = e.clientY - s.y
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+              suppress.current = true; turn(dx < 0 ? 1 : -1)
+            }
+          }}
+          onClickCapture={e => {
+            if (suppress.current) { e.preventDefault(); e.stopPropagation(); suppress.current = false }
+          }}
+        >
+          {[4, 3, 2, 1, 0].map(i => (
+            <DocumentPage
+              key={i} index={i} activeCard={activeCard}
+              staticStory reduced={false}
+              onNext={() => turn(1)}
+            />
+          ))}
+        </motion.div>
 
-  // Monolith tower — approaches through Stages 1–2, passes camera in Stage 2→3
-  // Z values stay within valid range for perspective:1800px (must be > −1800).
-  const monolithZ       = useTimeline(p,
-    [0,    0.10,  0.42,  0.56,  0.62,  0.88,  1.0],
-    [-1380,-1180, -220,   260,   380,     0, -1100])
-  const monolithScale   = useTimeline(p,
-    [0,    0.10,  0.42,  0.56,  0.60,  0.86,  0.92,  1.0],
-    [0.44, 0.54,  1.00,  1.55,  0.18,  0.18,  0.80,  0.52])
-  const monolithOpacity = useTimeline(p,
-    [0,    0.06,  0.44,  0.57,  0.62,  0.84,  0.92,  1.0],
-    [0,    1,     1,     0.22,  0,     0,     1,     1])
-  const monolithRotateY = useTimeline(p, [0, 0.42, 0.56], [2, 6, 11])
+        <div className={styles.capabilityLabels} aria-hidden="true">
+          <span>Simplify</span><span>Explain</span>
+          <span>Visualize</span><span>Practice</span><span>Learn</span>
+        </div>
+      </div>
 
-  // Clarity copy (Stage 2)
-  const clarityOpacity = useTimeline(p, [0.42, 0.46, 0.56, 0.62], [0, 1, 1, 0])
+      <div className={styles.pageControls} aria-label="Explore the source pages">
+        <button type="button" aria-label="Previous source page"
+          disabled={activeCard === 0} onClick={() => turn(-1)}>←</button>
+        <span aria-live="polite">{activeCard + 1} / {LAYERS.length} · {LAYERS[activeCard]}</span>
+        <button type="button" aria-label="Next source page"
+          disabled={activeCard === LAYERS.length - 1} onClick={() => turn(1)}>→</button>
+      </div>
 
-  // ── STAGE 3: ENTERING THE DOCUMENT SPACE (p: 0.62 → 0.88) ──────────────
-  // fanProgress drives the PageFan opening: 0 = closed stack, 1 = fully open.
-  const fanProgress        = useTimeline(p, [0.62, 0.74, 0.84, 0.88], [0, 1, 1, 0])
-  const fanWrapperOpacity  = useTimeline(p, [0.61, 0.66, 0.84, 0.89], [0, 1, 1, 0])
+      {/* Stage 2: clarity copy */}
+      <div className={`${styles.storyCopy} ${styles.clarityCopy}`}>
+        <p className={styles.eyebrowLight}>A calmer way to learn</p>
+        <h2 className={styles.storyHeading}>
+          Same material.<br /><em>A clearer path.</em>
+        </h2>
+        <p className={styles.storyBody}>
+          Read it. See it. Try it.<br />
+          Keep the explanation beside the question,<br />
+          so understanding has room to grow.
+        </p>
+      </div>
 
-  // Interactive demo panel (unchanged from original)
-  const productOpacity  = useTimeline(p, [0.62, 0.70], [0, 1])
-  const productScale    = useTimeline(p, [0.60, 0.70, 0.85, 1], [0.92, 1, 1, 0.55])
-  const productZ        = useTimeline(p, [0.60, 0.70, 0.85, 1], [-120, 0, 0, -500])
-  const productRotateY  = useTimeline(p, [0.60, 0.70, 0.85, 1], [-8, 0, 0, -26])
-  const productX        = useTimeline(p, [0.60, 0.70, 0.85, 1], [40, 0, 0, 450])
-  const productY        = useTimeline(p, [0.60, 0.70, 0.85, 1], [40, 0, 0, 30])
+      {/* Stage 3: interactive product demo */}
+      <section
+        className={styles.productStage}
+        aria-label="Interactive Lucent preview"
+        onFocus={() => setLoadDemo(true)}
+        onPointerEnter={() => setLoadDemo(true)}
+      >
+        <div className={styles.productStageIntro}>
+          <div>
+            <p className={styles.eyebrowLight}>See Lucent in action</p>
+            <h2>From reading <em>to reasoning.</em></h2>
+          </div>
+          <p>
+            Try an answer. Ask for another explanation.<br />
+            See what happens when the idea clicks.
+          </p>
+        </div>
+        {loadDemo ? (
+          <Suspense fallback={<div className={styles.demoLoading} role="status">Opening the learning preview…</div>}>
+            <ProductDemo />
+          </Suspense>
+        ) : (
+          <button
+            type="button"
+            className={styles.btnLight}
+            onClick={() => setLoadDemo(true)}
+          >
+            Open interactive preview
+          </button>
+        )}
+      </section>
 
-  // Capability labels staggered in Z
-  const capLabelsOpacity = useTimeline(p, [0, 0.32, 0.41, 0.62, 0.70], [1, 1, 0, 0, 1])
+      {/* Stage 4: resolution */}
+      <section className={styles.resolutionCopy} aria-label="Go further with Lucent">
+        <p className={styles.eyebrowLight}>Go further</p>
+        <h2>A little further<br />from the familiar.</h2>
+        <p>Bring your material.<br />Leave with a new way of seeing it.</p>
+        <Link to="/signup" className={styles.btnLight}>
+          Begin with your material <span aria-hidden="true">↗</span>
+        </Link>
+      </section>
+    </div>
+  )
+}
 
-  // Floating interaction depth nodes
-  const node1Opacity = useTimeline(p, [0.63, 0.70, 0.85, 0.94], [0, 1, 1, 0])
-  const node2Opacity = useTimeline(p, [0.65, 0.72, 0.85, 0.94], [0, 1, 1, 0])
-  const node3Opacity = useTimeline(p, [0.67, 0.74, 0.85, 0.94], [0, 1, 1, 0])
-  const node1Z = useTimeline(p, [0.62, 0.72], [-200, -60])
-  const node2Z = useTimeline(p, [0.62, 0.74], [-300, -140])
-  const node3Z = useTimeline(p, [0.62, 0.76], [-400, -220])
+// ─────────────────────────────────────────────────────────────────────────────
+// SpatialStory — public export
+// ─────────────────────────────────────────────────────────────────────────────
+export function SpatialStory() {
+  const reduced = useReducedMotion()
+  const [compact, setCompact] = useState(
+    () => window.matchMedia("(max-width: 950px), (max-height: 620px)").matches
+  )
 
-  // ── STAGE 4: CONVERGENCE & EXIT (p: 0.88 → 1.0) ────────────────────────
-  const endingOpacity = useTimeline(p, [0.94, 1], [0, 1])
+  useEffect(() => {
+    const q   = window.matchMedia("(max-width: 950px), (max-height: 620px)")
+    const upd = () => setCompact(q.matches)
+    q.addEventListener("change", upd)
+    return () => q.removeEventListener("change", upd)
+  }, [])
 
-  // ── Interactive card reader ──────────────────────────────────────────────
-  const documentX      = useTimeline(p, [0, 0.33, 0.43], [0, 0, 100])
-  const documentY      = useTimeline(p, [0, 0.33, 0.43], [0, 0, 180])
-  const documentScale2 = useTimeline(p, [0, 0.33, 0.43], [1, 1, 0.65])
-  const documentOpacity= useTimeline(p, [0.34, 0.42], [1, 0])
+  const staticStory = reduced || compact
 
-  // ── Fog layers ───────────────────────────────────────────────────────────
-  const fogFarX       = useTimeline(p, [0, 1], [-100, 160])
-  const fogNearX      = useTimeline(p, [0, 0.5, 1], [100, -90, -280])
-  const fogNearY      = useTimeline(p, [0, 0.32, 0.40, 0.48, 1], [0, -10, -160, -50, -90])
-  const fogNearOpacity= useTimeline(p, [0, 0.32, 0.40, 0.48, 0.70, 0.85, 1], [0.8, 0.8, 1, 0.4, 0.14, 0.14, 0.48])
-  const fogBetweenX   = useTimeline(p, [0, 0.5, 1], [-80, 80, 140])
-  // Stage-2 fly-by mist — sweeps low across frame as camera accelerates
-  const fogSweepX       = useTimeline(p, [0.14, 0.42, 0.55], [130, -170, -340])
-  const fogSweepOpacity = useTimeline(p, [0.14, 0.22, 0.38, 0.46, 0.55], [0, 1, 1, 0.5, 0])
-  // Deep atmospheric mist during descent
-  const fogDeepX       = useTimeline(p, [0, 0.42, 1], [-60, 80, 180])
-  const fogDeepOpacity = useTimeline(p, [0, 0.14, 0.42, 0.62], [0.6, 0.6, 1.0, 0])
+  // Ref to the <main> scroll container — passed to both the Canvas overlay
+  // AND used as the useScroll target inside CanvasHero.
+  const mainRef = useRef<HTMLElement | null>(null)
 
-  // Misc
-  const scrollCueOpacity = useTimeline(p, [0, 0.1, 0.2], [1, 1, 0])
-
-  const accessible = (active: boolean) => ({
-    "aria-hidden": !staticStory && !active ? (true as const) : undefined,
-    ...(!staticStory && !active ? { inert: "" } : {}),
-  })
-
-  function turnPage(direction: number) {
-    setActiveCard(c => Math.max(0, Math.min(layers.length - 1, c + direction)))
+  if (staticStory) {
+    return (
+      <main
+        className={styles.spatialStory}
+        data-static-story="true"
+        aria-label="From source material to understanding"
+      >
+        <StaticSpatialStory />
+      </main>
+    )
   }
 
   return (
     <main
-      ref={ref}
+      ref={mainRef}
       className={styles.spatialStory}
-      data-static-story={staticStory}
+      data-static-story="false"
       aria-label="From source material to understanding"
     >
-      <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
-      {!staticStory && <div id="learn-in-action" className={styles.demoAnchor} tabIndex={-1} />}
-
+      {/* 100svh sticky frame — Canvas + overlays live here */}
       <div className={styles.storySticky}>
-        {/*
-          Camera viewport — hosts perspective(1800px).
-          perspectiveOriginVal is a MotionValue<string> pre-computed at component
-          top level; applying it here is safe and hooks-compliant.
-        */}
-        <motion.div
-          className={styles.cameraViewport}
-          style={staticStory ? undefined : { perspectiveOrigin: perspectiveOriginVal }}
-        >
-
-          {/* ── Environment (landscape + fog + monolith) ── */}
-          <div className={styles.environment} aria-hidden="true">
-            <motion.img
-              className={styles.landscape}
-              src="/lucent-landscape.jpg"
-              width="1672" height="941"
-              fetchPriority="high" alt=""
-              style={staticStory ? undefined : { scale: landscapeScale, x: landscapeX, y: landscapeY }}
-            />
-            <div className={styles.landscapeShade} />
-            <motion.div
-              className={styles.foreground}
-              style={staticStory ? undefined : { scale: foregroundScale, y: foregroundY }}
-            />
-
-            {/* Deep atmospheric mist — rises during descent */}
-            <motion.div
-              className={`${styles.fog} ${styles.fogDeep}`}
-              style={staticStory ? undefined : { x: fogDeepX, opacity: fogDeepOpacity }}
-            />
-            {/* Far mountain mist — drifts right */}
-            <motion.div
-              className={`${styles.fog} ${styles.fogFar}`}
-              style={staticStory ? undefined : { x: fogFarX }}
-            />
-            {/* Stage-2 fly-by mist sweep */}
-            <motion.div
-              className={`${styles.fog} ${styles.fogSweep}`}
-              style={staticStory ? undefined : { x: fogSweepX, opacity: fogSweepOpacity }}
-            />
-
-            {/* ── Monolith tower (Stages 1–2 and 4) ── */}
-            {!staticStory && (
-              <motion.div
-                className={styles.monolithWrapper}
-                style={{
-                  z: monolithZ,
-                  scale: monolithScale,
-                  opacity: monolithOpacity,
-                  rotateY: monolithRotateY,
-                }}
-              >
-                <MonolithTower />
-              </motion.div>
-            )}
-          </div>
-
-          {/* ── Stage 1: Hero copy — rides the Z-axis as a signpost ── */}
-          <motion.div
-            className={`${styles.storyCopy} ${styles.heroStoryCopy}`}
-            {...accessible(beat === 0)}
-            style={staticStory ? undefined : { opacity: heroOpacity, z: heroZ, y: heroY }}
-          >
-            <p className={styles.eyebrowLight}>Read. Understand. Go further.</p>
-            <h1 className={styles.storyHeadline}>
-              Turn any<br />material into<br /><em>understanding.</em>
-            </h1>
-            <p className={styles.storyBody}>
-              Your documents, opened up.<br />
-              Clear explanations, interactive visuals, and a tutor that helps the idea click.
-            </p>
-            <div className={styles.heroActions}>
-              <Link to="/signup" className={styles.btnLight}>Get started <span aria-hidden="true">↗</span></Link>
-              <a href="#learn-in-action" className={styles.watchLink}>
-                <span aria-hidden="true">▷</span> Explore Lucent
-              </a>
-            </div>
-          </motion.div>
-
-          {/* ── Interactive document card stack (Stages 1–2) ── */}
-          <motion.div
-            className={styles.documentScene}
-            {...accessible(beat === 0)}
-            style={staticStory ? undefined : {
-              x: documentX, y: documentY,
-              scale: documentScale2, opacity: documentOpacity,
-            }}
-          >
-            <motion.div
-              className={styles.documentStack}
-              style={reduced || compact ? undefined : { rotateX: tiltX, rotateY: tiltY }}
-              onPointerMove={e => {
-                if (reduced || compact || e.pointerType !== "mouse") return
-                const b = e.currentTarget.getBoundingClientRect()
-                tiltX.set((0.5 - (e.clientY - b.top) / b.height) * 5)
-                tiltY.set(((e.clientX - b.left) / b.width - 0.5) * 5)
-              }}
-              onPointerLeave={() => { tiltX.set(0); tiltY.set(0) }}
-              onPointerDown={e => {
-                suppressClick.current = false
-                gesture.current = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null
-              }}
-              onPointerCancel={() => { gesture.current = null }}
-              onPointerUp={e => {
-                const start = gesture.current; gesture.current = null
-                if (!start) return
-                const dx = e.clientX - start.x; const dy = e.clientY - start.y
-                if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-                  suppressClick.current = true; turnPage(dx < 0 ? 1 : -1)
-                }
-              }}
-              onClickCapture={e => {
-                if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false }
-              }}
-            >
-              {[4, 3, 2, 1, 0].map(i => (
-                <DocumentPage key={i} index={i} activeCard={activeCard}
-                  staticStory={staticStory} reduced={reduced} onNext={() => turnPage(1)} />
-              ))}
-              <motion.div className={`${styles.fog} ${styles.fogBetween}`} style={{ x: fogBetweenX, z: -400 }} />
-            </motion.div>
-
-            <motion.div
-              className={styles.capabilityLabels}
-              style={staticStory ? undefined : { opacity: capLabelsOpacity }}
-              aria-hidden="true"
-            >
-              <span style={{ transform: "translateZ(40px)" }}>Simplify</span>
-              <span style={{ transform: "translateZ(20px)" }}>Explain</span>
-              <span style={{ transform: "translateZ(60px)" }}>Visualize</span>
-              <span style={{ transform: "translateZ(10px)" }}>Practice</span>
-              <span style={{ transform: "translateZ(50px)" }}>Learn</span>
-            </motion.div>
-            <p className={styles.paperCaption} aria-hidden="true">From pages<br />to progress.</p>
-          </motion.div>
-
-          {/* Page controls */}
-          <motion.div
-            className={styles.pageControls}
-            {...accessible(beat === 0)}
-            style={staticStory ? undefined : { opacity: heroOpacity }}
-            aria-label="Explore the source pages"
-          >
-            <button type="button" aria-label="Previous source page"
-              disabled={activeCard === 0} onClick={() => turnPage(-1)}>←</button>
-            <span aria-live="polite">{activeCard + 1} / {layers.length} · {layers[activeCard]}</span>
-            <button type="button" aria-label="Next source page"
-              disabled={activeCard === layers.length - 1} onClick={() => turnPage(1)}>→</button>
-          </motion.div>
-
-          {/* ── Stage 2: Clarity copy ── */}
-          <motion.div
-            className={`${styles.storyCopy} ${styles.clarityCopy}`}
-            {...accessible(beat === 1)}
-            style={staticStory ? undefined : { opacity: clarityOpacity }}
-          >
-            <p className={styles.eyebrowLight}>A calmer way to learn</p>
-            <h2 className={styles.storyHeading}>Same material.<br /><em>A clearer path.</em></h2>
-            <p className={styles.storyBody}>
-              Read it. See it. Try it.<br />
-              Keep the explanation beside the question, so understanding has room to grow.
-            </p>
-          </motion.div>
-
-          {/* ── Stage 3: Page fan — the interior document space ── */}
-          {/*
-            22 pages fan open radially from ±0° to ±74°, creating the
-            "inside the open book" visual from the reference images.
-            Outer pages recede in Z for natural perspective depth.
-          */}
-          {!staticStory && (
-            <motion.div
-              className={styles.fanWrapper}
-              aria-hidden="true"
-              style={{ opacity: fanWrapperOpacity }}
-            >
-              <PageFan fanProgress={fanProgress} />
-            </motion.div>
-          )}
-
-          {/* ── Stage 3: Interactive product demo ── */}
-          <motion.section
-            id={staticStory ? "learn-in-action" : undefined}
-            tabIndex={-1}
-            className={styles.productStage}
-            {...accessible(beat === 2)}
-            aria-label="Interactive Lucent preview"
-            style={staticStory ? undefined : {
-              opacity: productOpacity, scale: productScale,
-              rotateY: productRotateY, x: productX, y: productY, z: productZ,
-            }}
-          >
-            <div className={styles.productStageIntro}>
-              <div>
-                <p className={styles.eyebrowLight}>See Lucent in action</p>
-                <h2>From reading <em>to reasoning.</em></h2>
-              </div>
-              <p>Try an answer. Ask for another explanation.<br />See what happens when the idea clicks.</p>
-            </div>
-            {(loadDemo || staticStory) && (
-              <Suspense fallback={<div className={styles.demoLoading} role="status">Opening the learning preview…</div>}>
-                <ProductDemo />
-              </Suspense>
-            )}
-          </motion.section>
-
-          {/* Stage 3 floating depth nodes */}
-          {!staticStory && (
-            <div className={styles.floatingNodes} aria-hidden="true">
-              <motion.div className={`${styles.floatingNode} ${styles.floatingNodeA}`} style={{ opacity: node1Opacity, z: node1Z }} />
-              <motion.div className={`${styles.floatingNode} ${styles.floatingNodeB}`} style={{ opacity: node2Opacity, z: node2Z }} />
-              <motion.div className={`${styles.floatingNode} ${styles.floatingNodeC}`} style={{ opacity: node3Opacity, z: node3Z }} />
-            </div>
-          )}
-
-          {/* Near fog — physically occludes document edges (proper parallax occlusion) */}
-          <motion.div
-            className={`${styles.fog} ${styles.fogNear}`}
-            aria-hidden="true"
-            style={staticStory ? undefined : { x: fogNearX, y: fogNearY, opacity: fogNearOpacity }}
-          />
-
-          {/* ── Stage 4: Resolution copy ── */}
-          <motion.section
-            className={styles.resolutionCopy}
-            {...accessible(beat === 3)}
-            aria-label="Go further with Lucent"
-            style={staticStory ? undefined : { opacity: endingOpacity }}
-          >
-            <p className={styles.eyebrowLight}>Go further</p>
-            <h2>A little further<br />from the familiar.</h2>
-            <p>Bring your material.<br />Leave with a new way of seeing it.</p>
-            <Link to="/signup" className={styles.btnLight}>Begin with your material <span aria-hidden="true">↗</span></Link>
-          </motion.section>
-
-          <motion.div className={styles.scrollCue} aria-hidden="true"
-            style={staticStory ? undefined : { opacity: scrollCueOpacity }}>
-            <span /> Scroll to explore
-          </motion.div>
-
-          <div className={styles.storyIndex} aria-hidden="true">
-            <span>0{beat + 1}</span><i />
-            <span>{["Your material", "A clearer path", "Learn with Lucent", "Go further"][beat]}</span>
-          </div>
-
-        </motion.div>{/* /cameraViewport */}
+        <CanvasHero storyRef={mainRef} />
       </div>
     </main>
   )
