@@ -53,7 +53,8 @@
 .watchLink span { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #e4ece57d; border-radius: 50%; font-size: 18px; }
 .clarityCopy { top: 33%; width: 40%; }
 .documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; }
-.documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; }
+.documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; pointer-events: auto; touch-action: pan-y pinch-zoom; }
+.pageTurnTarget { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
 .documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg,#fdfcf5,#e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf,5px 5px 0 -2px #f8f7ec,12px 25px 32px #0e201c3d; backface-visibility: hidden; transform-origin: left center; }
 .pageControls { position: absolute; z-index: 12; left: 52%; bottom: 7%; display: flex; align-items: center; gap: 14px; color: var(--paper); font-size: 12px; }
 .pageControls button { border: 1px solid #f1f0e580; background: #243a3180; color: inherit; border-radius: 50%; width: 42px; height: 42px; font-size: 20px; cursor: pointer; }
@@ -150,8 +151,7 @@
 [data-static-story=true] .storyHeadline { font-size: clamp(64px,10vw,92px); }
 [data-static-story=true] .documentScene { position: relative; inset: auto; height: 550px; margin: 65px auto 45px; max-width: 600px; perspective: 1200px; }
 [data-static-story=true] .documentStack { left: 50%; margin-left: -180px; top: 35px; width: 340px; aspect-ratio: .68; }
-[data-static-story=true] .documentPage { transform: none !important; opacity: 1 !important; }
-[data-static-story=true] .documentPage[data-active=false] { visibility: hidden; }
+[data-static-story=true] .documentPage[data-active=false] { pointer-events: none; }
 [data-static-story=true] .pageControls { position: relative; inset: auto; width: fit-content; margin: 20px auto 0; }
 [data-static-story=true] .capabilityLabels { right: -1%; top: 4%; font-size: 10px; }
 [data-static-story=true] .paperCaption { display: none; }

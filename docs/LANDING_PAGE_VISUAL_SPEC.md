@@ -15,9 +15,13 @@ One sticky composition spans four scenes across a 600svh desktop timeline:
 readable source-page turns, a quiet landscape-only "A clearer path" interval,
 the interactive Lucent learning surface, and the closing invitation. Each of
 the five pages comes forward and holds nearly face-on before turning around
-its left edge. Scrolling or the previous/next controls turns pages, in either
-direction. After the final page, a stronger camera move and rising foreground
-fog carry the stack away. No pages, captions, or demo occupy the second scene.
+its left edge. Card browsing is independent of the scroll timeline: previous/next
+arrows, clicking the reading face or exposed next sheet, and horizontal touch
+swipes turn pages. Vertical wheel/touch scrolling always moves through the site;
+it never changes the selected page or gets captured by the stack. Mouse movement
+over the cards adds only a restrained spring-smoothed tilt. Leaving the opening
+scene carries the entire stack into rising fog, regardless of which page is
+selected. No pages, captions, or demo occupy the second scene.
 Only afterward does the demo fade in separately. The product recedes to the right,
 remaining visible in the same landscape behind the closing invitation.
 There is no separate full-screen CTA panel or hard environment cut.
@@ -37,8 +41,8 @@ There is no cream veil over the environment during the product interval.
 Three restrained CSS fog banks drift behind and in front of the
 sheets; foreground fog covers their lower edges and thins during interaction.
 Backing pages sit at distinct Z depths without intersecting the reading face.
-Compact and reduced-motion layouts use the same page controls to switch without
-scroll-linked turning. The demo itself approaches from negative
+Compact layouts support the same controls and horizontal swipes, while reduced
+motion switches pages immediately and disables hover tilt. The demo approaches from negative
 Z, settles into a readable flat interval, and recedes to negative Z at the end.
 Inactive controls are inert, including the receded product in the final scene.
 
@@ -144,12 +148,24 @@ independent page, fog, product, and landscape transforms. The six-layout
 interaction suite also checks that the product persists visually at the end
 but remains inert, and that no full-screen backdrop veil returns.
 
-Latest page-turn evidence: `.tmp/landing/page-turns/` records all five readable
+Earlier page-turn evidence: `.tmp/landing/page-turns/` records all five readable
 faces on desktop, phone, and reduced motion, plus the fog exit, empty second
 scene, and separate demo entrance. Browser assertions verify forward/backward
 navigation, previous faces turning out of view, readable front-face width, and
 zero document/demo opacity during the quiet interval. The six-layout interaction
 suite, direct-link/reload smoke, frontend tests, typecheck, and build passed.
+
+Manual-card follow-up: `web/e2e/landing-cards.cjs` exercises desktop, touch-mobile,
+and reduced-motion browsers. It verifies wheel-over-stack scrolling without
+selection changes, hover-only tilt, face/exposed-sheet clicks, arrows and keyboard
+activation, horizontal swipes in both directions, vertical native touch scrolling,
+and whole-stack fog exit without per-card scroll transforms. Screenshots are in
+`.tmp/landing/manual-cards/`. All three runs passed, as did the existing six-layout
+demo interaction checks, direct-link/reload/resize smoke, typecheck, 128 frontend
+tests, production build, and `git diff --check`. Build warnings remain limited to
+existing tooling deprecations and large optional chunks.
+Run the browser regression against Vite with Playwright available to Node:
+`NODE_PATH=/path/to/playwright/node_modules node web/e2e/landing-cards.cjs`.
 
 Presentation limits: this is a CSS/DOM spatial composition, not an orbitable 3D
 scene. The public interaction is a deterministic demonstration using the real

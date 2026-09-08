@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { motion, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "framer-motion"
+import { motion, useMotionValueEvent, useScroll, useSpring, useTransform, type MotionValue } from "framer-motion"
 import { useReducedMotion } from "../../lib/useReducedMotion"
 import styles from "./marketing.module.css"
 
@@ -15,19 +15,23 @@ function useTimeline(progress: MotionValue<number>, points: number[], values: nu
     [...(points[0] > 0 ? [values[0]] : []), ...values, ...(points[points.length - 1] < 1 ? [values[values.length - 1]] : [])])
 }
 
-function DocumentPage({ index, progress, staticStory, active }: { index: number; progress: MotionValue<number>; staticStory: boolean; active: boolean }) {
-  const start = index * .07
-  const last = index === layers.length - 1
-  const points = index === 0 ? [0, .05, .07] : [0, start - .022, start, start + .05, start + .07]
-  const values = (back: number, front: number, turned: number) => index === 0 ? [front, front, turned] : [back, back, front, front, last ? front : turned]
-  const x = useTimeline(progress, points, values(index * 38, 0, -60))
-  const y = useTimeline(progress, points, values(-index * 9, 0, 12))
-  const z = useTimeline(progress, points, values(100 - index * 85, 100, 160))
-  const rotateY = useTimeline(progress, points, values(-10, -5, -108))
-  const rotateX = useTimeline(progress, points, values(3, 0, 4))
-  const rotateZ = useTimeline(progress, points, values(-5 + index, -1, -6))
-  const opacity = useTimeline(progress, points, values(1, 1, 0))
-  return <motion.div data-paper-layer={index} data-active={active} className={styles.documentPage} style={staticStory ? undefined : { x, y, z, rotateX, rotateY, rotateZ, opacity }}>
+function DocumentPage({ index, activeCard, staticStory, reduced, onNext }: { index: number; activeCard: number; staticStory: boolean; reduced: boolean; onNext: () => void }) {
+  const offset = index - activeCard
+  const active = offset === 0
+  const clickable = activeCard < layers.length - 1 && (active || (!staticStory && offset === 1))
+  return <motion.div data-paper-layer={index} data-active={active} className={styles.documentPage}
+    aria-hidden={!active && !clickable ? true : undefined}
+    initial={false}
+    animate={{
+      x: active ? 0 : offset < 0 ? -60 : offset * 38,
+      y: active ? 0 : offset < 0 ? 12 : -offset * 9,
+      z: active ? 100 : offset < 0 ? 160 : 100 - offset * 85,
+      rotateY: active ? (staticStory ? 0 : -5) : offset < 0 ? -108 : -10,
+      rotateX: active ? 0 : 3,
+      rotateZ: active ? (staticStory ? 0 : -1) : -5 + offset,
+      opacity: active || (!staticStory && offset > 0) ? 1 : 0,
+    }}
+    transition={{ duration: reduced ? 0 : .55, ease: [.22, .68, .2, 1] }}>
     <div className={styles.pageTopline}><span>{index ? "Lucent / " + layers[index] : "Biology / Reading notes"}</span><span>0{index + 1}</span></div>
     <p className={styles.paperKicker}>{index ? layers[index] : "Cellular quality control"}</p>
     <h2>{index === 0 ? <>When a cell<br/>finds damage.</> : index === 1 ? <>The essential<br/>idea.</> : index === 2 ? <>Detection is<br/>only the start.</> : index === 3 ? <>See the<br/>connection.</> : <>Put the idea<br/>to work.</>}</h2>
@@ -38,6 +42,7 @@ function DocumentPage({ index, progress, staticStory, active }: { index: number;
       <div className={styles.paperLines}><i/><i/><i/><i/></div>
       <div className={styles.paperNote}>{index === 0 ? "01 — Detect. Signal. Respond." : index === 4 ? "Reason from what you know." : "Same source. A clearer explanation."}</div>
     </>}
+    {clickable && <button type="button" className={styles.pageTurnTarget} aria-label={`Show ${layers[activeCard + 1]} page`} onClick={onNext} />}
   </motion.div>
 }
 
@@ -47,8 +52,11 @@ export function SpatialStory() {
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 950px), (max-height: 620px)").matches)
   const [beat, setBeat] = useState(0)
   const [loadDemo, setLoadDemo] = useState(false)
-  const [scrollCard, setScrollCard] = useState(0)
-  const [manualCard, setManualCard] = useState(0)
+  const [activeCard, setActiveCard] = useState(0)
+  const gesture = useRef<{ x: number; y: number } | null>(null)
+  const suppressClick = useRef(false)
+  const tiltX = useSpring(0, { stiffness: 160, damping: 25 })
+  const tiltY = useSpring(0, { stiffness: 160, damping: 25 })
   const { scrollYProgress: p } = useScroll({ target: ref, offset: ["start start", "end end"] })
   useEffect(() => {
     const query = window.matchMedia("(max-width: 950px), (max-height: 620px)")
@@ -68,7 +76,6 @@ export function SpatialStory() {
   }, [])
   useMotionValueEvent(p, "change", value => {
     setBeat(value < .42 ? 0 : value < .62 ? 1 : value < .89 ? 2 : 3)
-    setScrollCard(Math.min(4, Math.floor((value + .004) / .07)))
     if (value > .40) setLoadDemo(true)
   })
   const heroOpacity = useTimeline(p, [0, .32, .41], [1, 1, 0])
@@ -98,11 +105,8 @@ export function SpatialStory() {
   const fogBetweenX = useTimeline(p, [0, .5, 1], [-80, 80, 140])
   const scrollCueOpacity = useTimeline(p, [0, .1, .2], [1, 1, 0])
   const accessible = (active: boolean) => ({ "aria-hidden": !staticStory && !active ? true : undefined, ...(!staticStory && !active ? { inert: "" } : {}) })
-  const activeCard = staticStory ? manualCard : scrollCard
   function turnPage(direction: number) {
-    const next = Math.max(0, Math.min(layers.length - 1, activeCard + direction))
-    if (staticStory) setManualCard(next)
-    else if (ref.current) window.scrollTo({ top: ref.current.offsetTop + (ref.current.offsetHeight - window.innerHeight) * (next * .07 + .015), behavior: "smooth" })
+    setActiveCard(current => Math.max(0, Math.min(layers.length - 1, current + direction)))
   }
 
   return <main ref={ref} className={styles.spatialStory} data-static-story={staticStory} aria-label="From source material to understanding">
@@ -123,13 +127,39 @@ export function SpatialStory() {
         <div className={styles.heroActions}><Link to="/signup" className={styles.btnLight}>Get started <span aria-hidden="true">↗</span></Link><a href="#learn-in-action" className={styles.watchLink}><span aria-hidden="true">▷</span> Explore Lucent</a></div>
       </motion.div>
 
-      <motion.div className={styles.documentScene} style={staticStory ? undefined : { x: documentX, y: documentY, scale: documentScale, opacity: documentOpacity }} aria-hidden="true">
-        <div className={styles.documentStack}>
-          {[4,3,2,1,0].map(index => <DocumentPage key={index} index={index} progress={p} staticStory={staticStory} active={index === activeCard}/>)}
+      <motion.div className={styles.documentScene} {...accessible(beat === 0)} style={staticStory ? undefined : { x: documentX, y: documentY, scale: documentScale, opacity: documentOpacity }}>
+        <motion.div className={styles.documentStack} style={reduced || compact ? undefined : { rotateX: tiltX, rotateY: tiltY }}
+          onPointerMove={event => {
+            if (reduced || compact || event.pointerType !== "mouse") return
+            const bounds = event.currentTarget.getBoundingClientRect()
+            tiltX.set((.5 - (event.clientY - bounds.top) / bounds.height) * 5)
+            tiltY.set(((event.clientX - bounds.left) / bounds.width - .5) * 5)
+          }}
+          onPointerLeave={() => { tiltX.set(0); tiltY.set(0) }}
+          onPointerDown={event => {
+            suppressClick.current = false
+            gesture.current = event.pointerType === "touch" ? { x: event.clientX, y: event.clientY } : null
+          }}
+          onPointerCancel={() => { gesture.current = null }}
+          onPointerUp={event => {
+            const start = gesture.current
+            gesture.current = null
+            if (!start) return
+            const dx = event.clientX - start.x
+            const dy = event.clientY - start.y
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+              suppressClick.current = true
+              turnPage(dx < 0 ? 1 : -1)
+            }
+          }}
+          onClickCapture={event => {
+            if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false }
+          }}>
+          {[4,3,2,1,0].map(index => <DocumentPage key={index} index={index} activeCard={activeCard} staticStory={staticStory} reduced={reduced} onNext={() => turnPage(1)}/>)}
           <motion.div className={`${styles.fog} ${styles.fogBetween}`} style={{ x: fogBetweenX, z: -400 }} />
-        </div>
-        <div className={styles.capabilityLabels}><span>Simplify</span><span>Explain</span><span>Visualize</span><span>Practice</span><span>Learn</span></div>
-        <p className={styles.paperCaption}>From pages<br/>to progress.</p>
+        </motion.div>
+        <div className={styles.capabilityLabels} aria-hidden="true"><span>Simplify</span><span>Explain</span><span>Visualize</span><span>Practice</span><span>Learn</span></div>
+        <p className={styles.paperCaption} aria-hidden="true">From pages<br/>to progress.</p>
       </motion.div>
 
       <motion.div className={styles.pageControls} {...accessible(beat === 0)} style={staticStory ? undefined : { opacity: heroOpacity }} aria-label="Explore the source pages">
