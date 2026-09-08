@@ -126,7 +126,7 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     (!(["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(`${String(block.label ?? "")} ${String(block.title ?? "")}`)) || block.id === latestReframeId),
   )
   const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
-  const primaryVisual = visualBlocks.at(-1)
+  const primaryVisual = visualBlocks[visualBlocks.length - 1]
   const visualAnchor = visualBlocks[0]
   // Keep the current reframe attached to the Watch surface.  Scene blocks are
   // persisted in tutor-event order, but a reframe is part of the visual

@@ -98,7 +98,7 @@ These stable event fields can be aggregated by the deployment log collector to c
 - CI and Compose YAML parsed successfully; `docker compose config --quiet` accepted the production configuration with the checked-in example values.
 - Live local backend returned HTTP 200 from both `/healthz` and `/readyz` against PostgreSQL at migration head.
 - Alembic current and repository heads both report `0010_persist_learning_blocks (head)`.
-- Docker CLI is installed, but local image builds could not run because Docker Desktop's daemon was unavailable while the Mac remained locked. The exact build definitions and resolved Compose graph were validated; Phase 5 retained the image smoke as a documented release-environment gate after confirming the daemon remained externally unavailable.
+- Docker image execution was completed in the deployment-validation follow-up described below. The earlier daemon-availability gap is closed.
 
 ### Phase 5 final validation evidence
 
@@ -118,7 +118,27 @@ These stable event fields can be aggregated by the deployment log collector to c
 - Accepted complete two-domain evidence: `.tmp/learn-golden/rag-v1/pendulum/` and `.tmp/learn-golden/rag-v1/satire/`; final post-cleanup smoke is under `.tmp/learn-golden/rag-v1/pendulum-final-post-cleanup/`, and the fresh Phase 5 smoke is under `.tmp/learn-golden/rag-v1/production-phase5-pendulum/`.
 - Runtime telemetry was observed for authenticated browser requests, Anthropic section generation, Voyage document embedding, source-index readiness, and readiness checks. Logged fields contained bounded operation metadata and timings, not source text or prompts.
 - `git diff --check`: passed for intended tracked work.
-- Docker image execution could not be performed locally because the installed Docker Desktop daemon remained unavailable. The Dockerfiles, resolved Compose graph, migration ordering, health gates, and static-server configuration were validated. This is an environment limitation, not an observed image-definition failure; the first deployment/CI image build should perform the documented image smoke.
+- Docker image build/execution, release migration, strict-production startup, health/readiness, production frontend, and containerized browser acceptance were completed in the deployment-validation follow-up below.
+
+### Phase 5 deployment-validation follow-up
+
+- A clean `--no-cache` build exposed and fixed two deployment-only defects:
+  - the npm lockfile omitted the platform packages required by the pinned Node 22/npm 10 build environment, so `npm ci` was not reproducible in the image;
+  - the Python slim image lacked the `libpq` runtime required by the pinned psycopg package, preventing Alembic and the API from connecting to PostgreSQL.
+- The lockfile was regenerated in an isolated pinned Node 22 container. A clean host `npm ci`, typecheck, complete frontend suite, and production build all pass.
+- The backend image now installs only the required `libpq5` runtime package before installing the unchanged pinned Python dependencies.
+- All backend, migration, and frontend images then built successfully from a clean no-cache state.
+- An isolated Compose project created a new PostgreSQL volume and applied every migration from the empty schema through `0010_persist_learning_blocks`; the migration container exited `0`, and an independent container check reported `0010_persist_learning_blocks (head)`.
+- The documented one-API stack reached healthy state. Containerized `/healthz`, `/readyz`, frontend `/`, and frontend `/healthz` all returned HTTP 200.
+- A second temporary API container using strict `APP_ENV=production`, secure cookies, HTTPS public origins, disabled development auth/legacy claim, and inert smoke OAuth/provider values also started successfully and returned HTTP 200 from `/healthz` and `/readyz` against the migrated database.
+- The production-built Nginx frontend completed a headless browser smoke through the containerized API/database using only the authorized CC0 Pendulum fixture:
+  - development authorization was obtained through the test-only API path; `/auth/me` then succeeded;
+  - browser upload produced document `1`, generation `faaa917e-a1c5-4dbb-89cf-ac80a2144613`, a `READY` source index, and substantive source-grounded pendulum notes;
+  - fresh Learn session `1301cd63-e452-4fe2-a19c-84fc64d94ddc` rendered grounded explanation, `Energy States Through a Complete Swing`, and active ordering practice;
+  - an intentional wrong response advanced revision 1 to 2 and produced teaching-before-retest plus a new visual-linked repair interaction;
+  - Ask `Show me visually` advanced revision 2 to 3, replaced the main visual with `Relationship view: Energy States Through a Complete Swing`, intentionally preserved the repair interaction, and the exact revision/interaction/visual survived browser reload.
+- Container logs showed clean PostgreSQL initialization, migration completion, Uvicorn startup, Nginx startup, repeated successful readiness probes, successful Anthropic note generation, successful Voyage indexing/retrieval, and successful Learn/Ask HTTP responses. Two tutor-decision provider outputs reached the existing structured-output limit; both emitted bounded telemetry and used the validated deterministic fallback while the learner request completed successfully. No startup exception, migration error, readiness failure, crash loop, or repeated HTTP failure remained after the fixes.
+- Evidence is preserved under `.tmp/learn-golden/rag-v1/production-container-smoke/`. The isolated API/web/PostgreSQL stack and disposable database volume were shut down and removed cleanly after validation.
 
 ## Production audit disposition
 
@@ -153,14 +173,15 @@ The audit's security/ownership, async ingestion, batch indexing, and production 
 - Quiz source association currently performs per-question retrieval. Paid-tier retry tuning makes it functionally acceptable for initial beta, but telemetry should determine whether batching is warranted.
 - Embeddings remain JSONB and exact retrieval loads full persisted block entities. Both are measured as negligible at present scale and should be revisited only with evidence.
 - The production frontend build emits a large-chunk warning. It does not affect correctness; targeted code splitting can be considered after launch metrics identify a user impact.
-- Docker Desktop was unavailable for a local image-run smoke. Run the documented image build/migrate/readiness smoke in the actual release environment before exposing traffic.
+- Tutor-decision model output can occasionally reach its structured-output limit. The bounded deterministic fallback is functioning and observable; monitor this event rate in production before changing token budgets or prompts.
+- A clean npm install currently reports four transitive dependency audit findings (three moderate, one high). No automatic breaking upgrade was applied during deployment validation; review the dependency advisories as part of routine release dependency management.
 
 ### External, privacy, legal, and operator launch gates
 
 - Confirm Anthropic and Voyage processing, retention, regional, and contractual terms for real student documents. Only checked-in authorized/CC0 fixtures were sent during development acceptance.
 - Provision production Anthropic and paid Voyage credentials through the deployment secret store; do not copy development credentials into images or source control.
 - Configure the final HTTPS web/API origins, strong application secrets, production Google OAuth redirect URI/client credentials, and the exact CORS/CSRF allowlists.
-- Provision and back up the managed PostgreSQL database, run the migration release step, build/run both images, and verify `/healthz`, `/readyz`, sign-in, upload, Learn, and rollback procedures on the chosen host.
+- Provision and back up the managed PostgreSQL database, run the already-validated migration/image release path, and verify `/healthz`, `/readyz`, sign-in, upload, Learn, and rollback procedures on the chosen host.
 - Enable a production log collector/alert policy over the structured events added in Phase 3 and establish an operator for provider/fallback, ingestion-failure, readiness, and latency alerts.
 
 ## Preserved unrelated workspace state
@@ -169,4 +190,4 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
 
 ## Final checkpoint
 
-Phases 1–5 are complete. The next action is operational release preparation: satisfy the external/privacy gates above, run the documented image smoke on a host with a working Docker daemon, and deploy the accepted single-API topology. No further productionization feature work is part of this master goal.
+Phases 1–5 and the local container deployment smoke are complete. The next action is operational release preparation: satisfy the external/privacy gates above and deploy the accepted single-API topology on the chosen host. No further productionization feature work is part of this master goal.
