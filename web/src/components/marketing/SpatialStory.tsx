@@ -16,13 +16,14 @@ function useTimeline(progress: MotionValue<number>, points: number[], values: nu
 }
 
 function DocumentPage({ index, progress }: { index: number; progress: MotionValue<number> }) {
-  const x = useTimeline(progress, [0, .12, .32, .49, .61], [index * 28, index * 28, (index - 2) * 87, index === 3 ? -30 : (index - 2) * 52, 0])
-  const y = useTimeline(progress, [0, .12, .32, .49, .61], [-index * 10, -index * 10, (index - 2) * -22, (index - 2) * -10, 0])
-  const z = useTimeline(progress, [0, .12, .32, .49, .61], [100 - index * 48, 100 - index * 48, 180 - index * 90, index === 3 ? 130 : -60 - index * 35, 0])
-  const rotateY = useTimeline(progress, [0, .32, .49, .61], [-23, -34 + index * 3, -14, 0])
+  const x = useTimeline(progress, [0, .12, .32, .49, .61], [index * 48, index * 58, (index - 2) * 115, index === 3 ? -30 : (index - 2) * 170, 0])
+  const y = useTimeline(progress, [0, .12, .32, .49, .61], [-index * 16, -index * 21, (index - 2) * -40, (index - 2) * -45, 0])
+  const z = useTimeline(progress, [0, .12, .32, .49, .61], [140 - index * 105, 180 - index * 120, 270 - index * 155, index === 3 ? 200 : -160 - index * 100, 0])
+  const rotateY = useTimeline(progress, [0, .32, .49, .558, .61], [-29 + index * 4, -43 + index * 8, index === 3 ? -12 : -35 + index * 9, index === 3 ? 78 : -30, 78])
+  const rotateX = useTimeline(progress, [0, .32, .49, .61], [4 - index * 2, 9 - index * 4, 0, 0])
   const rotateZ = useTimeline(progress, [0, .32, .61], [-7 + index * 1.1, -8 + index * 2, 0])
-  const opacity = useTimeline(progress, [.50, .55, .58], [1, index === 3 ? 1 : 0, 0])
-  return <motion.div data-paper-layer={index} className={styles.documentPage} style={{ x, y, z, rotateY, rotateZ, opacity }}>
+  const opacity = useTimeline(progress, [.50, .55, .558, .563], [1, index === 3 ? 1 : 0, index === 3 ? 1 : 0, 0])
+  return <motion.div data-paper-layer={index} className={styles.documentPage} style={{ x, y, z, rotateX, rotateY, rotateZ, opacity }}>
     <div className={styles.pageTopline}><span>{index ? "Lucent / " + layers[index] : "Biology / Reading notes"}</span><span>0{index + 1}</span></div>
     <p className={styles.paperKicker}>{index ? layers[index] : "Cellular quality control"}</p>
     <h2>{index === 0 ? <>When a cell<br/>finds damage.</> : index === 1 ? <>The essential<br/>idea.</> : index === 2 ? <>Detection is<br/>only the start.</> : index === 3 ? <>See the<br/>connection.</> : <>Put the idea<br/>to work.</>}</h2>
@@ -68,18 +69,27 @@ export function SpatialStory() {
   const clarityOpacity = useTimeline(p, [.39, .44, .53, .59], [0, 1, 1, 0])
   const documentX = useTimeline(p, [0, .34, .49, .65], [0, 0, 40, -220])
   const documentScale = useTimeline(p, [0, .36, .50, .65], [1, .78, .85, 1.25])
-  const documentOpacity = useTimeline(p, [.54, .58], [1, 0])
-  const productOpacity = useTimeline(p, [.54, .575, .85, .92], [0, 1, 1, 0])
-  const productScale = useTimeline(p, [.54, .68, .85, .95], [.38, 1, 1, .78])
-  const productRotateY = useTimeline(p, [.54, .68, .85, .95], [-18, 0, 0, 8])
-  const productX = useTimeline(p, [.54, .68, .85, .95], [180, 0, 0, -70])
-  const productY = useTimeline(p, [.54, .68, .85, .95], [0, 0, 0, -90])
-  const endingOpacity = useTimeline(p, [.89, .96], [0, 1])
-  const landscapeScale = useTimeline(p, [0, .55, 1], [1.02, 1.10, 1.02])
-  const landscapeY = useTimeline(p, [0, 1], [0, -24])
-  const foregroundY = useTimeline(p, [0, .65, 1], [0, 100, 10])
-  const foregroundScale = useTimeline(p, [0, .65, 1], [1.02, 1.20, 1.04])
-  const veilOpacity = useTimeline(p, [0, .5, .65, .85, 1], [0, 0, .88, .88, 0])
+  const documentOpacity = useTimeline(p, [.558, .563], [1, 0])
+  // Pass the visual sheet edge-on into the product surface; don't dissolve
+  // two readable interfaces over each other during the handoff.
+  const productOpacity = useTimeline(p, [.558, .563], [0, 1])
+  const productScale = useTimeline(p, [.558, .68, .85, 1], [.75, 1, 1, .55])
+  const productZ = useTimeline(p, [.558, .68, .85, 1], [-140, 0, 0, -500])
+  const productRotateY = useTimeline(p, [.558, .68, .85, 1], [78, 0, 0, -26])
+  const productX = useTimeline(p, [.558, .68, .85, 1], [130, 0, 0, 450])
+  const productY = useTimeline(p, [.54, .68, .85, 1], [30, 0, 0, 30])
+  const endingOpacity = useTimeline(p, [.94, 1], [0, 1])
+  // A continuous forward/right camera drift, never a backdrop reset at the demo.
+  const landscapeScale = useTimeline(p, [0, .5, 1], [1.04, 1.17, 1.32])
+  const landscapeY = useTimeline(p, [0, 1], [0, -48])
+  const landscapeX = useTimeline(p, [0, 1], [0, -65])
+  const foregroundY = useTimeline(p, [0, 1], [0, 190])
+  const foregroundScale = useTimeline(p, [0, 1], [1.04, 1.60])
+  const fogFarX = useTimeline(p, [0, 1], [-100, 160])
+  const fogNearX = useTimeline(p, [0, .5, 1], [100, -90, -280])
+  const fogNearY = useTimeline(p, [0, 1], [30, -90])
+  const fogNearOpacity = useTimeline(p, [0, .5, .68, .85, 1], [.48, .55, .14, .14, .48])
+  const fogBetweenX = useTimeline(p, [0, .5, 1], [-80, 80, 140])
   const scrollCueOpacity = useTimeline(p, [0, .1, .2], [1, 1, 0])
   const accessible = (active: boolean) => ({ "aria-hidden": !staticStory && !active ? true : undefined, ...(!staticStory && !active ? { inert: "" } : {}) })
 
@@ -88,10 +98,10 @@ export function SpatialStory() {
     {!staticStory && <div id="learn-in-action" className={styles.demoAnchor} tabIndex={-1} />}
     <div className={styles.storySticky}>
       <div className={styles.environment} aria-hidden="true">
-        <motion.img className={styles.landscape} src="/lucent-landscape.jpg" width="1672" height="941" fetchPriority="high" alt="" style={staticStory ? undefined : { scale: landscapeScale, y: landscapeY }} />
+        <motion.img className={styles.landscape} src="/lucent-landscape.jpg" width="1672" height="941" fetchPriority="high" alt="" style={staticStory ? undefined : { scale: landscapeScale, x: landscapeX, y: landscapeY }} />
         <div className={styles.landscapeShade}/>
         <motion.div className={styles.foreground} style={staticStory ? undefined : { scale: foregroundScale, y: foregroundY }} />
-        <motion.div className={styles.productVeil} style={staticStory ? undefined : { opacity: veilOpacity }} />
+        <motion.div className={`${styles.fog} ${styles.fogFar}`} style={staticStory ? undefined : { x: fogFarX }} />
       </div>
 
       <motion.div className={`${styles.storyCopy} ${styles.heroStoryCopy}`} {...accessible(beat === 0)} style={staticStory ? undefined : { opacity: heroOpacity }}>
@@ -102,7 +112,10 @@ export function SpatialStory() {
       </motion.div>
 
       <motion.div className={styles.documentScene} style={staticStory ? undefined : { x: documentX, scale: documentScale, opacity: documentOpacity }} aria-hidden="true">
-        <div className={styles.documentStack}>{[4,3,2,1,0].map(index => <DocumentPage key={index} index={index} progress={p}/>)}</div>
+        <div className={styles.documentStack}>
+          {[4,3,2,1,0].map(index => <DocumentPage key={index} index={index} progress={p}/>)}
+          <motion.div className={`${styles.fog} ${styles.fogBetween}`} style={{ x: fogBetweenX, z: 30 }} />
+        </div>
         <div className={styles.capabilityLabels}><span>Simplify</span><span>Explain</span><span>Visualize</span><span>Practice</span><span>Learn</span></div>
         <p className={styles.paperCaption}>From pages<br/>to progress.</p>
       </motion.div>
@@ -119,10 +132,12 @@ export function SpatialStory() {
         <p className={styles.storyBody}>Read it. See it. Try it.<br/>Keep the explanation beside the question, so understanding has room to grow.</p>
       </motion.div>
 
-      <motion.section id={staticStory ? "learn-in-action" : undefined} tabIndex={-1} className={styles.productStage} {...accessible(beat === 3)} aria-label="Interactive Lucent preview" style={staticStory ? undefined : { opacity: productOpacity, scale: productScale, rotateY: productRotateY, x: productX, y: productY }}>
+      <motion.section id={staticStory ? "learn-in-action" : undefined} tabIndex={-1} className={styles.productStage} {...accessible(beat === 3)} aria-label="Interactive Lucent preview" style={staticStory ? undefined : { opacity: productOpacity, scale: productScale, rotateY: productRotateY, x: productX, y: productY, z: productZ }}>
         <div className={styles.productStageIntro}><div><p className={styles.eyebrowLight}>See Lucent in action</p><h2>From reading <em>to reasoning.</em></h2></div><p>Try an answer. Ask for another explanation.<br/>See what happens when the idea clicks.</p></div>
         {(loadDemo || staticStory) && <Suspense fallback={<div className={styles.demoLoading} role="status">Opening the learning preview…</div>}><ProductDemo /></Suspense>}
       </motion.section>
+
+      <motion.div className={`${styles.fog} ${styles.fogNear}`} aria-hidden="true" style={staticStory ? undefined : { x: fogNearX, y: fogNearY, opacity: fogNearOpacity }} />
 
       <motion.section className={styles.resolutionCopy} {...accessible(beat === 4)} aria-label="Go further with Lucent" style={staticStory ? undefined : { opacity: endingOpacity }}>
         <p className={styles.eyebrowLight}>Go further</p>

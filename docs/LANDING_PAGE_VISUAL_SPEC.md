@@ -14,8 +14,9 @@
 One sticky composition spans five beats across a 600svh desktop timeline:
 source material, page separation, structured understanding, the interactive
 Lucent learning surface, and the closing invitation. The source sheets open
-at different Z depths; the visual explanation sheet comes forward and expands
-into the product surface. The product then recedes into the same landscape.
+at different Z depths; the visual explanation sheet comes forward and turns
+edge-on into the product surface. The product then recedes to the right,
+remaining visible in the same landscape behind the closing invitation.
 There is no separate full-screen CTA panel or hard environment cut.
 
 ## Motion and 3D strategy
@@ -27,8 +28,14 @@ loop and keeps product text crisp when the composition resolves into Lucent.
 Every timeline explicitly includes progress 0 and 1. Browser inspection caught
 native scroll animations interpolating back to their initial opacity when the
 last authored keyframe ended early; full-range endpoints prevent ghosted copy.
-The landscape and masked foreground move at different rates. The interactive
-preview is flat during its reading interval, and inactive controls are inert.
+The landscape and masked foreground move at different rates along a continuous
+forward/right camera drift, without returning to the opening camera position.
+There is no cream veil over the environment during the product interval.
+Three restrained CSS fog banks drift behind, between, and in front of the
+sheets; foreground fog thins during interaction. Pages separate by up to 155px
+in Z and rotate independently on X/Y/Z. The demo itself approaches from negative
+Z, settles into a readable flat interval, and recedes to negative Z at the end.
+Inactive controls are inert, including the receded product in the final scene.
 
 ## Real product reuse
 
@@ -113,6 +120,23 @@ plus `report.json` and `smoke.json`. Inspection/acceptance scripts remain in
 Validation: `npm run typecheck` passed; `npm test` passed (18 files, 128 tests);
 `npm run build` passed; `git diff --check` passed. Existing Vite plugin
 deprecation warnings and large optional application-chunk warnings remain.
+
+### Spatial-continuity refinement
+
+Live before/after browser inspection confirmed the previous cream overlay
+visually disconnected the demo from the landscape. It is now removed, with
+landscape visible around a smaller paper-edged demo. A detailed 13-position
+scroll inspection also caught overlapping source/demo text during a dissolve;
+the handoff now occurs while both surfaces are nearly edge-on. Closing copy
+waits for the receding demo to clear it. The static mobile treatment also drops
+the isolated cream section backdrop. Fog and camera movement are disabled for
+compact/reduced-motion layouts.
+
+Evidence in `.tmp/landing/spatial/`: intermediate transition screenshots,
+`fog-on.png` / `fog-off.png` rendered comparison, and `state.json` recording
+independent page, fog, product, and landscape transforms. The six-layout
+interaction suite also checks that the product persists visually at the end
+but remains inert, and that no full-screen backdrop veil returns.
 
 Presentation limits: this is a CSS/DOM spatial composition, not an orbitable 3D
 scene. The public interaction is a deterministic demonstration using the real
