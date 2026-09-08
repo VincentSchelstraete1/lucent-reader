@@ -26,7 +26,7 @@ const ProductDemo = lazy(() =>
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SEEDED RNG — deterministic so instance jitter doesn't change on re-render
+// SEEDED RNG
 // ─────────────────────────────────────────────────────────────────────────────
 function seededRng(seed: number): () => number {
   let s = seed >>> 0
@@ -39,7 +39,7 @@ function seededRng(seed: number): () => number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAMERA SPLINE — 8 keyframes, scroll progress → camera position + lookAt + FOV
+// CAMERA SPLINE — Z-coordinates pulled back for proper framing
 // ─────────────────────────────────────────────────────────────────────────────
 interface CamKf {
   p:  number
@@ -50,17 +50,18 @@ interface CamKf {
 
 const CAM: CamKf[] = [
   //   p     pos                        lookAt                    fov
-  { p:0.00, px:  0, py:85, pz: 200, lx:  0, ly:28, lz: -80, fov:65 },
-  { p:0.15, px:  0, py:55, pz: 155, lx:  0, ly:28, lz: -80, fov:67 },
-  { p:0.30, px:  0, py:22, pz:  90, lx:  0, ly:28, lz: -80, fov:70 },
-  { p:0.45, px:  0, py: 5, pz:   8, lx:  0, ly:28, lz: -80, fov:75 },
-  { p:0.52, px:  0, py:14, pz: -60, lx:  0, ly:14, lz:-130, fov:68 },
-  { p:0.65, px:  0, py:14, pz:-110, lx:  0, ly:14, lz:-175, fov:62 },
-  { p:0.82, px:  0, py:14, pz:-165, lx:  0, ly:10, lz:-210, fov:58 },
-  { p:1.00, px: -6, py:38, pz:-115, lx:  0, ly: 4, lz:-160, fov:55 },
+  { p:0.00, px:  0, py:85, pz: 220, lx:  0, ly:28, lz: -80, fov:65 },
+  { p:0.15, px:  0, py:55, pz: 170, lx:  0, ly:28, lz: -80, fov:67 },
+  { p:0.30, px:  0, py:22, pz: 110, lx:  0, ly:28, lz: -80, fov:70 },
+  { p:0.45, px:  0, py: 5, pz:  30, lx:  0, ly:28, lz: -80, fov:75 },
+  // Stage 3: Canyon entrance (Z=-40 instead of -60)
+  { p:0.52, px:  0, py:16, pz: -40, lx:  0, ly:16, lz:-140, fov:68 },
+  // Stage 3: Canyon deep (Z=-75 instead of -110 to keep portal framed)
+  { p:0.65, px:  0, py:16, pz: -75, lx:  0, ly:16, lz:-160, fov:62 },
+  { p:0.82, px:  0, py:16, pz:-135, lx:  0, ly:12, lz:-210, fov:58 },
+  { p:1.00, px: -6, py:38, pz:-100, lx:  0, ly: 6, lz:-170, fov:55 },
 ]
 
-// Module-level temp vectors — safe here because useFrame callbacks are sequential
 const _tp = new THREE.Vector3()
 const _tl = new THREE.Vector3()
 
@@ -74,7 +75,7 @@ function applyCamKf(t: number, camera: THREE.Camera) {
   const b = kfs[Math.min(ai + 1, kfs.length - 1)]
   const span = b.p - a.p
   const lt   = span > 0 ? Math.max(0, Math.min(1, (t - a.p) / span)) : 1
-  const s    = lt * lt * (3 - 2 * lt)           // smoothstep
+  const s    = lt * lt * (3 - 2 * lt)
 
   _tp.set(a.px+(b.px-a.px)*s, a.py+(b.py-a.py)*s, a.pz+(b.pz-a.pz)*s)
   _tl.set(a.lx+(b.lx-a.lx)*s, a.ly+(b.ly-a.ly)*s, a.lz+(b.lz-a.lz)*s)
@@ -88,9 +89,6 @@ function applyCamKf(t: number, camera: THREE.Camera) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ScrollCamera — moves the R3F camera according to scroll progress
-// ─────────────────────────────────────────────────────────────────────────────
 function ScrollCamera({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   const { camera } = useThree()
   useEffect(() => { applyCamKf(0, camera) }, [camera])
@@ -99,14 +97,14 @@ function ScrollCamera({ scrollRef }: { scrollRef: React.MutableRefObject<number>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FogController — animates THREE.FogExp2 density through the 4 stages
+// FogController — updated to matching photographic alpine misty colors
 // ─────────────────────────────────────────────────────────────────────────────
 function FogController({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   const { scene } = useThree()
 
   useEffect(() => {
-    scene.fog        = new THREE.FogExp2(0xb8cdd6, 0.006)
-    scene.background = new THREE.Color(0x8ba0ae)
+    scene.fog        = new THREE.FogExp2("#d5dcde", 0.008)
+    scene.background = new THREE.Color("#c1cdd4") // Bright misty backdrop
     return () => { scene.fog = null; scene.background = null }
   }, [scene])
 
@@ -114,10 +112,10 @@ function FogController({ scrollRef }: { scrollRef: React.MutableRefObject<number
     if (!(scene.fog instanceof THREE.FogExp2)) return
     const t = scrollRef.current
     let d: number
-    if      (t < 0.15) d = 0.006
-    else if (t < 0.45) d = THREE.MathUtils.lerp(0.006, 0.024, (t - 0.15) / 0.30)
-    else if (t < 0.55) d = THREE.MathUtils.lerp(0.024, 0.003, (t - 0.45) / 0.10)
-    else               d = 0.003
+    if      (t < 0.15) d = 0.008
+    else if (t < 0.45) d = THREE.MathUtils.lerp(0.008, 0.020, (t - 0.15) / 0.30)
+    else if (t < 0.55) d = THREE.MathUtils.lerp(0.020, 0.004, (t - 0.45) / 0.10)
+    else               d = 0.004
     scene.fog.density = d
   })
 
@@ -125,44 +123,36 @@ function FogController({ scrollRef }: { scrollRef: React.MutableRefObject<number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SkyDome — landscape JPEG wrapped on the inside of a large sphere
+// SkyDome — ignoring fog so it acts as a true skybox
 // ─────────────────────────────────────────────────────────────────────────────
 function SkyDome() {
   const tex = useTexture("/lucent-landscape.jpg")
   useMemo(() => { tex.colorSpace = THREE.SRGBColorSpace }, [tex])
   return (
     <mesh>
-      <sphereGeometry args={[480, 32, 16]} />
-      <meshBasicMaterial map={tex} side={THREE.BackSide} />
+      <sphereGeometry args={[480, 64, 32]} />
+      <meshBasicMaterial map={tex} side={THREE.BackSide} fog={false} toneMapped={false} />
     </mesh>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LakePlane — highly reflective water surface at y = 0
-// ─────────────────────────────────────────────────────────────────────────────
 function LakePlane() {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[600, 600]} />
-      <meshStandardMaterial color="#253545" metalness={0.90} roughness={0.05} />
+      <planeGeometry args={[800, 800]} />
+      <meshStandardMaterial color="#253545" metalness={0.92} roughness={0.08} />
     </mesh>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PaperMonolith — skyscraper-scale tower of 250 instanced paper sheets
-//
-// Each sheet is a thin BoxGeometry (width × depth, very small height).
-// They are stacked vertically with tiny random jitter in X/Z/rotY so the
-// stack reads as a real physical ream viewed from the side (paper edges)
-// or from above (top page visible).
+// PaperMonolith
 // ─────────────────────────────────────────────────────────────────────────────
 const MONO_N     = 250
-const MONO_W     = 3.2     // sheet width  (X)
-const MONO_D     = 2.4     // sheet depth  (Z)
-const MONO_T     = 0.022   // sheet thickness (Y)
-const MONO_STEP  = 0.22    // Y spacing between sheet centres → total height ≈ 55 units
+const MONO_W     = 3.2
+const MONO_D     = 2.4
+const MONO_T     = 0.022
+const MONO_STEP  = 0.22
 
 function PaperMonolith() {
   const ref = useRef<THREE.InstancedMesh>(null!)
@@ -179,13 +169,13 @@ function PaperMonolith() {
 
     for (let i = 0; i < MONO_N; i++) {
       pos.set(
-        (rng() - 0.5) * 0.14,           // tiny X jitter
-        i * MONO_STEP + 0.5,             // stack from y≈0.5 upward
-        -80 + (rng() - 0.5) * 0.12,     // tiny Z jitter around world z=-80
+        (rng() - 0.5) * 0.14,
+        i * MONO_STEP + 0.5,
+        -80 + (rng() - 0.5) * 0.12,
       )
       euler.set(
         (rng() - 0.5) * 0.006,
-        (rng() - 0.5) * 0.042,          // slight twist per sheet
+        (rng() - 0.5) * 0.042,
         (rng() - 0.5) * 0.006,
       )
       quat.setFromEuler(euler)
@@ -196,30 +186,24 @@ function PaperMonolith() {
   }, [rng])
 
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, MONO_N]} castShadow>
+    <instancedMesh ref={ref} args={[undefined, undefined, MONO_N]} castShadow receiveShadow>
       <boxGeometry args={[MONO_W, MONO_T, MONO_D]} />
-      <meshStandardMaterial color="#ece9de" roughness={0.88} metalness={0.02} />
+      <meshStandardMaterial color="#f7f7f5" roughness={0.92} metalness={0} />
     </instancedMesh>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PaperCanyon — 36 tall sheets arranged radially → interior atrium (Stage 3)
-//
-// The sheets form a cylinder of radius 16 centred on the camera path.
-// A warm point light above creates the glowing-cathedral look from the refs.
-// All sheets share one material so opacity can be updated in one call.
+// PaperCanyon — elegant, smooth curved sheets framing the portal
 // ─────────────────────────────────────────────────────────────────────────────
-const CANYON_N  = 36
-const CANYON_R  = 16
-const CANYON_CZ = -125    // world Z of canyon centre
+const CANYON_CZ = -140
 
 function PaperCanyon({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   const groupRef = useRef<THREE.Group>(null!)
   const mat = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: "#ece9de", roughness: 0.88, metalness: 0.02,
+        color: "#f7f7f5", roughness: 0.94, metalness: 0.0,
         side: THREE.DoubleSide, transparent: true, opacity: 0,
       }),
     [],
@@ -231,71 +215,50 @@ function PaperCanyon({ scrollRef }: { scrollRef: React.MutableRefObject<number> 
     if      (t > 0.48 && t < 0.57) o = (t - 0.48) / 0.09
     else if (t >= 0.57 && t <= 0.80) o = 1
     else if (t > 0.80 && t < 0.90)  o = 1 - (t - 0.80) / 0.10
-    mat.opacity = o * 0.94
+    mat.opacity = o * 1.0
     if (groupRef.current) groupRef.current.visible = o > 0.004
   })
 
-  const sheets = useMemo(
-    () =>
-      Array.from({ length: CANYON_N }, (_, i) => {
-        const θ = (i / CANYON_N) * Math.PI * 2
-        return {
-          key: i,
-          pos: [
-            Math.sin(θ) * CANYON_R,
-            14,
-            Math.cos(θ) * CANYON_R + CANYON_CZ,
-          ] as [number, number, number],
-          rot: [0, -θ, 0] as [number, number, number],
-        }
-      }),
-    [],
-  )
+  // 6 large sweeping curved sheets (3 left, 3 right) framing the center
+  const sheets = useMemo(() => [
+    // Left sheets (radius, height, thetaStart, thetaLength, y, rotY)
+    { r: 24, h: 56, ts: Math.PI * 0.65, tl: Math.PI * 0.30, y: 14, ry: -0.1 },
+    { r: 28, h: 64, ts: Math.PI * 0.60, tl: Math.PI * 0.35, y: 18, ry:  0.0 },
+    { r: 34, h: 74, ts: Math.PI * 0.55, tl: Math.PI * 0.40, y: 24, ry:  0.1 },
+    // Right sheets
+    { r: 24, h: 56, ts: Math.PI * 0.05, tl: Math.PI * 0.30, y: 14, ry:  0.1 },
+    { r: 28, h: 64, ts: Math.PI * 0.05, tl: Math.PI * 0.35, y: 18, ry:  0.0 },
+    { r: 34, h: 74, ts: Math.PI * 0.05, tl: Math.PI * 0.40, y: 24, ry: -0.1 },
+  ], [])
 
   return (
-    <group ref={groupRef}>
-      {sheets.map(s => (
-        <mesh key={s.key} position={s.pos} rotation={s.rot} material={mat}>
-          <planeGeometry args={[22, 44]} />
+    <group ref={groupRef} position={[0, 0, CANYON_CZ]}>
+      {sheets.map((s, i) => (
+        <mesh key={i} position={[0, s.y, 0]} rotation={[0, s.ry, 0]} castShadow receiveShadow material={mat}>
+          <cylinderGeometry args={[s.r, s.r, s.h, 32, 1, true, s.ts, s.tl]} />
         </mesh>
       ))}
-      {/* Warm top light — creates the "glowing opening" from the reference */}
-      <pointLight
-        position={[0, 42, CANYON_CZ]}
-        intensity={20}
-        color="#fff8e2"
-        distance={100}
-        decay={2}
-      />
-      {/* Cooler fill light from below */}
-      <pointLight
-        position={[0, -4, CANYON_CZ]}
-        intensity={5}
-        color="#c8dff0"
-        distance={45}
-        decay={2}
-      />
+      
+      {/* Warm top ambient occlusion light catching the upper curves */}
+      <pointLight position={[0, 45, 10]} intensity={18} color="#fffaf0" distance={120} decay={2} castShadow />
+      <pointLight position={[0, -10, 20]} intensity={6} color="#dbe5eb" distance={80} decay={2} />
     </group>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PaperFlower — fanned-open sculpture over the alpine lake (Stage 4)
-//
-// 44 sheets arranged radially like PaperCanyon but with an upward tilt (rotX)
-// that increases toward the outer sheets, creating an open-book / flower effect
-// matching the Stage 4 reference image (the sculptural tree over the fjord).
+// PaperFlower
 // ─────────────────────────────────────────────────────────────────────────────
-const FLOWER_N  = 44
-const FLOWER_R  = 22
-const FLOWER_CZ = -162    // world Z of flower centre
+const FLOWER_N  = 24
+const FLOWER_R  = 28
+const FLOWER_CZ = -180
 
 function PaperFlower({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   const groupRef = useRef<THREE.Group>(null!)
   const mat = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color: "#ece9de", roughness: 0.85, metalness: 0.02,
+        color: "#f7f7f5", roughness: 0.90, metalness: 0.0,
         side: THREE.DoubleSide, transparent: true, opacity: 0,
       }),
     [],
@@ -304,7 +267,7 @@ function PaperFlower({ scrollRef }: { scrollRef: React.MutableRefObject<number> 
   useFrame(() => {
     const t = scrollRef.current
     const o = t < 0.78 ? 0 : t < 0.88 ? (t - 0.78) / 0.10 : 1
-    mat.opacity = o * 0.90
+    mat.opacity = o * 1.0
     if (groupRef.current) groupRef.current.visible = o > 0.004
   })
 
@@ -312,13 +275,12 @@ function PaperFlower({ scrollRef }: { scrollRef: React.MutableRefObject<number> 
     () =>
       Array.from({ length: FLOWER_N }, (_, i) => {
         const θ = (i / FLOWER_N) * Math.PI * 2
-        // Progressive upward tilt: side sheets tilt more than front/back sheets
-        const tiltX = -(Math.abs(Math.sin(θ * 0.5)) * 0.55 + 0.12)
+        const tiltX = -(Math.abs(Math.sin(θ * 0.5)) * 0.6 + 0.15)
         return {
           key: i,
           pos: [
             Math.sin(θ) * FLOWER_R,
-            2,
+            6,
             Math.cos(θ) * FLOWER_R + FLOWER_CZ,
           ] as [number, number, number],
           rot: [tiltX, -θ, 0] as [number, number, number],
@@ -330,21 +292,18 @@ function PaperFlower({ scrollRef }: { scrollRef: React.MutableRefObject<number> 
   return (
     <group ref={groupRef}>
       {sheets.map(s => (
-        <mesh key={s.key} position={s.pos} rotation={s.rot} material={mat}>
-          <planeGeometry args={[28, 42]} />
+        <mesh key={s.key} position={s.pos} rotation={s.rot} material={mat} castShadow receiveShadow>
+          {/* Smooth plane geometry for the flower petals */}
+          <planeGeometry args={[22, 48, 4, 4]} />
         </mesh>
       ))}
-      <pointLight position={[0, 22, FLOWER_CZ]} intensity={10} color="#fff8e8" distance={80} decay={2} />
+      <pointLight position={[0, 30, FLOWER_CZ]} intensity={14} color="#fffcf5" distance={100} decay={2} />
     </group>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ProductDemoPortal — LucentProductDemo embedded as a drei Html transform plane
-// inside the paper canyon.  Visible only when camera is inside (Stage 3).
-//
-// Using group.visible = false when outside Stage 3 so drei's Html also hides
-// the DOM element.  Lazy-loaded on first activation via shouldRender flag.
+// ProductDemoPortal
 // ─────────────────────────────────────────────────────────────────────────────
 function ProductDemoPortal({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   const groupRef     = useRef<THREE.Group>(null!)
@@ -355,7 +314,6 @@ function ProductDemoPortal({ scrollRef }: { scrollRef: React.MutableRefObject<nu
     const t      = scrollRef.current
     const active = t > 0.50 && t < 0.92
     if (groupRef.current) groupRef.current.visible = active
-    // Trigger React render once (avoids setShouldRender every frame)
     if (active && !hasLoadedRef.current) {
       hasLoadedRef.current = true
       setShouldRender(true)
@@ -363,9 +321,7 @@ function ProductDemoPortal({ scrollRef }: { scrollRef: React.MutableRefObject<nu
   })
 
   return (
-    // scale={0.028}: 680 CSS px × 0.028 ≈ 19 Three.js units wide,
-    // roughly 40% of viewport width when camera is ~40 units away in the canyon.
-    <group ref={groupRef} position={[0, 14, -140]} scale={0.028}>
+    <group ref={groupRef} position={[0, 16, -145]} scale={0.032}>
       <Html
         transform
         occlude="blending"
@@ -397,33 +353,30 @@ function ProductDemoPortal({ scrollRef }: { scrollRef: React.MutableRefObject<nu
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HeroScene — assembles all R3F scene objects
+// HeroScene
 // ─────────────────────────────────────────────────────────────────────────────
 export function HeroScene({ scrollRef }: { scrollRef: React.MutableRefObject<number> }) {
   return (
     <>
-      {/* Camera + atmosphere */}
       <ScrollCamera    scrollRef={scrollRef} />
       <FogController   scrollRef={scrollRef} />
 
-      {/* Environment */}
       <Suspense fallback={null}>
         <SkyDome />
       </Suspense>
       <LakePlane />
 
-      {/* Lighting */}
-      <ambientLight intensity={0.55} color="#c8d8e2" />
+      {/* Warmer, softer lighting reflecting the alpine mood */}
+      <ambientLight intensity={0.8} color="#dbe5eb" />
       <directionalLight
-        position={[40, 80, 60]}
-        intensity={1.4}
-        color="#fff6ee"
+        position={[40, 90, 60]}
+        intensity={2.2}
+        color="#fffaf0"
         castShadow
+        shadow-bias={-0.0001}
       />
-      {/* Hemisphere: sky blue above, deep moss below */}
-      <hemisphereLight args={["#9fc0ce", "#2e4038", 0.65]} />
+      <hemisphereLight args={["#c1cdd4", "#304036", 0.8]} />
 
-      {/* Story elements */}
       <PaperMonolith />
       <PaperCanyon    scrollRef={scrollRef} />
       <PaperFlower    scrollRef={scrollRef} />

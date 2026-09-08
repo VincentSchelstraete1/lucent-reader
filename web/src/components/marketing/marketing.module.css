@@ -285,3 +285,5 @@
   .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   [data-static-story=true] .documentPage { transform: none !important; }
 }
+
+.sceneScrim { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 40%, rgba(17, 39, 35, 0.25) 100%); pointer-events: none; z-index: 1; }

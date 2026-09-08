@@ -271,6 +271,7 @@ function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null
 
       {/* ── HTML overlay — pointer-events:none; child elements opt-in ── */}
       <div className={styles.heroOverlay}>
+        <div className={styles.sceneScrim} />
         <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
 
         {/* Stage 1: hero copy (left) */}
