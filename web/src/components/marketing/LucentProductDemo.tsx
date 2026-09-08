@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { StructuredVisual, type StructuredVisualSpec } from "../../learning/visuals/StructuredVisual"
 import styles from "./marketing.module.css"
 
-const qualityControlVisual: StructuredVisualSpec = {
+export const qualityControlVisual: StructuredVisualSpec = {
   type: "process_flow",
   title: "Control signals in intracellular quality control",
   purpose: "Follow how a damaged protein is recognized and contained before it can disrupt the cell.",

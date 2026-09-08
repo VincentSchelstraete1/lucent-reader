@@ -4,14 +4,14 @@
  * Desktop (full motion):
  *   Mounts a @react-three/fiber <Canvas> that fills the 100svh sticky frame.
  *   HTML overlays (headline, CTAs, stage copy) are absolutely positioned above
- *   the canvas.  The interactive document card stack is also an HTML overlay
- *   on the right side, fading out when the camera enters the paper canyon.
+ *   the canvas. Documents and paper architecture are actual world-space meshes;
+ *   the product preview uses a perspective-projected, interactive HTML surface.
  *
  * Mobile / prefers-reduced-motion:
  *   Renders the existing CSS card-stack layout (no WebGL canvas).
- *   All motion is handled by Framer Motion on DOM elements.
+ *   Reduced motion removes the animated journey and uses normal document flow.
  */
-import { lazy, Suspense, useEffect, useRef, useState } from "react"
+import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react"
 import { Canvas } from "@react-three/fiber"
 import { Link } from "react-router-dom"
 import {
@@ -231,42 +231,56 @@ function DocumentCardStack({ reduced }: { reduced: boolean }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CanvasHero — desktop WebGL experience (mounted inside the sticky frame)
 // ─────────────────────────────────────────────────────────────────────────────
-function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null> }) {
-  const reduced   = useReducedMotion()
+function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTMLElement | null>; onUnavailable: () => void }) {
   const scrollRef = useRef<number>(0)
+  const requestFrame = useRef<() => void>(() => {})
   const [beat, setBeat] = useState(0)
+  const [activeCard, setActiveCard] = useState(0)
 
   const { scrollYProgress: p } = useScroll({
-    target: storyRef as any,
+    target: storyRef as React.RefObject<HTMLElement>,
     offset: ["start start", "end end"],
   })
 
   // Feed scroll progress into R3F's shared ref (read in useFrame — no re-renders)
   useMotionValueEvent(p, "change", v => {
     scrollRef.current = v
-    setBeat(v < 0.46 ? 0 : v < 0.62 ? 1 : v < 0.88 ? 2 : 3)
+    requestFrame.current()
+    setBeat(v < .075 ? 0 : v < .29 ? 1 : v < .46 ? 2 : v < .88 ? 3 : 4)
   })
 
   // ── Overlay opacity values ────────────────────────────────────────────────
-  const stage1Opacity   = useTimeline(p, [0, 0.38, 0.47],        [1, 1, 0])
-  const cardStackOp     = useTimeline(p, [0, 0.38, 0.50],        [1, 1, 0])
-  const stage2Opacity   = useTimeline(p, [0.40, 0.46, 0.56, 0.62],[0, 1, 1, 0])
-  const stage4Opacity   = useTimeline(p, [0.88, 0.96],           [0, 1])
-  const scrollCueOp     = useTimeline(p, [0, 0.10, 0.20],        [1, 1, 0])
+  const stage1Opacity   = useTimeline(p, [.065, .11, .22, .285], [0, 1, 1, 0])
+  const heroX = useTimeline(p, [.065, .12, .22, .285], [-160, 0, 0, -200])
+  const heroY = useTimeline(p, [.065, .12, .22, .285], [50, 0, 0, -50])
+  const stage2Opacity   = useTimeline(p, [.315, .35, .40, .445], [0, 1, 1, 0])
+  const stage4Opacity   = useTimeline(p, [.91, .97], [0, 1])
+  const scrollCueOp     = useTimeline(p, [0, .055, .095], [1, 1, 0])
 
-  const STAGE_LABELS = ["Your material", "A clearer path", "Learn with Lucent", "Go further"]
+  const STAGE_LABELS = ["Explore", "Your material", "A clearer path", "Inside Lucent", "Go further"]
+
+  useEffect(() => {
+    if (window.location.hash !== "#learn-in-action") return
+    const id = requestAnimationFrame(() => document.getElementById("learn-in-action")?.scrollIntoView({ behavior: "instant" }))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   return (
     <>
       {/* ── WebGL Canvas ──────────────────────────────────────────────── */}
       <Canvas
         style={{ position: "absolute", inset: 0 }}
-        camera={{ position: [0, 85, 200], fov: 65, near: 0.5, far: 2000 }}
+        camera={{ position: [-8, 28, 240], fov: 52, near: .15, far: 5000 }}
         gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         dpr={[1, 1.5]}
+        frameloop="demand"
+        onCreated={({ invalidate, gl }) => {
+          requestFrame.current = invalidate
+          gl.domElement.addEventListener("webglcontextlost", onUnavailable, { once: true })
+        }}
         shadows
       >
-        <HeroScene scrollRef={scrollRef} />
+        <HeroScene scrollRef={scrollRef} activeCard={activeCard} onNext={() => setActiveCard(c => Math.min(4, c + 1))} />
       </Canvas>
 
       {/* ── HTML overlay — pointer-events:none; child elements opt-in ── */}
@@ -277,8 +291,9 @@ function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null
         {/* Stage 1: hero copy (left) */}
         <motion.div
           className={`${styles.storyCopy} ${styles.heroStoryCopy}`}
-          aria-hidden={beat !== 0}
-          style={{ opacity: stage1Opacity }}
+          aria-hidden={beat !== 1}
+          {...(beat !== 1 ? { inert: "" } : {})}
+          style={{ opacity: stage1Opacity, x: heroX, y: heroY }}
         >
           <p className={styles.eyebrowLight}>Read. Understand. Go further.</p>
           <h1 className={styles.storyHeadline}>
@@ -299,22 +314,16 @@ function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null
           </div>
         </motion.div>
 
-        {/* Stage 1: card stack overlay (right) */}
-        <motion.div
-          className={styles.documentScene}
-          aria-hidden={beat !== 0}
-          style={{ opacity: cardStackOp, pointerEvents: beat === 0 ? "auto" : "none" }}
-        >
-          <DocumentCardStack reduced={reduced} />
-          <p className={styles.paperCaption} aria-hidden="true">
-            From pages<br />to progress.
-          </p>
+        <motion.div className={styles.pageControls} aria-label="Explore the source pages" aria-hidden={beat !== 1} {...(beat !== 1 ? { inert: "" } : {})} style={{ opacity: stage1Opacity }}>
+          <button type="button" aria-label="Previous source page" disabled={activeCard === 0} onClick={() => setActiveCard(c => Math.max(0, c - 1))}>←</button>
+          <span aria-live="polite">{activeCard + 1} / 5 · {LAYERS[activeCard]}</span>
+          <button type="button" aria-label="Next source page" disabled={activeCard === 4} onClick={() => setActiveCard(c => Math.min(4, c + 1))}>→</button>
         </motion.div>
 
         {/* Stage 2: clarity copy */}
         <motion.div
           className={`${styles.storyCopy} ${styles.clarityCopy}`}
-          aria-hidden={beat !== 1}
+          aria-hidden={beat !== 2}
           style={{ opacity: stage2Opacity }}
         >
           <p className={styles.eyebrowLight}>A calmer way to learn</p>
@@ -328,18 +337,12 @@ function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null
           </p>
         </motion.div>
 
-        {/* Stage 3: anchor for keyboard navigation (demo is inside Canvas portal) */}
-        <div
-          id="learn-in-action"
-          className={styles.demoAnchor}
-          tabIndex={-1}
-          aria-label="Interactive Lucent preview — embedded in 3D scene"
-        />
 
         {/* Stage 4: resolution copy */}
         <motion.section
           className={styles.resolutionCopy}
-          aria-hidden={beat !== 3}
+          aria-hidden={beat !== 4}
+          {...(beat !== 4 ? { inert: "" } : {})}
           aria-label="Go further with Lucent"
           style={{ opacity: stage4Opacity }}
         >
@@ -374,6 +377,7 @@ function CanvasHero({ storyRef }: { storyRef: React.RefObject<HTMLElement | null
 // Full DOM-based layout, no WebGL canvas.
 // ─────────────────────────────────────────────────────────────────────────────
 function StaticSpatialStory() {
+  const reduced = useReducedMotion()
   const [activeCard, setActiveCard] = useState(0)
   const [loadDemo,   setLoadDemo  ] = useState(false)
   const tiltX    = useSpring(0, { stiffness: 160, damping: 25 })
@@ -396,7 +400,7 @@ function StaticSpatialStory() {
   return (
     <div className={styles.storySticky} data-static-story="true">
       <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
-      <div id="learn-in-action" className={styles.demoAnchor} tabIndex={-1} />
+      <div className={styles.staticLandscape} aria-hidden="true" />
 
       {/* Stage 1: hero copy */}
       <div className={`${styles.storyCopy} ${styles.heroStoryCopy}`}>
@@ -443,7 +447,7 @@ function StaticSpatialStory() {
           {[4, 3, 2, 1, 0].map(i => (
             <DocumentPage
               key={i} index={i} activeCard={activeCard}
-              staticStory reduced={false}
+              staticStory reduced={reduced}
               onNext={() => turn(1)}
             />
           ))}
@@ -478,6 +482,8 @@ function StaticSpatialStory() {
 
       {/* Stage 3: interactive product demo */}
       <section
+        id="learn-in-action"
+        tabIndex={-1}
         className={styles.productStage}
         aria-label="Interactive Lucent preview"
         onFocus={() => setLoadDemo(true)}
@@ -526,6 +532,7 @@ function StaticSpatialStory() {
 // ─────────────────────────────────────────────────────────────────────────────
 export function SpatialStory() {
   const reduced = useReducedMotion()
+  const [unavailable, setUnavailable] = useState(false)
   const [compact, setCompact] = useState(
     () => window.matchMedia("(max-width: 950px), (max-height: 620px)").matches
   )
@@ -537,7 +544,7 @@ export function SpatialStory() {
     return () => q.removeEventListener("change", upd)
   }, [])
 
-  const staticStory = reduced || compact
+  const staticStory = reduced || compact || unavailable
 
   // Ref to the <main> scroll container — passed to both the Canvas overlay
   // AND used as the useScroll target inside CanvasHero.
@@ -562,10 +569,18 @@ export function SpatialStory() {
       data-static-story="false"
       aria-label="From source material to understanding"
     >
+      <div id="learn-in-action" className={styles.demoAnchor} tabIndex={-1} />
       {/* 100svh sticky frame — Canvas + overlays live here */}
       <div className={styles.storySticky}>
-        <CanvasHero storyRef={mainRef} />
+        <SceneBoundary onUnavailable={() => setUnavailable(true)}><CanvasHero storyRef={mainRef} onUnavailable={() => setUnavailable(true)} /></SceneBoundary>
       </div>
     </main>
   )
+}
+
+class SceneBoundary extends Component<{ children: ReactNode; onUnavailable: () => void }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch() { this.props.onUnavailable() }
+  render() { return this.state.failed ? null : this.props.children }
 }
