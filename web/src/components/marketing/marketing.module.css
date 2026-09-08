@@ -288,6 +288,15 @@
 
 .sceneScrim { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 40%, rgba(17, 39, 35, 0.25) 100%); pointer-events: none; z-index: 1; }
 .heroOverlay { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
+.openingMark { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; flex-direction: column; gap: 9px; color: #344344; text-shadow: 0 1px 12px #fff4d777; }
+.openingPoster { position: absolute; inset: 0; z-index: 19; pointer-events: none; background: url('/lucent-opening-alpine.jpg') center / cover; transform: scale(1.06); }
+.storySticky:has(canvas[data-opening]) .openingPoster { display: none; }
+.openingMark svg { width: 28px; height: 34px; filter: drop-shadow(0 1px 5px #192f3955); }
+.openingMark span { font: 400 34px/1 var(--lucent-font-editorial); }
+.openingScrollCue { left: 50%; transform: translateX(-50%); flex-direction: column; gap: 10px; bottom: 5%; letter-spacing: .09em; font-size: 10px; text-shadow: 0 1px 6px #10282b; }
+.staticOpening { position: relative; height: 100svh; min-height: 560px; margin: -150px -6vw 90px; background: linear-gradient(#142c3933, transparent 25%), url('/lucent-opening-alpine.jpg') center / cover; }
+.staticOpeningCue { position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 10px; letter-spacing: .07em; text-shadow: 0 1px 6px #10282b; }
+@media (max-width: 700px) { .staticOpening { margin-top: -140px; } }
 .heroOverlay a, .heroOverlay button { pointer-events: auto; }
 .heroOverlay [inert] a, .heroOverlay [inert] button { pointer-events: none; }
 .heroOverlay .storyCopy, .heroOverlay .resolutionCopy { text-shadow: 0 2px 25px #17382f70; }

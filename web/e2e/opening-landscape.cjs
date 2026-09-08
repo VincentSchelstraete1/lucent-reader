@@ -1,0 +1,51 @@
+// Scene 1 visual acceptance. Requires existing Playwright and installed Chrome.
+const { chromium } = require('playwright')
+const fs = require('node:fs'), assert = require('node:assert/strict')
+const output = process.env.EVIDENCE_DIR || '.tmp/scene-one/desktop'
+fs.mkdirSync(output, { recursive: true })
+;(async () => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const errors = [], evidence = []
+  page.on('pageerror', e => errors.push(e.message))
+  try {
+    await page.goto(process.env.BASE_URL || 'http://127.0.0.1:5173/')
+    const canvas = page.locator('canvas[data-opening="photographic-depth"]')
+    await canvas.waitFor()
+    assert.equal(await page.locator('[class*="openingPoster"]').isVisible(), false)
+    await page.waitForTimeout(1500)
+    assert.equal(await page.getByRole('heading', { name: 'Turn any material into understanding.' }).count(), 0)
+    assert.equal(await page.getByRole('button', { name: 'Next source page' }).count(), 0)
+    await page.getByRole('navigation', { name: 'Main navigation' }).waitFor()
+    await page.screenshot({ path: `${output}/01-opening.png` })
+    const time = Number(await canvas.getAttribute('data-opening-time'))
+    const first = await canvas.getAttribute('data-camera')
+    await page.waitForTimeout(7000)
+    assert(Number(await canvas.getAttribute('data-opening-time')) > time + 5)
+    assert.notEqual(await canvas.getAttribute('data-camera'), first)
+    await page.screenshot({ path: `${output}/02-atmosphere-after-seven-seconds.png` })
+    evidence.push({ checkpoint: 'idle-atmosphere', from: first, to: await canvas.getAttribute('data-camera') })
+    await page.mouse.move(90, 650)
+    for (let i = 0; i < 7; i++) { await page.mouse.wheel(0, 40); await page.waitForTimeout(220) }
+    await page.waitForTimeout(1400)
+    const progress = Number(await canvas.getAttribute('data-progress'))
+    assert(progress > .03 && progress < .04)
+    await page.screenshot({ path: `${output}/03-forward-glide.png` })
+    evidence.push({ checkpoint: 'forward-glide', progress, camera: await canvas.getAttribute('data-camera') })
+    for (const [name, options] of [['mobile', { viewport: { width: 390, height: 844 } }], ['reduced-motion', { viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' }]]) {
+      const fallback = await browser.newPage(options)
+      fallback.on('pageerror', e => errors.push(e.message))
+      await fallback.goto(process.env.BASE_URL || 'http://127.0.0.1:5173/')
+      await fallback.getByRole('region', { name: 'Alpine opening' }).waitFor()
+      assert.equal(await fallback.locator('canvas').count(), 0)
+      assert(await fallback.getByRole('heading', { name: 'Turn any material into understanding.' }).evaluate(el => el.getBoundingClientRect().top >= innerHeight))
+      assert(await fallback.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      await fallback.screenshot({ path: `${output}/04-${name}.png` })
+      evidence.push({ checkpoint: `${name}-pure-opening`, passed: true })
+      await fallback.close()
+    }
+    assert.deepEqual(errors, [])
+    fs.writeFileSync(`${output}/results.json`, JSON.stringify({ evidence, errors }, null, 2))
+    console.log('PASS: minimal photographic opening, animated atmosphere, physical initial glide; no page errors')
+  } finally { await browser.close() }
+})().catch(e => { console.error(e); process.exitCode = 1 })

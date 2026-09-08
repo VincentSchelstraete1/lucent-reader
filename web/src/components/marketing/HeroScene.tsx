@@ -6,6 +6,8 @@ import { architectureFormation, cameraPose, pageFormation, paperRibbon, ridgeGeo
 import { StructuredVisual } from "../../learning/visuals/StructuredVisual"
 import { qualityControlVisual } from "./LucentProductDemo"
 import styles from "./marketing.module.css"
+import { OpeningLandscape } from "./OpeningLandscape"
+import { openingCamera, OPENING_END } from "./openingScene"
 
 const ProductDemo = lazy(() => import("./LucentProductDemo").then(m => ({ default: m.LucentProductDemo })))
 type Progress = { scrollRef: MutableRefObject<number> }
@@ -13,11 +15,11 @@ type Progress = { scrollRef: MutableRefObject<number> }
 function CameraJourney({ scrollRef, journeyRef }: Progress & { journeyRef: MutableRefObject<number> }) {
   const { camera, gl, scene, invalidate } = useThree()
   const progress = useRef(scrollRef.current)
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     progress.current = THREE.MathUtils.damp(progress.current, scrollRef.current, 6, Math.min(delta, .1))
     if (Math.abs(progress.current - scrollRef.current) > .00001) invalidate()
     journeyRef.current = progress.current
-    const pose = cameraPose(progress.current)
+    const pose = progress.current < OPENING_END ? openingCamera(progress.current, clock.elapsedTime) : cameraPose(progress.current)
     camera.position.copy(pose.position); camera.lookAt(pose.target); camera.rotateZ(pose.roll)
     if (scene.fog instanceof THREE.FogExp2) scene.fog.density = .0018 + Math.sin(progress.current * Math.PI) * .0005
     // Read-only browser diagnostics: actual camera travel, not CSS zoom.
@@ -283,13 +285,18 @@ function AlpineSun() {
 
 export function HeroScene({ scrollRef, activeCard, onNext }: Progress & { activeCard: number; onNext: () => void }) {
   const journeyRef = useRef(scrollRef.current)
+  const laterWorld = useRef<THREE.Group>(null!)
+  useFrame(() => { laterWorld.current.visible = journeyRef.current >= .055 })
   return <>
     <color attach="background" args={["#d5dcde"]} /><fogExp2 attach="fog" args={["#d5dcde", .008]} />
     <CameraJourney scrollRef={scrollRef} journeyRef={journeyRef} />
     <ambientLight intensity={.6} color="#fffaf0" /><hemisphereLight args={["#e7efec", "#536957", .7]} />
     <AlpineSun />
+    <group ref={laterWorld}>
     <Suspense fallback={null}><AlpineWorld /><DocumentSheets scrollRef={journeyRef} activeCard={activeCard} onNext={onNext} /></Suspense>
     <Mist /><group position={[24, 0, 0]}><Bvh firstHitOnly><PaperAtrium scrollRef={journeyRef} /></Bvh><DriftingPages scrollRef={journeyRef} /><FeatureDiscoveries scrollRef={journeyRef} /><ProductPortal scrollRef={journeyRef} /></group>
     <Overlook />
+    </group>
+    <Suspense fallback={null}><OpeningLandscape progress={journeyRef} /></Suspense>
   </>
 }

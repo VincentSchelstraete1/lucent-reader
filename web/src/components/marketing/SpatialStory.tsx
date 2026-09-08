@@ -32,6 +32,10 @@ const ProductDemo = lazy(() =>
 
 const LAYERS = ["Source material", "Simplify", "Explain", "Visualize", "Practice"]
 
+function OpeningEmblem() {
+  return <><svg viewBox="0 0 40 48" fill="none" aria-hidden="true"><path d="M10 5h17l9 9v27M27 5v10h9M4 11h16l10 10v24H4V11Zm16 0v11h10M10 29h14M10 34h14M10 39h14" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /></svg><span>Lucent</span></>
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // useTimeline — clamped keyframe interpolation for Framer Motion MotionValues
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,6 +260,7 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
   const stage2Opacity   = useTimeline(p, [.315, .35, .40, .445], [0, 1, 1, 0])
   const stage4Opacity   = useTimeline(p, [.91, .97], [0, 1])
   const scrollCueOp     = useTimeline(p, [0, .055, .095], [1, 1, 0])
+  const openingMarkOp = useTimeline(p, [0, .035, .06], [1, 1, 0])
 
   const STAGE_LABELS = ["Explore", "Your material", "A clearer path", "Inside Lucent", "Go further"]
 
@@ -268,6 +273,7 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
   return (
     <>
       {/* ── WebGL Canvas ──────────────────────────────────────────────── */}
+      <div className={styles.openingPoster} aria-hidden="true" />
       <Canvas
         style={{ position: "absolute", inset: 0 }}
         camera={{ position: [-8, 28, 240], fov: 52, near: .15, far: 5000 }}
@@ -287,6 +293,9 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
       <div className={styles.heroOverlay}>
         <div className={styles.sceneScrim} />
         <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
+        <motion.div className={styles.openingMark} style={{ opacity: openingMarkOp }} aria-hidden={beat !== 0}>
+          <OpeningEmblem />
+        </motion.div>
 
         {/* Stage 1: hero copy (left) */}
         <motion.div
@@ -356,14 +365,14 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
 
         {/* Chrome */}
         <motion.div
-          className={styles.scrollCue}
+          className={`${styles.scrollCue} ${beat === 0 ? styles.openingScrollCue : ''}`}
           aria-hidden="true"
           style={{ opacity: scrollCueOp }}
         >
           <span /> Scroll to explore
         </motion.div>
 
-        <div className={styles.storyIndex} aria-hidden="true">
+        <div className={styles.storyIndex} aria-hidden="true" style={{ visibility: beat === 0 ? 'hidden' : 'visible' }}>
           <span>0{beat + 1}</span><i />
           <span>{STAGE_LABELS[beat]}</span>
         </div>
@@ -401,6 +410,10 @@ function StaticSpatialStory() {
     <div className={styles.storySticky} data-static-story="true">
       <a className={styles.skipLink} href="#learn-in-action">Skip to interactive preview</a>
       <div className={styles.staticLandscape} aria-hidden="true" />
+      <section className={styles.staticOpening} aria-label="Alpine opening">
+        <div className={styles.openingMark}><OpeningEmblem /></div>
+        <div className={styles.staticOpeningCue}>Scroll to explore <span aria-hidden="true">↓</span></div>
+      </section>
 
       {/* Stage 1: hero copy */}
       <div className={`${styles.storyCopy} ${styles.heroStoryCopy}`}>
