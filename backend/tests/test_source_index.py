@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -171,6 +172,63 @@ def test_index_failure_is_sanitized_and_retryable(client):
         assert source_index.status == "FAILED"
         assert source_index.failure_code == "embedding_unavailable"
         assert "secret" not in source_index.failure_code
+
+
+def test_unexpected_index_failure_records_sanitized_terminal_state(client, caplog):
+    class UnexpectedProvider(DeterministicEmbeddingProvider):
+        def embed_documents(self, texts):
+            raise RuntimeError("private document/provider detail")
+
+    response = _upload(
+        client,
+        MutableIngestor("A substantive source explains how acceleration depends on force and mass."),
+        "unexpected-failure.pdf",
+    ).json()
+    with TestSessionLocal() as db:
+        source_index = db.get(DocumentSourceIndex, response["document_id"])
+        source_index.status = "PENDING"
+        source_index.embedded_count = 0
+        for block in source_index.blocks:
+            block.embedding = None
+        generation = source_index.generation_id
+        db.commit()
+
+    set_embedding_provider(UnexpectedProvider())
+    try:
+        assert index_document(response["document_id"], generation) is False
+    finally:
+        set_embedding_provider(None)
+
+    with TestSessionLocal() as db:
+        source_index = db.get(DocumentSourceIndex, response["document_id"])
+        assert source_index.status == "FAILED"
+        assert source_index.failure_code == "unexpected_indexing_failure"
+        assert source_index.lease_expires_at is None
+    assert "private document/provider detail" not in caplog.text
+
+
+def test_expired_indexing_lease_becomes_retryable_terminal_failure(client):
+    response = _upload(
+        client,
+        MutableIngestor("A substantive source describes energy transfer in an oscillating system."),
+        "expired-lease.pdf",
+    ).json()
+    with TestSessionLocal() as db:
+        source_index = db.get(DocumentSourceIndex, response["document_id"])
+        source_index.status = "INDEXING"
+        source_index.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        source_index.failure_code = None
+        db.commit()
+
+    status = client.get(f"/documents/{response['document_id']}/source-index")
+    assert status.status_code == 200
+    assert status.json()["status"] == "FAILED"
+    assert status.json()["retryable"] is True
+    with TestSessionLocal() as db:
+        source_index = db.get(DocumentSourceIndex, response["document_id"])
+        assert source_index.status == "FAILED"
+        assert source_index.failure_code == "indexing_lease_expired"
+        assert source_index.lease_expires_at is None
 
 
 def test_ingested_learn_response_supplies_original_source_text_to_tutor(client):

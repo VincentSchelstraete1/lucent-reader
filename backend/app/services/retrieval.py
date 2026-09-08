@@ -18,7 +18,7 @@ from app.models.document import Document
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
 from app.models.source import Source
 from app.services.embeddings import EmbeddingError, get_embedding_provider
-from app.services.source_index import embedding_input_for
+from app.services.source_index import embedding_input_for, expire_stale_index_lease
 
 
 logger = logging.getLogger(__name__)
@@ -167,6 +167,7 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     if expected_generation is not None and source_index.generation_id != expected_generation:
         return _empty_context(RetrievalStatus.SOURCE_CHANGED, document_id=document_id, generation_id=source_index.generation_id,
                               fingerprint=fingerprint, index=source_index)
+    expire_stale_index_lease(source_index)
     if source_index.status != "READY":
         status = RetrievalStatus.INDEXING if source_index.status in {"PENDING", "INDEXING"} else RetrievalStatus.FAILED
         return _empty_context(status, document_id=document_id, generation_id=source_index.generation_id,

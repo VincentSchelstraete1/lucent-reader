@@ -190,4 +190,23 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
 
 ## Final checkpoint
 
+### Pre-beta P1 reliability follow-up
+
+- Source indexing now records unexpected exceptions as a sanitized `FAILED`
+  state (`unexpected_indexing_failure`) and clears the active lease. Logs
+  retain document/generation/attempt identifiers and exception types without
+  source content or exception messages.
+- An expired `INDEXING` lease is converted to the retryable terminal failure
+  `indexing_lease_expired` when index status is observed; retrieval also
+  reports the abandoned lease as failed instead of indexing forever.
+- Every Learn mutation (response/continue, Ask, Ask inline response, hint,
+  visual event, and stop) now holds a PostgreSQL row lock while deriving and
+  persisting state. Browser requests send the active scene identity, and a
+  stale scene ID/revision receives HTTP 409 rather than overwriting newer
+  authoritative state. Legacy callers that omit scene identity still
+  serialize safely from the latest committed row.
+- Regression coverage includes plain unexpected indexing exceptions, expired
+  leases in status/retrieval, stale mutations across response/Ask/hint/stop,
+  and two simultaneous database sessions preserving both state changes.
+
 Phases 1–5 and the local container deployment smoke are complete. The next action is operational release preparation: satisfy the external/privacy gates above and deploy the accepted single-API topology on the chosen host. No further productionization feature work is part of this master goal.

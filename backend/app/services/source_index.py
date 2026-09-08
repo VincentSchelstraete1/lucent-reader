@@ -43,6 +43,28 @@ class SourceCorpusInvalid(ValueError):
     """The extracted representation is not safe or substantive enough to teach."""
 
 
+def expire_stale_index_lease(source_index: DocumentSourceIndex, *, now: datetime | None = None) -> bool:
+    """Convert an abandoned indexing lease into a safe terminal state."""
+    checked_at = now or datetime.now(timezone.utc)
+    if (
+        source_index.status == "INDEXING"
+        and source_index.lease_expires_at is not None
+        and source_index.lease_expires_at <= checked_at
+    ):
+        source_index.status = "FAILED"
+        source_index.failure_code = "indexing_lease_expired"
+        source_index.lease_expires_at = None
+        logger.error(
+            "source_index_failed document_id=%s generation_id=%s attempt_id=%s failure_code=%s",
+            source_index.document_id,
+            source_index.generation_id,
+            source_index.attempt_id,
+            source_index.failure_code,
+        )
+        return True
+    return False
+
+
 def _clean(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
@@ -368,5 +390,43 @@ def index_document(document_id: int, generation_id: uuid.UUID) -> bool:
             "source_index_failed document_id=%s generation_id=%s attempt_id=%s failure_code=%s exception=%s duration_ms=%.1f",
             document_id, generation_id, attempt_id, getattr(exc, "code", "source_invalid"),
             type(exc).__name__, (time.perf_counter() - started) * 1000,
+        )
+        return False
+    except Exception as exc:
+        # Persist only a bounded generic code. The exception type is useful to
+        # operators without exposing provider details or document content.
+        failure_code = "unexpected_indexing_failure"
+        try:
+            with SessionLocal.begin() as db:
+                source_index = db.get(DocumentSourceIndex, document_id, with_for_update=True)
+                if (
+                    source_index is not None
+                    and source_index.generation_id == generation_id
+                    and source_index.attempt_id == attempt_id
+                ):
+                    source_index.status = "FAILED"
+                    source_index.failure_code = failure_code
+                    source_index.lease_expires_at = None
+        except Exception as persistence_exc:
+            logger.critical(
+                "source_index_failure_state_unavailable document_id=%s generation_id=%s attempt_id=%s "
+                "failure_code=%s exception=%s persistence_exception=%s",
+                document_id,
+                generation_id,
+                attempt_id,
+                failure_code,
+                type(exc).__name__,
+                type(persistence_exc).__name__,
+            )
+            return False
+        logger.error(
+            "source_index_failed document_id=%s generation_id=%s attempt_id=%s failure_code=%s "
+            "exception=%s duration_ms=%.1f",
+            document_id,
+            generation_id,
+            attempt_id,
+            failure_code,
+            type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
         )
         return False

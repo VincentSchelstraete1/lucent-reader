@@ -334,19 +334,19 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   }
   async function stop() {
     if (!session) return
-    try { const stopped = await api.stopLearnSession(session.id); sessionRef.current = stopped; setSession(stopped) }
+    try { const stopped = await api.stopLearnSession(session.id, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); sessionRef.current = stopped; setSession(stopped) }
     catch (e) { setError(e instanceof Error ? e.message : "This session could not be saved.") }
   }
   async function requestHint() {
     if (!session) return
-    try { const result = await api.getLearnHint(session.id); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
+    try { const result = await api.getLearnHint(session.id, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
     catch (e) { setError(e instanceof Error ? e.message : "No hint is available right now.") }
   }
   async function askLucent(messageOverride?: string) {
     const message = messageOverride?.trim() || askMessage.trim()
     if (!session || !message) return
     setAskLoading(true); setError(null)
-    try { const result = await api.askLucent(session.id, message); setAskAnswer(result); if (result.scene) setSession((current) => current ? { ...current, scene: result.scene } : current); setAskMessage("") }
+    try { const result = await api.askLucent(session.id, message, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); setAskAnswer(result); if (result.scene) setSession((current) => current ? { ...current, scene: result.scene } : current); setAskMessage("") }
     catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
     finally { setAskLoading(false) }
   }
@@ -354,7 +354,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     const inline = session?.scene?.inlineInteraction
     if (!session || !inline) return
     setLoading(true); setError(null)
-    try { setSession(await api.submitAskInteraction(session.id, inline.id, response)) }
+    try { setSession(await api.submitAskInteraction(session.id, inline.id, { ...response, sceneId: session.scene?.id, sceneRevision: session.scene?.revision })) }
     catch (e) { setError(e instanceof Error ? e.message : "That extra practice could not be checked right now.") }
     finally { setLoading(false) }
   }

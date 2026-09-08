@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -128,6 +129,25 @@ def test_retrieval_rejects_other_user_and_stale_generation(client):
         set_embedding_provider(None)
     assert stale.status == RetrievalStatus.SOURCE_CHANGED
     assert stale.blocks == []
+
+
+def test_retrieval_reports_expired_indexing_lease_as_failed(client):
+    owner, document_id, generation, _provider = _seed_index(client)
+    with TestSessionLocal() as db:
+        source_index = db.get(DocumentSourceIndex, document_id)
+        source_index.status = "INDEXING"
+        source_index.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    with TestSessionLocal() as db:
+        context = retrieve_source(
+            db,
+            user_id=owner,
+            document_id=document_id,
+            expected_generation=generation,
+            query=SourceQuery("ask", "pendulum energy"),
+        )
+    assert context.status == RetrievalStatus.FAILED
+    assert context.failure_code == "indexing_lease_expired"
 
 
 def test_not_indexed_and_provider_mismatch_never_fall_back_to_first_section(client):

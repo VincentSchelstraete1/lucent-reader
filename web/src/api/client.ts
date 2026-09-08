@@ -442,9 +442,9 @@ export const api = {
   ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
   ,getActiveLearnSession: (documentId: number) => get<LearnSession | null>(`/documents/${documentId}/learn-sessions/active`)
   ,submitLearnResponse: (sessionId: string, request: { sceneId?: string; sceneRevision?: number; interactionId?: string; eventType?: "RESPONSE" | "CONTINUE"; response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
-  ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
-  ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
-  ,askLucent: (sessionId: string, message: string) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message })
-  ,submitAskInteraction: (sessionId: string, interactionId: string, response: { response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/ask-interactions/${interactionId}/responses`, response)
+  ,getLearnHint: (sessionId: string, scene?: { id: string; revision: number }) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, { sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,stopLearnSession: (sessionId: string, scene?: { id: string; revision: number }) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, { sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,askLucent: (sessionId: string, message: string, scene?: { id: string; revision: number }) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message, sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,submitAskInteraction: (sessionId: string, interactionId: string, response: { response?: string; optionId?: string; orderedIds?: string[]; sceneId?: string; sceneRevision?: number }) => post<LearnSession>(`/learn-sessions/${sessionId}/ask-interactions/${interactionId}/responses`, response)
   ,learnVisualEvent: (sessionId: string, request: { sceneId: string; sceneRevision: number; event: "set_stage" | "highlight" | "replay"; stage?: number; elementId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/visual-events`, request)
 }

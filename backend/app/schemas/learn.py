@@ -526,6 +526,11 @@ class LearnResponseRequest(BaseModel):
     ordered_ids: list[str] | None = Field(default=None, alias="orderedIds")
 
 
+class LearnMutationRequest(BaseModel):
+    scene_id: str | None = Field(default=None, alias="sceneId", max_length=60)
+    scene_revision: int | None = Field(default=None, alias="sceneRevision", ge=0)
+
+
 class LearnHintResponse(BaseModel):
     hint: str
     hints_used: int = Field(alias="hintsUsed")
