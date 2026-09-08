@@ -117,10 +117,20 @@ def _expected_database_revisions() -> frozenset[str]:
 def readyz():
     """Confirm PostgreSQL is reachable and its schema is at repository head."""
     try:
+        expected = _expected_database_revisions()
+    except Exception as exc:
+        # A missing or unreadable alembic script directory is a packaging fault,
+        # not a database outage; reporting it as "unavailable" sends operators
+        # to investigate PostgreSQL while the real problem is the image.
+        logger.error(
+            "readiness_check outcome=not_ready component=migrations reason=unreadable exception_type=%s",
+            type(exc).__name__,
+        )
+        return JSONResponse(status_code=503, content={"status": "not_ready", "component": "migrations", "reason": "unreadable"})
+    try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
             current = frozenset(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
-        expected = _expected_database_revisions()
         if current != expected:
             logger.warning(
                 "readiness_check outcome=not_ready component=database reason=migration_mismatch current_count=%s expected_count=%s",

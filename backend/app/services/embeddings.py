@@ -157,6 +157,15 @@ class VoyageEmbeddingProvider:
 
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list) or len(data) != len(values):
+            logger.warning(
+                "provider_operation_complete provider=voyage operation=embed_%s outcome=invalid exception_type=%s duration_ms=%.1f attempts=%s item_count=%s model=%s",
+                input_type,
+                "EmbeddingInvalidResponse",
+                (time.perf_counter() - started) * 1000,
+                attempts,
+                len(values),
+                self.metadata.model,
+            )
             raise EmbeddingInvalidResponse("Embedding provider returned an unexpected item count")
         try:
             ordered = sorted(data, key=lambda item: int(item.get("index", 0)))

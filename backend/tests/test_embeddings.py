@@ -128,3 +128,20 @@ def test_voyage_success_telemetry_excludes_embedding_input(monkeypatch, caplog):
     messages = [record.getMessage() for record in caplog.records if "provider_operation_complete" in record.getMessage()]
     assert any("provider=voyage operation=embed_query outcome=success" in message for message in messages)
     assert all("SECRET CC0 QUERY" not in message for message in messages)
+
+
+def test_voyage_item_count_mismatch_emits_terminal_telemetry(monkeypatch, caplog):
+    """Every terminal outcome must emit provider_operation_complete, this one included."""
+    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+    response = httpx.Response(200, request=httpx.Request("POST", "https://api.voyageai.com/v1/embeddings"), json={
+        "data": [],
+    })
+    monkeypatch.setattr("app.services.embeddings.httpx.post", lambda *args, **kwargs: response)
+    caplog.set_level("INFO", logger="app.services.embeddings")
+
+    with pytest.raises(EmbeddingInvalidResponse):
+        VoyageEmbeddingProvider().embed_query("SECRET CC0 QUERY")
+
+    messages = [record.getMessage() for record in caplog.records if "provider_operation_complete" in record.getMessage()]
+    assert any("provider=voyage operation=embed_query outcome=invalid" in message for message in messages)
+    assert all("SECRET CC0 QUERY" not in message for message in messages)

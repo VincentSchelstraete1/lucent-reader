@@ -356,6 +356,7 @@ async def start_progressive_pdf(
 ) -> ProgressiveStartResponse:
     _prune_progressive_jobs()
     if len(_PROGRESSIVE_JOBS) >= settings.progressive_job_max_entries:
+        await file.close()
         raise _error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "ingestion_capacity_reached",
