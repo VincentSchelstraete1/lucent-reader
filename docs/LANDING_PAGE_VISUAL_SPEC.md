@@ -11,11 +11,14 @@
 
 ## Continuous scroll narrative
 
-One sticky composition spans five beats across a 600svh desktop timeline:
-source material, page separation, structured understanding, the interactive
-Lucent learning surface, and the closing invitation. The source sheets open
-at different Z depths; the visual explanation sheet comes forward and turns
-edge-on into the product surface. The product then recedes to the right,
+One sticky composition spans four scenes across a 600svh desktop timeline:
+readable source-page turns, a quiet landscape-only "A clearer path" interval,
+the interactive Lucent learning surface, and the closing invitation. Each of
+the five pages comes forward and holds nearly face-on before turning around
+its left edge. Scrolling or the previous/next controls turns pages, in either
+direction. After the final page, a stronger camera move and rising foreground
+fog carry the stack away. No pages, captions, or demo occupy the second scene.
+Only afterward does the demo fade in separately. The product recedes to the right,
 remaining visible in the same landscape behind the closing invitation.
 There is no separate full-screen CTA panel or hard environment cut.
 
@@ -31,9 +34,11 @@ last authored keyframe ended early; full-range endpoints prevent ghosted copy.
 The landscape and masked foreground move at different rates along a continuous
 forward/right camera drift, without returning to the opening camera position.
 There is no cream veil over the environment during the product interval.
-Three restrained CSS fog banks drift behind, between, and in front of the
-sheets; foreground fog thins during interaction. Pages separate by up to 155px
-in Z and rotate independently on X/Y/Z. The demo itself approaches from negative
+Three restrained CSS fog banks drift behind and in front of the
+sheets; foreground fog covers their lower edges and thins during interaction.
+Backing pages sit at distinct Z depths without intersecting the reading face.
+Compact and reduced-motion layouts use the same page controls to switch without
+scroll-linked turning. The demo itself approaches from negative
 Z, settles into a readable flat interval, and recedes to negative Z at the end.
 Inactive controls are inert, including the receded product in the final scene.
 
@@ -126,8 +131,9 @@ deprecation warnings and large optional application-chunk warnings remain.
 Live before/after browser inspection confirmed the previous cream overlay
 visually disconnected the demo from the landscape. It is now removed, with
 landscape visible around a smaller paper-edged demo. A detailed 13-position
-scroll inspection also caught overlapping source/demo text during a dissolve;
-the handoff now occurs while both surfaces are nearly edge-on. Closing copy
+scroll inspection also caught overlapping source/demo text during a dissolve.
+The later user-directed page-turn pass removes that morph entirely: a quiet
+landscape interval now separates the opening stack from the demo fade. Closing copy
 waits for the receding demo to clear it. The static mobile treatment also drops
 the isolated cream section backdrop. Fog and camera movement are disabled for
 compact/reduced-motion layouts.
@@ -137,6 +143,13 @@ Evidence in `.tmp/landing/spatial/`: intermediate transition screenshots,
 independent page, fog, product, and landscape transforms. The six-layout
 interaction suite also checks that the product persists visually at the end
 but remains inert, and that no full-screen backdrop veil returns.
+
+Latest page-turn evidence: `.tmp/landing/page-turns/` records all five readable
+faces on desktop, phone, and reduced motion, plus the fog exit, empty second
+scene, and separate demo entrance. Browser assertions verify forward/backward
+navigation, previous faces turning out of view, readable front-face width, and
+zero document/demo opacity during the quiet interval. The six-layout interaction
+suite, direct-link/reload smoke, frontend tests, typecheck, and build passed.
 
 Presentation limits: this is a CSS/DOM spatial composition, not an orbitable 3D
 scene. The public interaction is a deterministic demonstration using the real

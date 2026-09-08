@@ -39,7 +39,7 @@
 .fog { position: absolute; pointer-events: none; background: radial-gradient(ellipse at 28% 55%,#e5e6d766,transparent 52%),radial-gradient(ellipse at 67% 45%,#f0eddf4a,transparent 49%),radial-gradient(ellipse at 84% 62%,#cbd7cd38,transparent 44%); filter: blur(14px); }
 .fogFar { inset: 42% -15% 13% 18%; opacity: .48; }
 .fogBetween { width: 240%; height: 65%; left: -60%; top: 45%; opacity: .55; }
-.fogNear { z-index: 9; width: 85%; height: 24%; left: 32%; top: 71%; opacity: .36; }
+.fogNear { z-index: 9; width: 95%; height: 39%; left: 27%; top: 61%; opacity: .8; background: radial-gradient(ellipse at 42% 48%,#e4e5d9b3,transparent 59%),radial-gradient(ellipse at 73% 61%,#ece8dba3,transparent 53%),radial-gradient(ellipse at 18% 70%,#cbd5cd80,transparent 46%); }
 .storyCopy { position: absolute; z-index: 4; left: 7%; width: 40%; top: 27%; }
 .heroStoryCopy { top: 26%; }
 .eyebrowLight { font-size: 10px; line-height: 1.5; font-weight: 500; letter-spacing: .19em; text-transform: uppercase; margin: 0 0 22px; }
@@ -51,10 +51,13 @@
 .heroActions { display: flex; align-items: center; gap: 28px; margin-top: 28px; }
 .watchLink { display: flex; gap: 10px; align-items: center; font-size: 12px; text-decoration: none; }
 .watchLink span { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #e4ece57d; border-radius: 50%; font-size: 18px; }
-.transformCopy, .clarityCopy { top: 33%; width: 33%; }
+.clarityCopy { top: 33%; width: 40%; }
 .documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; }
 .documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; }
-.documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg,#fdfcf5,#e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf,5px 5px 0 -2px #f8f7ec,12px 25px 32px #0e201c3d; backface-visibility: hidden; }
+.documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg,#fdfcf5,#e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf,5px 5px 0 -2px #f8f7ec,12px 25px 32px #0e201c3d; backface-visibility: hidden; transform-origin: left center; }
+.pageControls { position: absolute; z-index: 12; left: 52%; bottom: 7%; display: flex; align-items: center; gap: 14px; color: var(--paper); font-size: 12px; }
+.pageControls button { border: 1px solid #f1f0e580; background: #243a3180; color: inherit; border-radius: 50%; width: 42px; height: 42px; font-size: 20px; cursor: pointer; }
+.pageControls button:disabled { opacity: .3; cursor: default; }
 .documentPage::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset -5px 0 9px #6b63530d; pointer-events: none; }
 .pageTopline { display: flex; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #babdaf; font-size: 7px; letter-spacing: .12em; text-transform: uppercase; }
 .paperKicker { margin: 27px 0 8px; font-size: 9px; color: #5b715b; }
@@ -139,7 +142,7 @@
 .spatialStory[data-static-story=true] { height: auto; }
 [data-static-story=true] .storySticky { position: relative; height: auto; min-height: 0; padding: 150px 6vw 90px; overflow: hidden; perspective: none; }
 [data-static-story=true] .environment { background: #20382f; }
-[data-static-story=true] .landscape { height: 1200px; object-position: 48% top; mask-image: linear-gradient(#000 60%,transparent); }
+[data-static-story=true] .landscape { height: 2000px; object-position: 48% top; mask-image: linear-gradient(#000 70%,transparent); }
 [data-static-story=true] .foreground { display: none; }
 [data-static-story=true] .fog { display: none; }
 [data-static-story=true] .storyCopy { position: relative; inset: auto; width: 100%; margin: 0; }
@@ -147,15 +150,12 @@
 [data-static-story=true] .storyHeadline { font-size: clamp(64px,10vw,92px); }
 [data-static-story=true] .documentScene { position: relative; inset: auto; height: 550px; margin: 65px auto 45px; max-width: 600px; perspective: 1200px; }
 [data-static-story=true] .documentStack { left: 50%; margin-left: -180px; top: 35px; width: 340px; aspect-ratio: .68; }
-[data-static-story=true] .documentPage { opacity: 1 !important; }
-[data-static-story=true] [data-paper-layer="0"] { transform: rotateY(-12deg) rotateZ(-5deg) translateZ(80px) !important; }
-[data-static-story=true] [data-paper-layer="1"] { transform: translate3d(25px,-8px,20px) rotateZ(-1deg) !important; }
-[data-static-story=true] [data-paper-layer="2"] { transform: translate3d(48px,-18px,-40px) rotateZ(3deg) !important; }
-[data-static-story=true] [data-paper-layer="3"], [data-static-story=true] [data-paper-layer="4"] { display: none; }
+[data-static-story=true] .documentPage { transform: none !important; opacity: 1 !important; }
+[data-static-story=true] .documentPage[data-active=false] { visibility: hidden; }
+[data-static-story=true] .pageControls { position: relative; inset: auto; width: fit-content; margin: 20px auto 0; }
 [data-static-story=true] .capabilityLabels { right: -1%; top: 4%; font-size: 10px; }
-[data-static-story=true] .paperCaption { right: 0; bottom: -10px; }
-[data-static-story=true] .transformCopy { margin: 70px 0; max-width: 550px; }
-[data-static-story=true] .clarityCopy { margin: 90px 0 55px; max-width: 550px; }
+[data-static-story=true] .paperCaption { display: none; }
+[data-static-story=true] .clarityCopy { margin: 90px 0; padding-block: 70px; min-height: 50svh; max-width: 550px; }
 [data-static-story=true] .storyHeading { font-size: clamp(48px,8vw,72px); }
 [data-static-story=true] .productStage { position: relative; inset: auto; margin: 0 -2vw; padding: 25px; border-radius: 12px; background: transparent; }
 [data-static-story=true] .productStageIntro { display: block; }
@@ -231,6 +231,4 @@
 @media (prefers-reduced-motion: reduce) {
   .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   [data-static-story=true] .documentPage { transform: none !important; }
-  [data-static-story=true] [data-paper-layer="1"] { transform: translate(14px,-9px) !important; }
-  [data-static-story=true] [data-paper-layer="2"] { transform: translate(28px,-18px) !important; }
 }
