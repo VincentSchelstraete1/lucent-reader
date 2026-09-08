@@ -1,5 +1,9 @@
 @font-face { font-family: "Lucent Landing Serif"; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/instrument-serif-regular.ttf') format('truetype'); }
 @font-face { font-family: "Lucent Landing Serif"; font-style: italic; font-weight: 400; font-display: swap; src: url('/fonts/instrument-serif-italic.ttf') format('truetype'); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PAGE SHELL
+   ══════════════════════════════════════════════════════════════════════════ */
 .page {
   --lucent-font-editorial: "Lucent Landing Serif", Georgia, serif;
   --ink: #282e28;
@@ -13,13 +17,22 @@
 }
 .page *, .page *::before, .page *::after { box-sizing: border-box; }
 .page a { color: inherit; }
-.sectionContent { position: absolute; inset: 0 0 auto; z-index: 30; background: linear-gradient(#102b248c,transparent); }
+
+/* ── Nav ──────────────────────────────────────────────────────────────────── */
+.sectionContent { position: absolute; inset: 0 0 auto; z-index: 30; background: linear-gradient(#102b248c, transparent); }
 .nav { display: flex; align-items: center; gap: 60px; padding: 26px 6vw; }
 .wordmark { font: 400 32px/1 var(--lucent-font-editorial); text-decoration: none; }
 .navLinks { display: flex; gap: 30px; }
 .navLink { font-size: 12px; text-decoration: none; }
 .navActions { display: flex; align-items: center; gap: 18px; margin-left: auto; }
-.btnPrimary, .btnGhost, .btnLight { display: inline-flex; align-items: center; justify-content: center; gap: 24px; min-height: 44px; padding: 10px 22px; border-radius: 30px; font: 500 12px/1.3 var(--lucent-font-ui); text-decoration: none; transition: background .2s, color .2s; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btnPrimary, .btnGhost, .btnLight {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 24px; min-height: 44px; padding: 10px 22px; border-radius: 30px;
+  font: 500 12px/1.3 var(--lucent-font-ui); text-decoration: none;
+  transition: background .2s, color .2s;
+}
 .btnPrimary { border: 1px solid #e9ece194; }
 .btnGhost { padding-inline: 8px; }
 .btnPrimary:hover { background: #f9f7ef; color: #25372e; }
@@ -30,173 +43,330 @@
 .skipLink { position: fixed; top: 12px; left: 12px; z-index: 90; transform: translateY(-180%); background: var(--paper); padding: 14px 20px; color: var(--ink) !important; }
 .skipLink:focus { transform: none; }
 
-/* ── Scroll story shell ────────────────────────────────────────────────── */
-/* 700svh — ~116svh per stage — so each beat has comfortable breathing room */
+/* ══════════════════════════════════════════════════════════════════════════
+   SCROLL STORY SHELL
+   700svh total — ~116svh per stage — each beat has cinematic breathing room.
+   ══════════════════════════════════════════════════════════════════════════ */
 .spatialStory { position: relative; height: 700svh; margin: 0; padding: 0; max-width: none; }
 .demoAnchor { position: absolute; top: calc(72% - 72svh); width: 1px; height: 1px; pointer-events: none; }
 
-/* Sticky viewport — increased perspective for deeper Z range */
+/* Sticky frame — overflow:hidden clips 2D spill; perspective lives in cameraViewport */
 .storySticky { position: sticky; top: 0; height: 100svh; min-height: 620px; overflow: hidden; }
 
-/* Camera viewport: perspective lives here so perspective-origin animates the "descent" */
+/* ── Camera viewport ────────────────────────────────────────────────────────
+   perspective lives here so that animating perspectiveOrigin creates the
+   "camera descending" illusion without any actual 3D camera object.
+   transform-style:preserve-3d propagates the 3D context to all children.    */
 .cameraViewport {
   position: absolute;
   inset: 0;
   perspective: 1800px;
-  perspective-origin: 50% 50%;
+  perspective-origin: 50% 50%; /* overridden by Framer Motion in JS */
   transform-style: preserve-3d;
 }
 
-/* ── Environment ─────────────────────────────────────────────────────────── */
-.environment { position: absolute; inset: 0; pointer-events: none; transform-style: preserve-3d; }
-.landscape { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 52%; will-change: transform; }
-.landscapeShade { position: absolute; inset: 0; background: linear-gradient(90deg,#11272399,#20362e30 58%,#16292008), linear-gradient(0deg,#142b2570,transparent 45%,#10231e1f); }
-.foreground { position: absolute; inset: 0; background: linear-gradient(90deg,#11272399,#20362e30 58%,#16292008),url('/lucent-landscape.jpg') center 52% / cover; mask-image: linear-gradient(transparent 69%,#000 96%); will-change: transform; }
+/* ══════════════════════════════════════════════════════════════════════════
+   ENVIRONMENT LAYER
+   ══════════════════════════════════════════════════════════════════════════ */
+.environment {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-style: preserve-3d; /* essential — passes 3D context to monolith */
+}
+.landscape {
+  display: block; width: 100%; height: 100%;
+  object-fit: cover; object-position: center 52%;
+  will-change: transform;
+}
+.landscapeShade {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, #11272399, #20362e30 58%, #16292008),
+    linear-gradient(0deg, #142b2570, transparent 45%, #10231e1f);
+}
+.foreground {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, #11272399, #20362e30 58%, #16292008),
+    url('/lucent-landscape.jpg') center 52% / cover;
+  mask-image: linear-gradient(transparent 69%, #000 96%);
+  will-change: transform;
+}
 
-/* ── Fog layers ──────────────────────────────────────────────────────────── */
+/* ── Fog layers ─────────────────────────────────────────────────────────── */
 .fog { position: absolute; pointer-events: none; }
 
-/* Shared fog texture — soft misty blobs */
+/* Shared mist texture — large soft radial blobs */
 .fogFar, .fogDeep, .fogNear, .fogBetween, .fogSweep {
-  background: radial-gradient(ellipse at 28% 55%,#e5e6d766,transparent 52%),
-              radial-gradient(ellipse at 67% 45%,#f0eddf4a,transparent 49%),
-              radial-gradient(ellipse at 84% 62%,#cbd7cd38,transparent 44%);
+  background:
+    radial-gradient(ellipse at 28% 55%, #e5e6d766, transparent 52%),
+    radial-gradient(ellipse at 67% 45%, #f0eddf4a, transparent 49%),
+    radial-gradient(ellipse at 84% 62%, #cbd7cd38, transparent 44%);
   filter: blur(14px);
 }
 
-/* Far mountains mist — drifts rightward */
+/* Far mountains mist — drifts right across Stage 1 */
 .fogFar { inset: 42% -15% 13% 18%; opacity: .48; will-change: transform; }
 
-/* Deep atmospheric mist rising during descent — Stage 1 */
+/* Deep atmospheric mist during descent — larger and denser than fogFar */
 .fogDeep {
-  inset: 30% -20% 25% -10%;
-  opacity: .6;
-  filter: blur(22px);
-  background: radial-gradient(ellipse at 30% 60%,#dce4db80,transparent 55%),
-              radial-gradient(ellipse at 70% 40%,#e8ebe360,transparent 50%),
-              radial-gradient(ellipse at 50% 75%,#d4dcd450,transparent 48%);
+  inset: 28% -22% 22% -12%;
+  filter: blur(28px);
+  background:
+    radial-gradient(ellipse at 30% 60%, #dce4db90, transparent 55%),
+    radial-gradient(ellipse at 70% 38%, #e8ebe370, transparent 50%),
+    radial-gradient(ellipse at 50% 78%, #d2dbd460, transparent 48%);
   will-change: transform, opacity;
 }
 
-/* Between-document fog (inside the interactive stack) */
+/* Stage-2 fly-by mist — rushes low across the bottom of the frame */
+.fogSweep {
+  bottom: 0; left: -30%; width: 165%; height: 34%;
+  filter: blur(22px);
+  background:
+    radial-gradient(ellipse at 20% 70%, #dce9e294, transparent 52%),
+    radial-gradient(ellipse at 55% 48%, #e5ebe278, transparent 48%),
+    radial-gradient(ellipse at 85% 66%, #d6e2dc64, transparent 44%);
+  will-change: transform, opacity;
+}
+
+/* Between-document fog inside the interactive card stack */
 .fogBetween { width: 240%; height: 65%; left: -60%; top: 45%; opacity: .55; }
 
-/* Stage-2 fly-by mist sweep — rushes low across the frame as camera accelerates */
-.fogSweep {
-  bottom: 0;
-  left: -30%;
-  width: 160%;
-  height: 32%;
-  opacity: 0;
-  filter: blur(18px);
-  background: radial-gradient(ellipse at 20% 70%,#dce8e090,transparent 52%),
-              radial-gradient(ellipse at 55% 50%,#e6ebe070,transparent 48%),
-              radial-gradient(ellipse at 85% 65%,#d8e4dc60,transparent 44%);
-  will-change: transform, opacity;
-}
-
-/* Near fog — physically occludes the lower document edges */
+/* Near fog — z-index 9 so it crosses in FRONT of document edges */
 .fogNear {
-  z-index: 9;
-  width: 95%;
-  height: 39%;
-  left: 27%;
-  top: 61%;
-  opacity: .8;
-  background: radial-gradient(ellipse at 42% 48%,#e4e5d9b3,transparent 59%),
-              radial-gradient(ellipse at 73% 61%,#ece8dba3,transparent 53%),
-              radial-gradient(ellipse at 18% 70%,#cbd5cd80,transparent 46%);
+  z-index: 9; width: 95%; height: 39%; left: 27%; top: 61%;
+  filter: blur(16px);
+  background:
+    radial-gradient(ellipse at 42% 48%, #e4e5d9b3, transparent 59%),
+    radial-gradient(ellipse at 73% 61%, #ece8dba3, transparent 53%),
+    radial-gradient(ellipse at 18% 70%, #cbd5cd80, transparent 46%);
   will-change: transform, opacity;
 }
 
-/* ── Document monolith ───────────────────────────────────────────────────── */
-/* The distant paper tower visible in Stages 1–2 and Stage 4.
-   Positioned at viewport center; Z motion drives the approach/recede. */
-.documentMonolith {
+/* ══════════════════════════════════════════════════════════════════════════
+   DOCUMENT MONOLITH (Stages 1–2 and 4)
+   A tall CSS 3D box: front face = paper surface, right face = visible
+   stacked paper edges (via repeating-linear-gradient).
+   The monolithWrapper's Z + scale + rotateY are all driven by Framer Motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Framer Motion wrapper — drives ALL 3D motion (z, scale, rotateY, opacity) */
+.monolithWrapper {
   position: absolute;
+  /* Centred horizontally; top at 6% so the tall box overflows above & below */
   left: 50%;
-  top: 12%;
-  /* Tower dimensions — tall and narrow like a book stack seen from afar */
-  width: 140px;
-  height: 480px;
-  margin-left: -70px;
+  top: 6%;
+  margin-left: -75px; /* half of monolithBox width (150px) */
   transform-style: preserve-3d;
-  transform-origin: 50% 100%;
+  transform-origin: 50% 100%; /* rotate from base so top leans correctly */
   will-change: transform, opacity;
   z-index: 3;
 }
 
-/* Individual thin paper sheets stacked in Z */
-.monolithSheet {
-  position: absolute;
-  inset: 0;
-  border-radius: 2px;
-  background: linear-gradient(
-    160deg,
-    #f5f2e8 0%,
-    #ede8d8 40%,
-    #ddd7c4 100%
-  );
-  border: 1px solid #c8c4b0;
-  box-shadow: 0 1px 3px #0e1f1a22;
-  will-change: transform;
+/* The actual CSS 3D box */
+.monolithBox {
+  position: relative;
+  width: 150px;
+  height: 960px; /* extremely tall — most of height extends off-screen */
+  transform-style: preserve-3d;
 }
 
-/* Top visible page of the monolith with readable text */
-.monolithTopPage {
+/* Front face — readable top page with paper texture */
+.monolithFront {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  inset: 0;
+  background: linear-gradient(170deg, #faf8f0 0%, #edeae0 55%, #e0ddd0 100%);
+  border: 1px solid #c5c2b0;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  /* Subtle dark-edge vignette on the right to sell the depth join */
+}
+.monolithFront::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; bottom: 0; width: 18px;
+  background: linear-gradient(to right, transparent, #0b181418);
+  pointer-events: none;
+}
+
+/* Content laid out on the top visible page */
+.monolithContent {
   padding: 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  pointer-events: none;
-  z-index: 2;
+  gap: 0;
 }
-.monolithTitle {
-  font-family: var(--lucent-font-editorial);
-  font-size: 13px;
+.monolithTopLine {
+  display: flex;
+  justify-content: space-between;
+  font-size: 7px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #8a8d84;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #c8cbbf;
+  margin-bottom: 14px;
+}
+.monolithHeading {
+  font: 400 clamp(18px, 1.6vw, 26px)/1.05 var(--lucent-font-editorial);
   color: #3b4039;
-  line-height: 1.2;
   display: block;
+  margin-bottom: 16px;
 }
-.monolithSubtitle {
-  font-family: var(--lucent-font-editorial);
-  font-size: 11px;
-  color: #6b7169;
-  font-style: italic;
+.monolithPLines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.monolithPLines i {
   display: block;
+  height: 2px;
+  background: #c7cbbf;
+  border-radius: 1px;
+}
+.monolithRule {
+  margin: 13px 0;
+  border-top: 1px solid #b8bbaf;
+  width: 28px;
 }
 
-/* ── Story copy ──────────────────────────────────────────────────────────── */
-.storyCopy { position: absolute; z-index: 4; left: 7%; width: 40%; top: 27%; transform-style: preserve-3d; }
+/* Right side face — stacked paper edges, revealed as rotateY increases.
+   Positioned at left:150px (right edge of front face), then rotated 90° in 3D
+   around its own left edge (transform-origin: 0 50%) to become perpendicular. */
+.monolithRight {
+  position: absolute;
+  top: 0;
+  left: 150px; /* flush with front face's right edge */
+  width: 40px;
+  height: 960px;
+  transform-origin: 0 50%;   /* hinge from left edge */
+  transform: rotateY(90deg); /* swing perpendicular */
+  /* repeating stripe = individual paper sheets visible edge-on */
+  background: repeating-linear-gradient(
+    to bottom,
+    #bbb8aa 0px,
+    #bbb8aa 1px,   /* dark paper edge */
+    #d8d4c6 1px,
+    #d8d4c6 5px    /* lighter paper interior */
+  );
+  border-top: 1px solid #c2bfb0;
+  border-right: 1px solid #a8a59a;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PAGE FAN (Stage 3 — interior document space)
+   22 FanPage sheets fan out from 0° to ±74°.  The fanWrapper covers the
+   whole viewport; pageFan is a zero-size anchor at 50% 50%; each fanPage
+   is absolutely centred on that anchor and has rotateY + z applied by FM.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Full-viewport container for the fan — opacity driven by Framer Motion */
+.fanWrapper {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  transform-style: preserve-3d;
+  will-change: opacity;
+}
+
+/* Zero-size 3D anchor at viewport centre */
+.pageFan {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+/* Individual fan page — looks like a large document card */
+.fanPage {
+  position: absolute;
+  width: clamp(290px, 30vw, 470px);
+  height: clamp(400px, 65vh, 720px);
+  /* centre the page on the anchor point */
+  left: calc(-1 * clamp(145px, 15vw, 235px));
+  top: calc(-1 * clamp(200px, 32.5vh, 360px));
+  /* paper aesthetic matching .documentPage */
+  background: linear-gradient(115deg, #fdfcf5 0%, #ede9df 55%, #e0dcd0 100%);
+  border: 1px solid #c9c8ba;
+  border-radius: 4px 4px 3px 3px;
+  box-shadow:
+    2px 3px 0 #cac8ba,
+    6px 9px 0 -2px #f5f3ee,
+    0 30px 70px #0e201c48;
+  backface-visibility: hidden;
+  transform-origin: center center;
+  transform-style: preserve-3d;
+  overflow: hidden;
+  will-change: transform, opacity;
+}
+
+/* Lined-paper effect on each fan page */
+.fanPage::before {
+  content: '';
+  position: absolute;
+  inset: 50px 30px 30px;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 27px,
+    #c8cbbf3a 27px,
+    #c8cbbf3a 28px
+  );
+}
+
+/* Page header bar */
+.fanPage::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 44px;
+  background: linear-gradient(to bottom, #f5f3e9, #edeae0);
+  border-bottom: 1px solid #c4c2b0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   STAGE 1: STORY COPY
+   ══════════════════════════════════════════════════════════════════════════ */
+.storyCopy {
+  position: absolute;
+  z-index: 4;
+  left: 7%;
+  width: 40%;
+  top: 27%;
+  transform-style: preserve-3d;
+}
 .heroStoryCopy { top: 26%; will-change: transform, opacity; }
 .eyebrowLight { font-size: 10px; line-height: 1.5; font-weight: 500; letter-spacing: .19em; text-transform: uppercase; margin: 0 0 22px; }
 .storyHeadline, .storyHeading, .resolutionCopy h2 { font-family: var(--lucent-font-editorial); font-weight: 400; letter-spacing: -.025em; margin: 0; }
-.storyHeadline { font-size: clamp(66px,6.8vw,112px); line-height: .98; }
+.storyHeadline { font-size: clamp(66px, 6.8vw, 112px); line-height: .98; }
 .storyHeadline em, .storyHeading em, .productStageIntro em { font-weight: 400; }
-.storyHeading { font-size: clamp(60px,6.5vw,104px); line-height: 1; }
+.storyHeading { font-size: clamp(60px, 6.5vw, 104px); line-height: 1; }
 .storyBody { font-size: 14px; line-height: 1.65; max-width: 34ch; margin: 26px 0 0; color: #f1f1e8; }
 .heroActions { display: flex; align-items: center; gap: 28px; margin-top: 28px; }
 .watchLink { display: flex; gap: 10px; align-items: center; font-size: 12px; text-decoration: none; }
 .watchLink span { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #e4ece57d; border-radius: 50%; font-size: 18px; }
 .clarityCopy { top: 33%; width: 40%; }
 
-/* ── Document scene (interactive card reader) ────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   INTERACTIVE DOCUMENT CARD STACK
+   ══════════════════════════════════════════════════════════════════════════ */
 .documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; will-change: transform, opacity; }
-.documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; pointer-events: auto; touch-action: pan-y pinch-zoom; }
+.documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px, 26vw, 390px); aspect-ratio: .72; transform-style: preserve-3d; pointer-events: auto; touch-action: pan-y pinch-zoom; }
 .pageTurnTarget { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
-.documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg,#fdfcf5,#e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf,5px 5px 0 -2px #f8f7ec,12px 25px 32px #0e201c3d; backface-visibility: hidden; transform-origin: left center; }
+.documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg, #fdfcf5, #e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf, 5px 5px 0 -2px #f8f7ec, 12px 25px 32px #0e201c3d; backface-visibility: hidden; transform-origin: left center; }
 .pageControls { position: absolute; z-index: 12; left: 52%; bottom: 7%; display: flex; align-items: center; gap: 14px; color: var(--paper); font-size: 12px; }
 .pageControls button { border: 1px solid #f1f0e580; background: #243a3180; color: inherit; border-radius: 50%; width: 42px; height: 42px; font-size: 20px; cursor: pointer; }
 .pageControls button:disabled { opacity: .3; cursor: default; }
 .documentPage::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset -5px 0 9px #6b63530d; pointer-events: none; }
 .pageTopline { display: flex; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #babdaf; font-size: 7px; letter-spacing: .12em; text-transform: uppercase; }
 .paperKicker { margin: 27px 0 8px; font-size: 9px; color: #5b715b; }
-.documentPage h2 { font: 400 clamp(32px,3vw,44px)/1.02 var(--lucent-font-editorial); margin: 0 0 21px; }
-.documentPage > p:not(.paperKicker) { font-size: clamp(10px,.84vw,13px); line-height: 1.7; margin: 0; }
+.documentPage h2 { font: 400 clamp(32px, 3vw, 44px)/1.02 var(--lucent-font-editorial); margin: 0 0 21px; }
+.documentPage > p:not(.paperKicker) { font-size: clamp(10px, .84vw, 13px); line-height: 1.7; margin: 0; }
 .paperRule { margin: 18px 0; width: 30px; border-top: 1px solid #97a38e; }
 .documentPage > .paperDetail { color: #6f7369; }
 .paperLines { display: grid; gap: 6px; margin: 16px 0; }
@@ -211,62 +381,49 @@
 .capabilityLabels span::before { content: ""; display: inline-block; width: 32px; border-top: 1px solid #f0f4ed70; margin: 0 8px 3px 0; }
 .paperCaption { position: absolute; bottom: 0; right: -18%; font: italic 27px/1.08 var(--lucent-font-editorial); color: #f0f1e7; }
 
-/* ── Stage 3: Floating interaction depth nodes ────────────────────────────── */
-/* Small luminous dots representing interactive hotspots at staggered Z depths */
+/* ══════════════════════════════════════════════════════════════════════════
+   STAGE 3: FLOATING DEPTH NODES
+   Small luminous dots at staggered Z depths — signal interactive hotspots.
+   ══════════════════════════════════════════════════════════════════════════ */
 .floatingNodes { position: absolute; inset: 0; pointer-events: none; transform-style: preserve-3d; z-index: 7; }
 .floatingNode {
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   will-change: transform, opacity;
 }
 .floatingNode::before {
   content: "";
-  position: absolute;
-  inset: -6px;
+  position: absolute; inset: -6px;
   border-radius: 50%;
   background: radial-gradient(circle, #c8ddc820 0%, transparent 70%);
   animation: nodePulse 2.8s ease-in-out infinite;
 }
-.floatingNodeA {
-  top: 38%;
-  left: 62%;
-  background: radial-gradient(circle, #e8eed4, #b8c8a8);
-  box-shadow: 0 0 18px 4px #a4c4a840, 0 0 6px 1px #d4e8c880;
-}
-.floatingNodeB {
-  top: 55%;
-  left: 72%;
-  background: radial-gradient(circle, #dde8d0, #a8bca0);
-  box-shadow: 0 0 14px 3px #90b09440, 0 0 5px 1px #c0d8b870;
-}
-.floatingNodeC {
-  top: 44%;
-  left: 80%;
-  background: radial-gradient(circle, #d0ddc8, #9cb09c);
-  box-shadow: 0 0 12px 3px #88a48840, 0 0 4px 1px #b4cdb450;
-}
+.floatingNodeA { top: 38%; left: 62%; background: radial-gradient(circle, #e8eed4, #b8c8a8); box-shadow: 0 0 18px 4px #a4c4a840, 0 0 6px 1px #d4e8c880; }
+.floatingNodeB { top: 55%; left: 72%; background: radial-gradient(circle, #dde8d0, #a8bca0); box-shadow: 0 0 14px 3px #90b09440, 0 0 5px 1px #c0d8b870; }
+.floatingNodeC { top: 44%; left: 80%; background: radial-gradient(circle, #d0ddc8, #9cb09c); box-shadow: 0 0 12px 3px #88a48840, 0 0 4px 1px #b4cdb450; }
 @keyframes nodePulse {
   0%, 100% { transform: scale(1); opacity: .7; }
   50% { transform: scale(1.6); opacity: .3; }
 }
 
-/* ── Product stage ───────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   STAGE 3: INTERACTIVE PRODUCT DEMO
+   ══════════════════════════════════════════════════════════════════════════ */
 .productStage { position: absolute; z-index: 8; inset: 10% 11% auto; transform-origin: 50% 50%; max-width: 1120px; margin-inline: auto; color: var(--paper); transform-style: preserve-3d; will-change: transform, opacity; }
 .productStageIntro { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 22px; }
 .productStageIntro .eyebrowLight { color: inherit; margin-bottom: 10px; }
-.productStageIntro h2 { font: 400 clamp(34px,3.5vw,52px)/1 var(--lucent-font-editorial); margin: 0; letter-spacing: -.02em; }
+.productStageIntro h2 { font: 400 clamp(34px, 3.5vw, 52px)/1 var(--lucent-font-editorial); margin: 0; letter-spacing: -.02em; }
 .productStageIntro > p { font-size: 12px; line-height: 1.7; margin: 0; color: inherit; }
 .productStageIntro { text-shadow: 0 2px 12px #13251dcc; }
 .demoLoading { min-height: 480px; background: var(--paper); display: grid; place-items: center; color: var(--ink); }
-.productFrame { background: #f8f6f0; border: 1px solid #d8d2c5; border-radius: 8px; box-shadow: 2px 3px 0 #c7c7b9,5px 6px 0 -2px #eeeade,0 32px 70px #0c211b66; color: #2d302d; }
+.productFrame { background: #f8f6f0; border: 1px solid #d8d2c5; border-radius: 8px; box-shadow: 2px 3px 0 #c7c7b9, 5px 6px 0 -2px #eeeade, 0 32px 70px #0c211b66; color: #2d302d; }
 .spatialStory[data-static-story=false] .productFrame { max-height: calc(80svh - 80px); overflow: auto; scrollbar-width: thin; scrollbar-color: #a6b19f #f8f6f0; }
 .productHeader { display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 22px; border-bottom: 1px solid #d8d2c5; }
 .productHeader > strong { font: 400 26px var(--lucent-font-editorial); }
 .productHeader > span { font-size: 12px; color: #6b7168; }
 .productHeader > small { margin-left: auto; font-size: 10px; color: #657266; }
-.productBody { display: grid; grid-template-columns: 110px minmax(0,1fr); }
+.productBody { display: grid; grid-template-columns: 110px minmax(0, 1fr); }
 .productSidebar { padding: 25px 14px; border-right: 1px solid #dfddd2; display: flex; flex-direction: column; gap: 22px; font-size: 11px; color: #626d60; }
 .productSidebar strong { font-weight: 500; padding: 9px 8px; margin: -9px -8px; background: #e3eadd; border-radius: 6px; color: #315d4d; }
 .productMain { min-width: 0; padding: 20px 24px; }
@@ -276,7 +433,7 @@
 .productModes { display: flex; gap: 2px; padding: 3px; border: 1px solid #d8d2c5; border-radius: 30px; font-size: 10px; background: #fbfaf6; }
 .productModes span { padding: 6px 9px; }
 .productModes strong { padding: 6px 9px; background: #dcefe5; border-radius: 30px; font-weight: 500; color: #315d4d; }
-.lessonGrid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(240px,.75fr); gap: 18px; margin-top: 18px; }
+.lessonGrid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, .75fr); gap: 18px; margin-top: 18px; }
 .lessonTeaching, .lessonPractice { min-width: 0; padding: 16px; border-radius: 12px; border: 1px solid #cfe3df; background: #f5fbfa; }
 .lessonPractice { border-color: #eadcc0; background: #fffbf2; }
 .productKicker { font-size: 10px; font-weight: 600; letter-spacing: .12em; color: #58735d; margin: 0 0 10px; }
@@ -305,41 +462,50 @@
 .lessonPractice > button:hover, .lessonPractice > button[aria-pressed=true] { border-color: #58735d; background: #eaf1e5; }
 .lessonPractice .demoReset { border: 0; background: none; padding: 8px 0; color: #315d4d; font-weight: 500; text-decoration: underline; }
 
-/* ── Stage 4: Resolution ─────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   STAGE 4: RESOLUTION
+   ══════════════════════════════════════════════════════════════════════════ */
 .resolutionCopy { position: absolute; z-index: 9; left: 7%; top: 28%; }
-.resolutionCopy h2 { font-size: clamp(64px,6.3vw,100px); line-height: .98; }
+.resolutionCopy h2 { font-size: clamp(64px, 6.3vw, 100px); line-height: .98; }
 .resolutionCopy > p:not(.eyebrowLight) { font-size: 15px; line-height: 1.65; margin: 30px 0; }
 
-/* ── Chrome ──────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   CHROME
+   ══════════════════════════════════════════════════════════════════════════ */
 .scrollCue { position: absolute; bottom: 6%; left: 7%; display: flex; gap: 12px; align-items: center; font-size: 10px; }
 .scrollCue > span { display: inline-block; width: 10px; height: 32px; border: 1px solid #f1f3e499; border-radius: 8px; }
-.scrollCue > span::after { content: ""; display: block; height: 9px; width: 2px; margin: 5px auto; background: #e5eadd; border-radius: 3px; animation: scrollBob 1.8s ease-in-out infinite; }
+.scrollCue > span::after {
+  content: ""; display: block; height: 9px; width: 2px;
+  margin: 5px auto; background: #e5eadd; border-radius: 3px;
+  animation: scrollBob 1.8s ease-in-out infinite;
+}
 @keyframes scrollBob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(6px); }
+  50% { transform: translateY(7px); }
 }
 .storyIndex { position: absolute; right: 6%; bottom: 6%; display: flex; align-items: center; gap: 14px; font-size: 9px; letter-spacing: .06em; color: #f1f3e4; }
 .storyIndex i { width: 70px; height: 1px; background: #f1f3e470; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 6%; padding: 24px 0; border-top: 1px solid #f1f3e426; font-size: 11px; color: #c7d2c5; }
 .footer a { text-decoration: none; }
 
-/* ════════════════════════════════════════════════════════════════════════════
-   Static / reduced-motion fallback
-   Narrow screens and prefers-reduced-motion get a single-column reading order
+/* ══════════════════════════════════════════════════════════════════════════
+   STATIC / REDUCED-MOTION FALLBACK
+   narrow viewports and prefers-reduced-motion get a clean reading layout
    with no camera motion, perspective, or 3D transforms.
-   ════════════════════════════════════════════════════════════════════════════ */
+   ══════════════════════════════════════════════════════════════════════════ */
 .spatialStory[data-static-story=true] { height: auto; }
 [data-static-story=true] .storySticky { position: relative; height: auto; min-height: 0; padding: 150px 6vw 90px; overflow: hidden; perspective: none; }
 [data-static-story=true] .cameraViewport { position: relative; perspective: none; transform-style: flat; }
 [data-static-story=true] .environment { background: #20382f; }
-[data-static-story=true] .landscape { height: 2000px; object-position: 48% top; mask-image: linear-gradient(#000 70%,transparent); }
+[data-static-story=true] .landscape { height: 2000px; object-position: 48% top; mask-image: linear-gradient(#000 70%, transparent); }
 [data-static-story=true] .foreground { display: none; }
 [data-static-story=true] .fog { display: none; }
-[data-static-story=true] .documentMonolith { display: none; }
+[data-static-story=true] .monolithWrapper { display: none; }
+[data-static-story=true] .fanWrapper { display: none; }
 [data-static-story=true] .floatingNodes { display: none; }
 [data-static-story=true] .storyCopy { position: relative; inset: auto; width: 100%; margin: 0; }
 [data-static-story=true] .heroStoryCopy { max-width: 580px; }
-[data-static-story=true] .storyHeadline { font-size: clamp(64px,10vw,92px); }
+[data-static-story=true] .storyHeadline { font-size: clamp(64px, 10vw, 92px); }
 [data-static-story=true] .documentScene { position: relative; inset: auto; height: 550px; margin: 65px auto 45px; max-width: 600px; perspective: 1200px; }
 [data-static-story=true] .documentStack { left: 50%; margin-left: -180px; top: 35px; width: 340px; aspect-ratio: .68; }
 [data-static-story=true] .documentPage[data-active=false] { pointer-events: none; }
@@ -347,20 +513,22 @@
 [data-static-story=true] .capabilityLabels { right: -1%; top: 4%; font-size: 10px; }
 [data-static-story=true] .paperCaption { display: none; }
 [data-static-story=true] .clarityCopy { margin: 90px 0; padding-block: 70px; min-height: 50svh; max-width: 550px; }
-[data-static-story=true] .storyHeading { font-size: clamp(48px,8vw,72px); }
+[data-static-story=true] .storyHeading { font-size: clamp(48px, 8vw, 72px); }
 [data-static-story=true] .productStage { position: relative; inset: auto; margin: 0 -2vw; padding: 25px; border-radius: 12px; background: transparent; }
 [data-static-story=true] .productStageIntro { display: block; }
 [data-static-story=true] .productStageIntro > p { margin-top: 16px; font-size: 13px; }
 [data-static-story=true] .resolutionCopy { position: relative; inset: auto; margin-top: 130px; padding: 80px 0; }
-[data-static-story=true] .resolutionCopy h2 { font-size: clamp(58px,9vw,96px); }
+[data-static-story=true] .resolutionCopy h2 { font-size: clamp(58px, 9vw, 96px); }
 [data-static-story=true] .storyIndex, [data-static-story=true] .scrollCue { display: none; }
 [data-static-story=true] .demoAnchor { top: auto; bottom: 1060px; }
 
-/* ── Responsive adjustments ──────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════════════════════════ */
 @media (min-width: 951px) and (min-height: 621px) and (max-height: 780px) {
   .heroStoryCopy { top: 24%; }
-  .storyHeadline { font-size: clamp(64px,6vw,88px); }
-  .documentStack { width: min(26vw,330px); }
+  .storyHeadline { font-size: clamp(64px, 6vw, 88px); }
+  .documentStack { width: min(26vw, 330px); }
   .productStage { inset-block-start: 10%; }
   .spatialStory[data-static-story=false] .productFrame { max-height: calc(78svh - 70px); }
   .productStageIntro { margin-bottom: 14px; }
@@ -387,10 +555,10 @@
   .navActions { gap: 10px; }
   .btnPrimary, .btnGhost { padding: 8px 12px; }
   [data-static-story=true] .storySticky { padding-top: 140px; }
-  [data-static-story=true] .storyHeadline { font-size: clamp(44px,14vw,76px); }
+  [data-static-story=true] .storyHeadline { font-size: clamp(44px, 14vw, 76px); }
   .heroActions { flex-wrap: wrap; gap: 20px; }
   [data-static-story=true] .documentScene { height: 420px; margin-top: 55px; }
-  [data-static-story=true] .documentStack { width: min(68vw,290px); margin-left: -36vw; }
+  [data-static-story=true] .documentStack { width: min(68vw, 290px); margin-left: -36vw; }
   .documentPage { padding: 22px; }
   .documentPage h2 { font-size: 33px; }
   .documentPage > p:not(.paperKicker) { font-size: 10px; }
