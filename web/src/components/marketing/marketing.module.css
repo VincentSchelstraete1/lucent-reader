@@ -29,19 +29,150 @@
 .page a:focus-visible, .page button:focus-visible { outline: 3px solid #9dbda6; outline-offset: 5px; }
 .skipLink { position: fixed; top: 12px; left: 12px; z-index: 90; transform: translateY(-180%); background: var(--paper); padding: 14px 20px; color: var(--ink) !important; }
 .skipLink:focus { transform: none; }
-.spatialStory { position: relative; height: 600svh; margin: 0; padding: 0; max-width: none; }
+
+/* ── Scroll story shell ────────────────────────────────────────────────── */
+/* 700svh — ~116svh per stage — so each beat has comfortable breathing room */
+.spatialStory { position: relative; height: 700svh; margin: 0; padding: 0; max-width: none; }
 .demoAnchor { position: absolute; top: calc(72% - 72svh); width: 1px; height: 1px; pointer-events: none; }
-.storySticky { position: sticky; top: 0; height: 100svh; min-height: 620px; overflow: hidden; perspective: 1500px; }
-.environment { position: absolute; inset: 0; pointer-events: none; }
-.landscape { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 52%; }
+
+/* Sticky viewport — increased perspective for deeper Z range */
+.storySticky { position: sticky; top: 0; height: 100svh; min-height: 620px; overflow: hidden; }
+
+/* Camera viewport: perspective lives here so perspective-origin animates the "descent" */
+.cameraViewport {
+  position: absolute;
+  inset: 0;
+  perspective: 1800px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+}
+
+/* ── Environment ─────────────────────────────────────────────────────────── */
+.environment { position: absolute; inset: 0; pointer-events: none; transform-style: preserve-3d; }
+.landscape { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 52%; will-change: transform; }
 .landscapeShade { position: absolute; inset: 0; background: linear-gradient(90deg,#11272399,#20362e30 58%,#16292008), linear-gradient(0deg,#142b2570,transparent 45%,#10231e1f); }
-.foreground { position: absolute; inset: 0; background: linear-gradient(90deg,#11272399,#20362e30 58%,#16292008),url('/lucent-landscape.jpg') center 52% / cover; mask-image: linear-gradient(transparent 69%,#000 96%); }
-.fog { position: absolute; pointer-events: none; background: radial-gradient(ellipse at 28% 55%,#e5e6d766,transparent 52%),radial-gradient(ellipse at 67% 45%,#f0eddf4a,transparent 49%),radial-gradient(ellipse at 84% 62%,#cbd7cd38,transparent 44%); filter: blur(14px); }
-.fogFar { inset: 42% -15% 13% 18%; opacity: .48; }
+.foreground { position: absolute; inset: 0; background: linear-gradient(90deg,#11272399,#20362e30 58%,#16292008),url('/lucent-landscape.jpg') center 52% / cover; mask-image: linear-gradient(transparent 69%,#000 96%); will-change: transform; }
+
+/* ── Fog layers ──────────────────────────────────────────────────────────── */
+.fog { position: absolute; pointer-events: none; }
+
+/* Shared fog texture — soft misty blobs */
+.fogFar, .fogDeep, .fogNear, .fogBetween, .fogSweep {
+  background: radial-gradient(ellipse at 28% 55%,#e5e6d766,transparent 52%),
+              radial-gradient(ellipse at 67% 45%,#f0eddf4a,transparent 49%),
+              radial-gradient(ellipse at 84% 62%,#cbd7cd38,transparent 44%);
+  filter: blur(14px);
+}
+
+/* Far mountains mist — drifts rightward */
+.fogFar { inset: 42% -15% 13% 18%; opacity: .48; will-change: transform; }
+
+/* Deep atmospheric mist rising during descent — Stage 1 */
+.fogDeep {
+  inset: 30% -20% 25% -10%;
+  opacity: .6;
+  filter: blur(22px);
+  background: radial-gradient(ellipse at 30% 60%,#dce4db80,transparent 55%),
+              radial-gradient(ellipse at 70% 40%,#e8ebe360,transparent 50%),
+              radial-gradient(ellipse at 50% 75%,#d4dcd450,transparent 48%);
+  will-change: transform, opacity;
+}
+
+/* Between-document fog (inside the interactive stack) */
 .fogBetween { width: 240%; height: 65%; left: -60%; top: 45%; opacity: .55; }
-.fogNear { z-index: 9; width: 95%; height: 39%; left: 27%; top: 61%; opacity: .8; background: radial-gradient(ellipse at 42% 48%,#e4e5d9b3,transparent 59%),radial-gradient(ellipse at 73% 61%,#ece8dba3,transparent 53%),radial-gradient(ellipse at 18% 70%,#cbd5cd80,transparent 46%); }
-.storyCopy { position: absolute; z-index: 4; left: 7%; width: 40%; top: 27%; }
-.heroStoryCopy { top: 26%; }
+
+/* Stage-2 fly-by mist sweep — rushes low across the frame as camera accelerates */
+.fogSweep {
+  bottom: 0;
+  left: -30%;
+  width: 160%;
+  height: 32%;
+  opacity: 0;
+  filter: blur(18px);
+  background: radial-gradient(ellipse at 20% 70%,#dce8e090,transparent 52%),
+              radial-gradient(ellipse at 55% 50%,#e6ebe070,transparent 48%),
+              radial-gradient(ellipse at 85% 65%,#d8e4dc60,transparent 44%);
+  will-change: transform, opacity;
+}
+
+/* Near fog — physically occludes the lower document edges */
+.fogNear {
+  z-index: 9;
+  width: 95%;
+  height: 39%;
+  left: 27%;
+  top: 61%;
+  opacity: .8;
+  background: radial-gradient(ellipse at 42% 48%,#e4e5d9b3,transparent 59%),
+              radial-gradient(ellipse at 73% 61%,#ece8dba3,transparent 53%),
+              radial-gradient(ellipse at 18% 70%,#cbd5cd80,transparent 46%);
+  will-change: transform, opacity;
+}
+
+/* ── Document monolith ───────────────────────────────────────────────────── */
+/* The distant paper tower visible in Stages 1–2 and Stage 4.
+   Positioned at viewport center; Z motion drives the approach/recede. */
+.documentMonolith {
+  position: absolute;
+  left: 50%;
+  top: 12%;
+  /* Tower dimensions — tall and narrow like a book stack seen from afar */
+  width: 140px;
+  height: 480px;
+  margin-left: -70px;
+  transform-style: preserve-3d;
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+  z-index: 3;
+}
+
+/* Individual thin paper sheets stacked in Z */
+.monolithSheet {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: linear-gradient(
+    160deg,
+    #f5f2e8 0%,
+    #ede8d8 40%,
+    #ddd7c4 100%
+  );
+  border: 1px solid #c8c4b0;
+  box-shadow: 0 1px 3px #0e1f1a22;
+  will-change: transform;
+}
+
+/* Top visible page of the monolith with readable text */
+.monolithTopPage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 2;
+}
+.monolithTitle {
+  font-family: var(--lucent-font-editorial);
+  font-size: 13px;
+  color: #3b4039;
+  line-height: 1.2;
+  display: block;
+}
+.monolithSubtitle {
+  font-family: var(--lucent-font-editorial);
+  font-size: 11px;
+  color: #6b7169;
+  font-style: italic;
+  display: block;
+}
+
+/* ── Story copy ──────────────────────────────────────────────────────────── */
+.storyCopy { position: absolute; z-index: 4; left: 7%; width: 40%; top: 27%; transform-style: preserve-3d; }
+.heroStoryCopy { top: 26%; will-change: transform, opacity; }
 .eyebrowLight { font-size: 10px; line-height: 1.5; font-weight: 500; letter-spacing: .19em; text-transform: uppercase; margin: 0 0 22px; }
 .storyHeadline, .storyHeading, .resolutionCopy h2 { font-family: var(--lucent-font-editorial); font-weight: 400; letter-spacing: -.025em; margin: 0; }
 .storyHeadline { font-size: clamp(66px,6.8vw,112px); line-height: .98; }
@@ -52,7 +183,9 @@
 .watchLink { display: flex; gap: 10px; align-items: center; font-size: 12px; text-decoration: none; }
 .watchLink span { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #e4ece57d; border-radius: 50%; font-size: 18px; }
 .clarityCopy { top: 33%; width: 40%; }
-.documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; }
+
+/* ── Document scene (interactive card reader) ────────────────────────────── */
+.documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; will-change: transform, opacity; }
 .documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; pointer-events: auto; touch-action: pan-y pinch-zoom; }
 .pageTurnTarget { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
 .documentPage { position: absolute; inset: 0; padding: 30px 32px; border: 1px solid #c9c8ba; border-radius: 4px; background: linear-gradient(115deg,#fdfcf5,#e8e4d8); color: #3b4039; box-shadow: 2px 2px 0 #cbc9bf,5px 5px 0 -2px #f8f7ec,12px 25px 32px #0e201c3d; backface-visibility: hidden; transform-origin: left center; }
@@ -74,10 +207,53 @@
 .paperFlow { display: grid; justify-items: center; font-size: 10px; }
 .paperFlow span { background: #e3e9dc; border: 1px solid #adbaa5; border-radius: 5px; padding: 10px 15px; width: 90%; text-align: center; }
 .paperFlow i { padding: 3px; font-style: normal; }
-.capabilityLabels { position: absolute; right: -21%; top: 5%; display: flex; flex-direction: column; gap: 33px; color: #f5f6ee; font-size: 11px; }
+.capabilityLabels { position: absolute; right: -21%; top: 5%; display: flex; flex-direction: column; gap: 33px; color: #f5f6ee; font-size: 11px; transform-style: preserve-3d; }
 .capabilityLabels span::before { content: ""; display: inline-block; width: 32px; border-top: 1px solid #f0f4ed70; margin: 0 8px 3px 0; }
 .paperCaption { position: absolute; bottom: 0; right: -18%; font: italic 27px/1.08 var(--lucent-font-editorial); color: #f0f1e7; }
-.productStage { position: absolute; z-index: 8; inset: 10% 11% auto; transform-origin: 50% 50%; max-width: 1120px; margin-inline: auto; color: var(--paper); }
+
+/* ── Stage 3: Floating interaction depth nodes ────────────────────────────── */
+/* Small luminous dots representing interactive hotspots at staggered Z depths */
+.floatingNodes { position: absolute; inset: 0; pointer-events: none; transform-style: preserve-3d; z-index: 7; }
+.floatingNode {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  will-change: transform, opacity;
+}
+.floatingNode::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #c8ddc820 0%, transparent 70%);
+  animation: nodePulse 2.8s ease-in-out infinite;
+}
+.floatingNodeA {
+  top: 38%;
+  left: 62%;
+  background: radial-gradient(circle, #e8eed4, #b8c8a8);
+  box-shadow: 0 0 18px 4px #a4c4a840, 0 0 6px 1px #d4e8c880;
+}
+.floatingNodeB {
+  top: 55%;
+  left: 72%;
+  background: radial-gradient(circle, #dde8d0, #a8bca0);
+  box-shadow: 0 0 14px 3px #90b09440, 0 0 5px 1px #c0d8b870;
+}
+.floatingNodeC {
+  top: 44%;
+  left: 80%;
+  background: radial-gradient(circle, #d0ddc8, #9cb09c);
+  box-shadow: 0 0 12px 3px #88a48840, 0 0 4px 1px #b4cdb450;
+}
+@keyframes nodePulse {
+  0%, 100% { transform: scale(1); opacity: .7; }
+  50% { transform: scale(1.6); opacity: .3; }
+}
+
+/* ── Product stage ───────────────────────────────────────────────────────── */
+.productStage { position: absolute; z-index: 8; inset: 10% 11% auto; transform-origin: 50% 50%; max-width: 1120px; margin-inline: auto; color: var(--paper); transform-style: preserve-3d; will-change: transform, opacity; }
 .productStageIntro { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 22px; }
 .productStageIntro .eyebrowLight { color: inherit; margin-bottom: 10px; }
 .productStageIntro h2 { font: 400 clamp(34px,3.5vw,52px)/1 var(--lucent-font-editorial); margin: 0; letter-spacing: -.02em; }
@@ -128,24 +304,39 @@
 .lessonPractice > button { width: 100%; display: block; padding: 12px; margin-top: 9px; font: 12px/1.5 var(--lucent-font-ui); text-align: left; color: #343b31; border: 1px solid #d8d2c5; border-radius: 8px; background: #fffefa; cursor: pointer; }
 .lessonPractice > button:hover, .lessonPractice > button[aria-pressed=true] { border-color: #58735d; background: #eaf1e5; }
 .lessonPractice .demoReset { border: 0; background: none; padding: 8px 0; color: #315d4d; font-weight: 500; text-decoration: underline; }
+
+/* ── Stage 4: Resolution ─────────────────────────────────────────────────── */
 .resolutionCopy { position: absolute; z-index: 9; left: 7%; top: 28%; }
 .resolutionCopy h2 { font-size: clamp(64px,6.3vw,100px); line-height: .98; }
 .resolutionCopy > p:not(.eyebrowLight) { font-size: 15px; line-height: 1.65; margin: 30px 0; }
+
+/* ── Chrome ──────────────────────────────────────────────────────────────── */
 .scrollCue { position: absolute; bottom: 6%; left: 7%; display: flex; gap: 12px; align-items: center; font-size: 10px; }
 .scrollCue > span { display: inline-block; width: 10px; height: 32px; border: 1px solid #f1f3e499; border-radius: 8px; }
-.scrollCue > span::after { content: ""; display: block; height: 9px; width: 2px; margin: 5px auto; background: #e5eadd; border-radius: 3px; }
+.scrollCue > span::after { content: ""; display: block; height: 9px; width: 2px; margin: 5px auto; background: #e5eadd; border-radius: 3px; animation: scrollBob 1.8s ease-in-out infinite; }
+@keyframes scrollBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
 .storyIndex { position: absolute; right: 6%; bottom: 6%; display: flex; align-items: center; gap: 14px; font-size: 9px; letter-spacing: .06em; color: #f1f3e4; }
 .storyIndex i { width: 70px; height: 1px; background: #f1f3e470; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 6%; padding: 24px 0; border-top: 1px solid #f1f3e426; font-size: 11px; color: #c7d2c5; }
 .footer a { text-decoration: none; }
 
-/* One reading order at narrower sizes and when camera motion is disabled. */
+/* ════════════════════════════════════════════════════════════════════════════
+   Static / reduced-motion fallback
+   Narrow screens and prefers-reduced-motion get a single-column reading order
+   with no camera motion, perspective, or 3D transforms.
+   ════════════════════════════════════════════════════════════════════════════ */
 .spatialStory[data-static-story=true] { height: auto; }
 [data-static-story=true] .storySticky { position: relative; height: auto; min-height: 0; padding: 150px 6vw 90px; overflow: hidden; perspective: none; }
+[data-static-story=true] .cameraViewport { position: relative; perspective: none; transform-style: flat; }
 [data-static-story=true] .environment { background: #20382f; }
 [data-static-story=true] .landscape { height: 2000px; object-position: 48% top; mask-image: linear-gradient(#000 70%,transparent); }
 [data-static-story=true] .foreground { display: none; }
 [data-static-story=true] .fog { display: none; }
+[data-static-story=true] .documentMonolith { display: none; }
+[data-static-story=true] .floatingNodes { display: none; }
 [data-static-story=true] .storyCopy { position: relative; inset: auto; width: 100%; margin: 0; }
 [data-static-story=true] .heroStoryCopy { max-width: 580px; }
 [data-static-story=true] .storyHeadline { font-size: clamp(64px,10vw,92px); }
@@ -164,6 +355,8 @@
 [data-static-story=true] .resolutionCopy h2 { font-size: clamp(58px,9vw,96px); }
 [data-static-story=true] .storyIndex, [data-static-story=true] .scrollCue { display: none; }
 [data-static-story=true] .demoAnchor { top: auto; bottom: 1060px; }
+
+/* ── Responsive adjustments ──────────────────────────────────────────────── */
 @media (min-width: 951px) and (min-height: 621px) and (max-height: 780px) {
   .heroStoryCopy { top: 24%; }
   .storyHeadline { font-size: clamp(64px,6vw,88px); }
