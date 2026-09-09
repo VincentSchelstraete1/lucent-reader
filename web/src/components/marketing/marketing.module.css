@@ -289,6 +289,11 @@
 .sceneScrim { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 40%, rgba(17, 39, 35, 0.25) 100%); pointer-events: none; z-index: 1; }
 .heroOverlay { position: absolute; inset: 0; z-index: 20; pointer-events: none; }
 .openingMark { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; flex-direction: column; gap: 9px; color: #344344; text-shadow: 0 1px 12px #fff4d777; }
+.valleyCapabilities { position: absolute; right: 5%; top: 30%; width: 110px; color: #faf7ec; text-shadow: 0 1px 12px #203d47; }
+.valleyCapabilities > div { display: grid; gap: 25px; }
+.valleyCapabilities span { display: flex; align-items: center; gap: 15px; font-size: 11px; }
+.valleyCapabilities i { width: 26px; height: 1px; background: #f6f0de88; }
+.valleyCapabilities em { display: block; margin-top: 90px; font: italic 25px/1.1 var(--lucent-font-editorial); }
 .openingPoster { position: absolute; inset: 0; z-index: 19; pointer-events: none; background: url('/lucent-opening-alpine.jpg') center / cover; transform: scale(1.06); }
 .storySticky:has(canvas[data-opening]) .openingPoster { display: none; }
 .openingMark svg { width: 28px; height: 34px; filter: drop-shadow(0 1px 5px #192f3955); }

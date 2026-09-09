@@ -250,19 +250,19 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
   useMotionValueEvent(p, "change", v => {
     scrollRef.current = v
     requestFrame.current()
-    setBeat(v < .075 ? 0 : v < .29 ? 1 : v < .46 ? 2 : v < .88 ? 3 : 4)
+    setBeat(v < .095 ? 0 : v < .335 ? 1 : v < .46 ? 2 : v < .88 ? 3 : 4)
   })
 
   // ── Overlay opacity values ────────────────────────────────────────────────
-  const stage1Opacity   = useTimeline(p, [.065, .11, .22, .285], [0, 1, 1, 0])
-  const heroX = useTimeline(p, [.065, .12, .22, .285], [-160, 0, 0, -200])
-  const heroY = useTimeline(p, [.065, .12, .22, .285], [50, 0, 0, -50])
+  const stage1Opacity   = useTimeline(p, [.095, .16, .285, .335], [0, 1, 1, 0])
+  const heroX = useTimeline(p, [.095, .18, .285, .335], [-100, 0, 0, -160])
+  const heroY = useTimeline(p, [.095, .18, .285, .335], [30, 0, 0, -30])
   const stage2Opacity   = useTimeline(p, [.315, .35, .40, .445], [0, 1, 1, 0])
   const stage4Opacity   = useTimeline(p, [.91, .97], [0, 1])
   const scrollCueOp     = useTimeline(p, [0, .055, .095], [1, 1, 0])
   const openingMarkOp = useTimeline(p, [0, .035, .06], [1, 1, 0])
 
-  const STAGE_LABELS = ["Explore", "Your material", "A clearer path", "Inside Lucent", "Go further"]
+  const STAGE_LABELS = ["Explore", "Your material", "A clearer path", "Lucent in the valley", "Go further"]
 
   useEffect(() => {
     if (window.location.hash !== "#learn-in-action") return
@@ -327,6 +327,11 @@ function CanvasHero({ storyRef, onUnavailable }: { storyRef: React.RefObject<HTM
           <button type="button" aria-label="Previous source page" disabled={activeCard === 0} onClick={() => setActiveCard(c => Math.max(0, c - 1))}>←</button>
           <span aria-live="polite">{activeCard + 1} / 5 · {LAYERS[activeCard]}</span>
           <button type="button" aria-label="Next source page" disabled={activeCard === 4} onClick={() => setActiveCard(c => Math.min(4, c + 1))}>→</button>
+        </motion.div>
+
+        <motion.div className={styles.valleyCapabilities} style={{ opacity: stage1Opacity }} aria-hidden="true">
+          <div>{['Simplify', 'Explain', 'Visualize', 'Practice', 'Learn'].map(label => <span key={label}><i />{label}</span>)}</div>
+          <em>From pages<br />to progress.</em>
         </motion.div>
 
         {/* Stage 2: clarity copy */}

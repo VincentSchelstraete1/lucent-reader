@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useTexture } from "@react-three/drei"
 import * as THREE from "three"
-import { cameraPose, smooth } from "./flythrough"
-import { openingDepth, OPENING_END } from "./openingScene"
+import { cameraPose } from "./flythrough"
+import { openingDepth } from "./openingScene"
 
 // A photographic depth projection, not a replacement set of generated mountains.
-// This bounded opening ends before the existing introduction has assembled.
+// The same photographic landscape persists throughout the camera journey.
 export function OpeningLandscape({ progress }: { progress: MutableRefObject<number> }) {
   const texture = useTexture('/lucent-opening-alpine.jpg')
   const { size, invalidate } = useThree()
@@ -16,7 +16,7 @@ export function OpeningLandscape({ progress }: { progress: MutableRefObject<numb
     const g = new THREE.PlaneGeometry(1, 1, 160, 100)
     const pos = g.attributes.position, uv = g.attributes.uv
     const aspect = size.width / size.height
-    const height = 2 * Math.tan(THREE.MathUtils.degToRad(52 / 2)) * 1.06
+    const height = 2 * Math.tan(THREE.MathUtils.degToRad(52 / 2)) * 1.1
     for (let i = 0; i < pos.count; i++) {
       const u = uv.getX(i), v = uv.getY(i)
       const depth = openingDepth(u, v)
@@ -39,19 +39,20 @@ export function OpeningLandscape({ progress }: { progress: MutableRefObject<numb
     texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter
     texture.needsUpdate = true
     let frame: ReturnType<typeof setTimeout>
-    const tick = () => { if (progress.current < OPENING_END && !document.hidden) invalidate(); frame = setTimeout(tick, 1000 / 30) }
+    const tick = () => { if (!document.hidden) invalidate(); frame = setTimeout(tick, 1000 / 30) }
     tick()
     return () => clearTimeout(frame)
   }, [texture, invalidate, progress])
   useFrame(({ clock, gl }) => {
-    surface.current.visible = progress.current < OPENING_END
+    surface.current.visible = true
     material.current.uniforms.time.value = clock.elapsedTime
-    material.current.uniforms.opacity.value = 1 - smooth(progress.current, .055, OPENING_END)
-    gl.domElement.dataset.opening = surface.current.visible ? 'photographic-depth' : 'inactive'
+    material.current.uniforms.opacity.value = 1
+    gl.domElement.dataset.opening = 'photographic-depth'
+    gl.domElement.dataset.landscape = 'persistent-alpine'
     gl.domElement.dataset.openingTime = clock.elapsedTime.toFixed(2)
   })
-  return <mesh ref={surface} geometry={geometry} position={basis.position} quaternion={basis.quaternion} renderOrder={1000} frustumCulled={false} raycast={() => {}}>
-    <shaderMaterial ref={material} uniforms={uniforms} transparent depthTest={false} depthWrite={false} toneMapped={false}
+  return <mesh ref={surface} geometry={geometry} position={basis.position} quaternion={basis.quaternion} renderOrder={-10} frustumCulled={false} raycast={() => {}}>
+    <shaderMaterial ref={material} uniforms={uniforms} depthTest depthWrite toneMapped={false}
       vertexShader={`varying vec2 photoUv;
         void main(){ photoUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`}
       fragmentShader={`
