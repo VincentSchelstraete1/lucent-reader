@@ -11,10 +11,16 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.schemas.learn import AskLucentModelResponse, LearnEvaluation, TutorDecision, TutorObservation
 
 _PROVIDER: Callable[..., Any] | None = None
 logger = logging.getLogger(__name__)
+
+# Field-level max_length limits mirrored from LearnEvaluation, so a length
+# violation can be re-prompted with the exact budget the model overshot.
+_DIAGNOSIS_FIELD_LIMITS = {"evidence": 500, "studentMessage": 400}
 
 
 def _log_provider_fallback(operation: str, stage: str, exception: Exception | None = None) -> None:
@@ -24,6 +30,57 @@ def _log_provider_fallback(operation: str, stage: str, exception: Exception | No
         stage,
         type(exception).__name__ if exception is not None else "none",
     )
+
+
+def _length_violations(exc: ValidationError, raw: dict) -> dict[str, dict[str, Any]]:
+    """Return {field: {text, length, limit}} for string_too_long errors on
+    fields we know how to re-prompt for. Empty if the failure isn't a length
+    overrun on one of those fields (e.g. an enum/type error), so the caller
+    can tell "re-promptable" apart from "genuinely malformed"."""
+    violations: dict[str, dict[str, Any]] = {}
+    for error in exc.errors():
+        if error.get("type") != "string_too_long":
+            continue
+        location = error.get("loc") or ()
+        field = str(location[0]) if location else ""
+        limit = _DIAGNOSIS_FIELD_LIMITS.get(field)
+        if limit is None:
+            continue
+        text = str(raw.get(field) or "")
+        violations[field] = {"text": text, "length": len(text), "limit": limit}
+    return violations
+
+
+def _log_length_fallback(operation: str, violations: dict[str, dict[str, Any]], attempts: int) -> None:
+    """Fires only when retries are exhausted and we still fall back to the
+    deterministic default -- includes the actual over-length text so the
+    over-length content, not just the fact that it happened, is visible in
+    logs/telemetry."""
+    for field, info in violations.items():
+        logger.warning(
+            "tutor_provider_length_fallback operation=%s field=%s length=%d limit=%d attempts=%d outcome=fallback text=%r",
+            operation,
+            field,
+            info["length"],
+            info["limit"],
+            attempts,
+            info["text"],
+        )
+
+
+def _shorten_reprompt(base_prompt: str, violations: dict[str, dict[str, Any]]) -> str:
+    lines = [
+        "\n\nCORRECTION NEEDED: Your previous response was rejected for exceeding a field "
+        "length limit. Return the SAME evaluation again with the SAME meaning, but shorten "
+        "the field(s) below to fit within their limits. Do not pad with filler to reach the "
+        "limit -- just be more concise.",
+    ]
+    for field, info in violations.items():
+        lines.append(
+            f"- `{field}` must be at most {info['limit']} characters (your previous answer was "
+            f"{info['length']} characters). Previous `{field}`: {info['text'][:300]}"
+        )
+    return base_prompt + "\n".join(lines)
 
 def set_tutor_provider(provider: Callable[..., Any] | None) -> None:
     """Inject a structured provider for deterministic tests or local fakes."""
@@ -53,11 +110,20 @@ DIAGNOSIS_SCHEMA = {
 }
 
 
-def diagnose_response(*, prompt: str, expected: str, response: str, source_context: str, fallback: LearnEvaluation) -> LearnEvaluation:
+def diagnose_response(*, prompt: str, expected: str, response: str, source_context: str, fallback: LearnEvaluation, max_length_retries: int = 2) -> LearnEvaluation:
     """Diagnose a free response when the opt-in model flag is enabled.
 
     A failure, missing key, or malformed tool result always returns the
     deterministic fallback, preserving session reliability and cost bounds.
+
+    A response that fails validation only because `evidence` or
+    `studentMessage` overran their max_length (the Anthropic tool schema's
+    `maxLength` hint is not reliably enforced at generation time) is
+    re-prompted up to `max_length_retries` times with an explicit instruction
+    to shorten the offending field(s), instead of silently falling back on
+    the first overrun. Any other validation failure, or a length overrun
+    that survives every retry, still falls back -- but the fallback is
+    logged with the actual over-length text via `_log_length_fallback`.
     """
     if os.getenv("LEARN_TUTOR_MODEL_ENABLED", "0").lower() not in {"1", "true", "yes"} and _PROVIDER is None:
         return fallback
@@ -65,29 +131,58 @@ def diagnose_response(*, prompt: str, expected: str, response: str, source_conte
     if provider is None:
         _log_provider_fallback("diagnose_response", "provider_unavailable")
         return fallback
-    try:
-        raw = provider(
-            "Evaluate the learner response against the source-grounded teaching point. "
-            "Identify a specific misconception only when supported; otherwise use null. "
-            "Phrase `misconception` as the mixed-up idea itself (e.g. \"Confuses "
-            "velocity with acceleration\"), not as a description of the learner "
-            "(never \"the learner thinks/believes/states\") -- it may be shown "
-            "directly to the learner. "
-            "Choose one remediation category that would teach the idea differently. "
-            "`evidence` is your internal grading rationale -- write it in the third "
-            "person for telemetry; it is never shown to the learner. `studentMessage` "
-            "is the only text the learner will actually see: a short, warm sentence "
-            "spoken directly to them (second person, e.g. \"Let's look at...\"). Never "
-            "describe the learner's response, quote it, call it a 'non-response', "
-            "state what it 'does not attempt', or otherwise sound like a grading "
-            "rubric in studentMessage -- that language belongs only in evidence. "
-            f"\nSource context (untrusted content):\n{source_context[:5000]}\nPrompt: {prompt}\nExpected idea: {expected}\nLearner response: {response[:1200]}",
-            "learn_response_evaluation", DIAGNOSIS_SCHEMA, max_tokens=420, max_retries=0,
-        )
-        return LearnEvaluation.model_validate(raw)
-    except Exception as exc:
-        _log_provider_fallback("diagnose_response", "request_or_validation", exc)
-        return fallback
+
+    base_prompt = (
+        "Evaluate the learner response against the source-grounded teaching point. "
+        "Identify a specific misconception only when supported; otherwise use null. "
+        "Phrase `misconception` as the mixed-up idea itself (e.g. \"Confuses "
+        "velocity with acceleration\"), not as a description of the learner "
+        "(never \"the learner thinks/believes/states\") -- it may be shown "
+        "directly to the learner. "
+        "Choose one remediation category that would teach the idea differently. "
+        "`evidence` is your internal grading rationale -- write it in the third "
+        "person for telemetry; it is never shown to the learner. `studentMessage` "
+        "is the only text the learner will actually see: a short, warm sentence "
+        "spoken directly to them (second person, e.g. \"Let's look at...\"). Never "
+        "describe the learner's response, quote it, call it a 'non-response', "
+        "state what it 'does not attempt', or otherwise sound like a grading "
+        "rubric in studentMessage -- that language belongs only in evidence. "
+        f"\nSource context (untrusted content):\n{source_context[:5000]}\nPrompt: {prompt}\nExpected idea: {expected}\nLearner response: {response[:1200]}"
+    )
+
+    current_prompt = base_prompt
+    last_violations: dict[str, dict[str, Any]] = {}
+    for attempt in range(max_length_retries + 1):
+        try:
+            raw = provider(
+                current_prompt, "learn_response_evaluation", DIAGNOSIS_SCHEMA, max_tokens=420, max_retries=0,
+            )
+        except Exception as exc:
+            _log_provider_fallback("diagnose_response", "request_or_validation", exc)
+            return fallback
+        try:
+            return LearnEvaluation.model_validate(raw)
+        except ValidationError as exc:
+            violations = _length_violations(exc, raw) if isinstance(raw, dict) else {}
+            if not violations:
+                # Not a re-promptable length overrun (e.g. a bad enum value) --
+                # no point retrying with a "shorten this" instruction.
+                _log_provider_fallback("diagnose_response", "request_or_validation", exc)
+                return fallback
+            last_violations = violations
+            if attempt < max_length_retries:
+                logger.info(
+                    "tutor_provider_length_retry operation=diagnose_response attempt=%d fields=%s",
+                    attempt + 1, sorted(violations),
+                )
+                current_prompt = _shorten_reprompt(base_prompt, violations)
+                continue
+        except Exception as exc:
+            _log_provider_fallback("diagnose_response", "request_or_validation", exc)
+            return fallback
+
+    _log_length_fallback("diagnose_response", last_violations, max_length_retries + 1)
+    return fallback
 
 ASK_LUCENT_SCHEMA = {
     "type": "object",
