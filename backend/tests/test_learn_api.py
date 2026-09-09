@@ -2,13 +2,19 @@ import json
 import re
 import hashlib
 import uuid
+import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
+from app.models.auth import User
+from app.models.learn import LearnSession
+from app.routers.learn import _get_owned_session_for_mutation
 from app.services.embeddings import DeterministicEmbeddingProvider, set_embedding_provider
 from app.services.learn_tutor import set_tutor_provider
 from app.services.learn_engine import build_remediation_step
@@ -140,6 +146,82 @@ def test_learn_session_is_owned_and_resumable(client):
     active = client.get(f"/documents/{document['id']}/learn-sessions/active")
     assert active.status_code == 200
     assert active.json()["id"] == first["id"]
+
+
+def test_stale_scene_mutations_are_rejected_without_changing_authoritative_state(client):
+    document = _document_with_note(client)
+    session = client.post(
+        f"/documents/{document['id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new"},
+    ).json()
+    stale = {"sceneId": session["scene"]["id"], "sceneRevision": session["scene"]["revision"]}
+    advanced = client.post(
+        f"/learn-sessions/{session['id']}/responses",
+        json={
+            **stale,
+            "interactionId": session["scene"].get("responseInteractionId"),
+            "eventType": "RESPONSE",
+            "response": "an intentionally incomplete answer",
+        },
+    )
+    assert advanced.status_code == 200
+    authoritative = advanced.json()["scene"]
+    assert authoritative["revision"] > stale["sceneRevision"]
+
+    stale_requests = (
+        (f"/learn-sessions/{session['id']}/responses", {**stale, "eventType": "CONTINUE"}),
+        (f"/learn-sessions/{session['id']}/ask", {**stale, "message": "Explain this differently"}),
+        (f"/learn-sessions/{session['id']}/hints", stale),
+        (f"/learn-sessions/{session['id']}/stop", stale),
+    )
+    for path, payload in stale_requests:
+        response = client.post(path, json=payload)
+        assert response.status_code == 409, (path, response.text)
+
+    persisted = client.get(f"/learn-sessions/{session['id']}").json()
+    assert persisted["status"] == "active"
+    assert persisted["scene"] == authoritative
+
+
+def test_concurrent_session_mutations_serialize_from_latest_state(client):
+    document = _document_with_note(client)
+    created = client.post(
+        f"/documents/{document['id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new"},
+    ).json()
+    session_id = uuid.UUID(created["id"])
+    first_locked = threading.Event()
+    second_attempting = threading.Event()
+    errors: list[BaseException] = []
+
+    def mutate(marker: str, wait_for_first: bool = False):
+        try:
+            if wait_for_first:
+                assert first_locked.wait(timeout=5)
+                second_attempting.set()
+            with TestSessionLocal() as db:
+                user = db.execute(select(User).where(User.email == "test@lucent.local")).scalar_one()
+                row = _get_owned_session_for_mutation(db, session_id, user)
+                state = dict(row.state or {})
+                state["concurrencyMarkers"] = [*(state.get("concurrencyMarkers") or []), marker]
+                row.state = state
+                if not wait_for_first:
+                    first_locked.set()
+                    assert second_attempting.wait(timeout=5)
+                    time.sleep(0.1)
+                db.commit()
+        except BaseException as exc:  # surface thread failures in the test
+            errors.append(exc)
+
+    first = threading.Thread(target=mutate, args=("first",))
+    second = threading.Thread(target=mutate, args=("second", True))
+    first.start(); second.start()
+    first.join(timeout=10); second.join(timeout=10)
+    assert not first.is_alive() and not second.is_alive()
+    assert errors == []
+    with TestSessionLocal() as db:
+        row = db.get(LearnSession, session_id)
+        assert row.state["concurrencyMarkers"] == ["first", "second"]
 
 
 def test_ask_lucent_model_fake_provider_returns_grounded_answer(client):

@@ -14,6 +14,7 @@ def _origins(value: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     environment: str
+    log_level: str
     database_url: str
     web_origins: tuple[str, ...]
     api_origin: str
@@ -25,6 +26,14 @@ class Settings:
     enable_legacy_claim: bool
     extension_ids: tuple[str, ...]
     pdf_upload_max_bytes: int
+    anthropic_timeout_seconds: float
+    anthropic_max_retries: int
+    database_pool_size: int
+    database_max_overflow: int
+    database_pool_recycle_seconds: int
+    database_pool_timeout_seconds: int
+    progressive_job_ttl_seconds: int
+    progressive_job_max_entries: int
     session_idle_seconds: int = 60 * 60 * 24
     session_absolute_seconds: int = 60 * 60 * 24 * 30
 
@@ -63,6 +72,7 @@ def load_settings() -> Settings:
     environment = os.getenv("APP_ENV", "development")
     settings = Settings(
         environment=environment,
+        log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
         database_url=os.environ["DATABASE_URL"],
         web_origins=_origins(os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")),
         api_origin=os.getenv("API_ORIGIN", "http://127.0.0.1:8000").rstrip("/"),
@@ -74,9 +84,40 @@ def load_settings() -> Settings:
         enable_legacy_claim=_bool("ENABLE_LEGACY_CLAIM"),
         extension_ids=_origins(os.getenv("LUCENT_EXTENSION_IDS", "")),
         pdf_upload_max_bytes=int(os.getenv("PDF_UPLOAD_MAX_BYTES", str(20 * 1024 * 1024))),
+        # Provider calls are user-facing request work. Keep the shared client
+        # bounded even when a call site does not need a narrower override.
+        anthropic_timeout_seconds=float(os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "20")),
+        anthropic_max_retries=int(os.getenv("ANTHROPIC_MAX_RETRIES", "1")),
+        # Initial production is a single API process backed by PostgreSQL.
+        # Five steady connections plus five temporary overflow connections
+        # leave headroom without consuming a large share of a small database.
+        database_pool_size=int(os.getenv("DATABASE_POOL_SIZE", "5")),
+        database_max_overflow=int(os.getenv("DATABASE_MAX_OVERFLOW", "5")),
+        database_pool_recycle_seconds=int(os.getenv("DATABASE_POOL_RECYCLE_SECONDS", "1800")),
+        database_pool_timeout_seconds=int(os.getenv("DATABASE_POOL_TIMEOUT_SECONDS", "15")),
+        progressive_job_ttl_seconds=int(os.getenv("PROGRESSIVE_JOB_TTL_SECONDS", "1800")),
+        progressive_job_max_entries=int(os.getenv("PROGRESSIVE_JOB_MAX_ENTRIES", "200")),
     )
     if settings.pdf_upload_max_bytes <= 0:
         raise RuntimeError("PDF_UPLOAD_MAX_BYTES must be greater than zero")
+    if settings.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise RuntimeError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+    if settings.anthropic_timeout_seconds <= 0:
+        raise RuntimeError("ANTHROPIC_TIMEOUT_SECONDS must be greater than zero")
+    if settings.anthropic_max_retries < 0:
+        raise RuntimeError("ANTHROPIC_MAX_RETRIES cannot be negative")
+    if settings.database_pool_size <= 0:
+        raise RuntimeError("DATABASE_POOL_SIZE must be greater than zero")
+    if settings.database_max_overflow < 0:
+        raise RuntimeError("DATABASE_MAX_OVERFLOW cannot be negative")
+    if settings.database_pool_recycle_seconds <= 0:
+        raise RuntimeError("DATABASE_POOL_RECYCLE_SECONDS must be greater than zero")
+    if settings.database_pool_timeout_seconds <= 0:
+        raise RuntimeError("DATABASE_POOL_TIMEOUT_SECONDS must be greater than zero")
+    if settings.progressive_job_ttl_seconds <= 0:
+        raise RuntimeError("PROGRESSIVE_JOB_TTL_SECONDS must be greater than zero")
+    if settings.progressive_job_max_entries <= 0:
+        raise RuntimeError("PROGRESSIVE_JOB_MAX_ENTRIES must be greater than zero")
     settings.validate()
     return settings
 

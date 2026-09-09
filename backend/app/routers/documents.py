@@ -9,6 +9,7 @@ from app.models.note import Note
 from app.models.quiz import Quiz, QuizAttempt
 from app.models.source import Source
 from app.schemas.ingestion import SourceIndexStatusResponse
+from app.services.source_index import expire_stale_index_lease
 from app.services.anthropic_service import generate_structured_note
 from sqlalchemy import select
 from app.auth_dependencies import get_current_user, require_csrf
@@ -72,6 +73,9 @@ def get_document_source_index(document_id: int, db=Depends(get_db), user: User =
             coverage_warnings=["Re-upload this document to prepare it for grounded learning."],
             retryable=False,
         )
+    if expire_stale_index_lease(source_index):
+        db.commit()
+        db.refresh(source_index)
     return SourceIndexStatusResponse(
         document_id=document_id,
         generation_id=source_index.generation_id,

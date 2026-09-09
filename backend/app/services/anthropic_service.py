@@ -1,15 +1,38 @@
 import os
 import logging
+import time
 from dataclasses import dataclass
 from anthropic import Anthropic
 from pydantic import ValidationError
 
 from app.schemas.generated_note import GeneratedNote
 from app.schemas.quiz import GeneratedQuizQuestions
+from app.config import settings
 
 
-client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+client = Anthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    timeout=settings.anthropic_timeout_seconds,
+    max_retries=settings.anthropic_max_retries,
+)
 logger = logging.getLogger(__name__)
+
+# Document note and quiz generation share a deterministic, approximately
+# 12k-token input budget (using the conservative four-characters-per-token
+# estimate). Keeping both the beginning and end retains introductions,
+# conclusions, and late source sections without an unbounded prompt path.
+DOCUMENT_PROMPT_MAX_CHARS = 48_000
+DOCUMENT_PROMPT_OMISSION = "\n\n[Middle of source omitted to fit the generation context budget.]\n\n"
+
+
+def _bounded_document_content(content: str, *, max_chars: int = DOCUMENT_PROMPT_MAX_CHARS) -> str:
+    normalized = str(content or "").strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    available = max_chars - len(DOCUMENT_PROMPT_OMISSION)
+    head_chars = int(available * 0.7)
+    tail_chars = available - head_chars
+    return f"{normalized[:head_chars].rstrip()}{DOCUMENT_PROMPT_OMISSION}{normalized[-tail_chars:].lstrip()}"
 
 
 @dataclass(frozen=True)
@@ -208,35 +231,41 @@ def _run_structured_tool(
     max_retries: int | None = None,
     include_metadata: bool = False,
 ) -> dict | StructuredToolResult:
+    started = time.perf_counter()
     request_client = client.with_options(max_retries=max_retries) if max_retries is not None else client
-    message = request_client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=max_tokens,
-        tools=[
-            {
-                "name": tool_name,
-                "description": f"Return the {tool_name} structured data for the given content.",
-                "input_schema": schema
-            }
-        ],
-        tool_choice={"type": "tool", "name": tool_name},
-        messages=[{"role": "user", "content": prompt}],
-        **({"timeout": timeout} if timeout is not None else {})
-    )
+    try:
+        message = request_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=max_tokens,
+            tools=[
+                {
+                    "name": tool_name,
+                    "description": f"Return the {tool_name} structured data for the given content.",
+                    "input_schema": schema
+                }
+            ],
+            tool_choice={"type": "tool", "name": tool_name},
+            messages=[{"role": "user", "content": prompt}],
+            **({"timeout": timeout} if timeout is not None else {})
+        )
+    except Exception as exc:
+        logger.warning(
+            "provider_operation_complete provider=anthropic operation=%s stage=request outcome=error exception_type=%s duration_ms=%.1f",
+            tool_name,
+            type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
+        )
+        raise
 
     usage = getattr(message, "usage", None)
-    logger.info(
-        "structured_generation_response tool=%s model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
-        tool_name,
-        getattr(message, "model", "unknown"),
-        getattr(message, "stop_reason", "unknown"),
-        getattr(usage, "input_tokens", "unknown"),
-        getattr(usage, "output_tokens", "unknown"),
-        max_tokens,
-    )
-
     tool_input = next((block.input for block in message.content if block.type == "tool_use"), None)
     if getattr(message, "stop_reason", None) == "max_tokens":
+        logger.warning(
+            "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=truncated exception_type=%s duration_ms=%.1f",
+            tool_name,
+            "StructuredToolTruncatedError",
+            (time.perf_counter() - started) * 1000,
+        )
         raise StructuredToolTruncatedError(
             input_tokens=getattr(usage, "input_tokens", None),
             output_tokens=getattr(usage, "output_tokens", None),
@@ -245,6 +274,16 @@ def _run_structured_tool(
         )
 
     if isinstance(tool_input, dict):
+        logger.info(
+            "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=success exception_type=none duration_ms=%.1f model=%s stop_reason=%s input_tokens=%s output_tokens=%s max_tokens=%s",
+            tool_name,
+            (time.perf_counter() - started) * 1000,
+            getattr(message, "model", "unknown"),
+            getattr(message, "stop_reason", "unknown"),
+            getattr(usage, "input_tokens", "unknown"),
+            getattr(usage, "output_tokens", "unknown"),
+            max_tokens,
+        )
         if include_metadata:
             return StructuredToolResult(
                 data=tool_input,
@@ -255,10 +294,17 @@ def _run_structured_tool(
             )
         return tool_input
 
+    logger.warning(
+        "provider_operation_complete provider=anthropic operation=%s stage=validation outcome=invalid exception_type=%s duration_ms=%.1f",
+        tool_name,
+        "ValueError",
+        (time.perf_counter() - started) * 1000,
+    )
     raise ValueError("Model did not return structured tool output")
 
 
 def generate_structured_note(title: str, content: str) -> GeneratedNote:
+    bounded_content = _bounded_document_content(content)
     prompt = (
         "You are turning ingested learning material into a clear, well-organized "
         "study note - not a plain summary. Read the document below and produce:\n"
@@ -269,7 +315,7 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
         "- sections: break the material into a few logical sections, each with a short "
         "heading and a clear explanation of that part in plain language\n\n"
         f"Document title: {title}\n\n"
-        f"Document content:\n{content}"
+        f"Document content:\n{bounded_content}"
     )
 
     raw = _run_structured_tool(prompt, "generated_note", GENERATED_NOTE_SCHEMA, max_tokens=1500)
@@ -281,6 +327,7 @@ def generate_structured_note(title: str, content: str) -> GeneratedNote:
 
 
 def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *, section_ids: list[str] | None = None) -> GeneratedQuizQuestions:
+    bounded_content = _bounded_document_content(content)
     section_instruction = (
         "Each source section begins with a [section:<id>] marker. Set section_id to the exact id for the section that supports the answer. "
         if section_ids else
@@ -295,7 +342,7 @@ def generate_quiz_questions(title: str, content: str, num_questions: int = 5, *,
         "Do not invent facts, add background knowledge, or fabricate quotations. Do not write phrases such as 'the document explicitly states' unless the supplied text contains those exact words. "
         "Keep explanations to 1–2 concise sentences that explain the reasoning, not a restatement of the entire source.\n\n"
         f"Document title: {title}\n\n"
-        f"Document content:\n{content}"
+        f"Document content:\n{bounded_content}"
     )
 
     raw = _run_structured_tool(prompt, "quiz_questions", QUIZ_QUESTIONS_SCHEMA, max_tokens=2000)

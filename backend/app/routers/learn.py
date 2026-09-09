@@ -19,7 +19,7 @@ from app.models.document import Document
 from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
 from app.models.note import Note
 from app.models.source import Source
-from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest, VisualEdge, VisualAnimation
+from app.schemas.learn import AskLucentRequest, AskLucentResponse, ConceptEvidence, LearnEvaluation, LearnHintRequest, LearnHintResponse, LearnMutationRequest, LearnResponseRequest, LearnSessionCreateRequest, LearnSessionReport, LearnSessionResponse, LearnStep, MultipleChoiceStep, ShortAnswerStep, TeachStep, TutorAction, TutorDecision, TutorObservation, TutorToolCall, TutorScenePlan, TutorSceneBlockPlan, LearningSceneBlock, VisualEventRequest, VisualEdge, VisualAnimation
 from app.services.learn_engine import build_learn_plan, contains_source_diagnostic, plan_fingerprint, public_step, student_facing_quality_issues, synthesize_visual_spec
 from app.services.learn_runtime import apply_scene_message, apply_visual_event, ensure_runtime_state, load_current_scene, persist_scene_revision, process_tutor_event, _private_for_rendered_scene, _objective
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response
@@ -292,6 +292,38 @@ def _get_owned_session(db, session_id: UUID, user: User) -> LearnSession:
     if not session: raise HTTPException(status_code=404, detail="Learning session not found")
     return session
 
+
+def _get_owned_session_for_mutation(db, session_id: UUID, user: User) -> LearnSession:
+    """Load current state while holding the session row through commit/rollback."""
+    session = _get_owned_session(db, session_id, user)
+    _ensure_session_runtime(db, session)
+    # _ensure_session_runtime may commit a one-time runtime upgrade. Acquire
+    # the lock afterwards and force-refresh the identity-map entry so every
+    # mutation computes from the latest committed authoritative state.
+    return db.execute(
+        select(LearnSession)
+        .where(LearnSession.id == session_id, LearnSession.user_id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+
+def _reject_stale_scene(session: LearnSession, request) -> None:
+    scene_id = getattr(request, "scene_id", None) if request is not None else None
+    scene_revision = getattr(request, "scene_revision", None) if request is not None else None
+    if scene_id is None and scene_revision is None:
+        return
+    scene = load_current_scene(session)
+    if (
+        scene is None
+        or (scene_id is not None and str(scene.id) != str(scene_id))
+        or (scene_revision is not None and int(scene.revision) != int(scene_revision))
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This learning session changed. Refresh and try again.",
+        )
+
 def _ask_scope(message: str, objective: dict, context: dict) -> str:
     terms = set(re.findall(r"[a-z0-9]{3,}", message.lower()))
     # Learner-initiated tutoring requests are scoped to the active concept even
@@ -339,11 +371,13 @@ def _ask_rate_allowed(db, user_id, session_id) -> bool:
 
 @router.post("/learn-sessions/{session_id}/ask", response_model=AskLucentResponse, dependencies=[Depends(require_csrf)])
 def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
-    session = _get_owned_session(db, session_id, user)
+    session = _get_owned_session_for_mutation(db, session_id, user)
+    _reject_stale_scene(session, request)
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="This learning session is no longer active")
     if not _ask_rate_allowed(db, user.id, session.id):
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="rate_limit", metadata={"scope": "ask"}); db.commit()
         raise HTTPException(status_code=429, detail="Ask Lucent is taking a short pause. Try again in a moment.")
-    _ensure_session_runtime(db, session)
     objectives = session.plan.get("objectives", [])
     # `session.objective_index` is a legacy compatibility column the runtime
     # never updates once a session is on the authoritative scene path; the
@@ -768,8 +802,8 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
 @router.post("/learn-sessions/{session_id}/ask-interactions/{interaction_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_ask_interaction(session_id: UUID, interaction_id: str, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
     """Evaluate an Ask Lucent inline question without replacing primary practice."""
-    session = _get_owned_session(db, session_id, user)
-    _ensure_session_runtime(db, session)
+    session = _get_owned_session_for_mutation(db, session_id, user)
+    _reject_stale_scene(session, request)
     scene = load_current_scene(session)
     inline = scene.inline_interaction if scene else None
     if inline is None or str(inline.id) != str(interaction_id):
@@ -856,9 +890,9 @@ def get_active_learn_session(document_id: int, db=Depends(get_db), user: User = 
 
 @router.post("/learn-sessions/{session_id}/hints", response_model=LearnHintResponse, dependencies=[Depends(require_csrf)])
 def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db=Depends(get_db), user: User = Depends(get_current_user)):
-    session = _get_owned_session(db, session_id, user)
+    session = _get_owned_session_for_mutation(db, session_id, user)
+    _reject_stale_scene(session, request)
     if session.status != "active": raise HTTPException(status_code=409, detail="This learning session is no longer active")
-    _ensure_session_runtime(db, session)
     private = (session.state or {}).get("currentScenePrivate") or {}
     parsed = _parse_step(private.get("interaction")) if private.get("interaction") else None
     if not parsed: raise HTTPException(status_code=409, detail="This teaching step is unavailable")
@@ -878,10 +912,10 @@ def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db
 
 @router.post("/learn-sessions/{session_id}/visual-events", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def handle_learn_visual_event(session_id: UUID, request: VisualEventRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
-    session = _get_owned_session(db, session_id, user)
+    session = _get_owned_session_for_mutation(db, session_id, user)
     if session.status != "active":
         raise HTTPException(status_code=409, detail="This learning session is no longer active")
-    _ensure_session_runtime(db, session)
+    _reject_stale_scene(session, request)
     scene = load_current_scene(session)
     if scene is None or str(scene.id) != request.scene_id or int(scene.revision) != request.scene_revision:
         raise HTTPException(status_code=409, detail="This visual is out of date")
@@ -903,14 +937,14 @@ def handle_learn_visual_event(session_id: UUID, request: VisualEventRequest, db=
 
 @router.post("/learn-sessions/{session_id}/responses", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
 def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=Depends(get_db), user: User = Depends(get_current_user)):
-    session = _get_owned_session(db, session_id, user)
+    session = _get_owned_session_for_mutation(db, session_id, user)
+    _reject_stale_scene(session, request)
     if session.status != "active":
         return _session_payload(session, feedback="This session is no longer active.", feedback_kind="info")
-    _ensure_session_runtime(db, session)
     scene = load_current_scene(session)
     private = (session.state or {}).get("currentScenePrivate") or {}
     interaction_id = request.interaction_id or private.get("interaction", {}).get("id")
-    event = {"id": f"response-{session.id}-{interaction_id or 'scene'}", "type": request.event_type or "RESPONSE", "sceneId": request.scene_id or (scene.id if scene else None), "sceneRevision": request.scene_revision or (scene.revision if scene else None), "interactionId": interaction_id, "response": {"response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}}
+    event = {"id": f"response-{session.id}-{interaction_id or 'scene'}", "type": request.event_type or "RESPONSE", "sceneId": request.scene_id if request.scene_id is not None else (scene.id if scene else None), "sceneRevision": request.scene_revision if request.scene_revision is not None else (scene.revision if scene else None), "interactionId": interaction_id, "response": {"response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}}
     try:
         rendered, _private = process_tutor_event(session, event, db=db)
     except SourceContextUnavailable as exc:
@@ -927,7 +961,8 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     return _session_payload(session, feedback=feedback, feedback_kind=kind)
 
 @router.post("/learn-sessions/{session_id}/stop", response_model=LearnSessionResponse, dependencies=[Depends(require_csrf)])
-def stop_learn_session(session_id: UUID, db=Depends(get_db), user: User = Depends(get_current_user)):
-    session = _get_owned_session(db, session_id, user)
+def stop_learn_session(session_id: UUID, request: LearnMutationRequest | None = None, db=Depends(get_db), user: User = Depends(get_current_user)):
+    session = _get_owned_session_for_mutation(db, session_id, user)
+    _reject_stale_scene(session, request)
     if session.status == "active": session.status = "stopped"; session.ended_reason = "user_stopped"; session.report = _report(session).model_dump(by_alias=True); db.commit()
     return _session_payload(session)

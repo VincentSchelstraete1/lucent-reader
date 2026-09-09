@@ -273,7 +273,7 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
         logger.warning("step_through_generation_failed fixture=%s stage=provider exception_type=%s max_retries=%s", request.fixture_name, type(exc).__name__, LIVE_MAX_RETRIES)
         raise HTTPException(status_code=502, detail={"code": "provider_error", "message": f"Claude generation request failed: {type(exc).__name__}. No automatic retry was attempted.", "diagnostics": {"stop_reason": "provider_error", "input_tokens": None, "output_tokens": None, "max_tokens": LIVE_MAX_TOKENS, "parsed": False, "truncated": False}}) from exc
     except Exception as exc:
-        logger.exception("step_through_generation_failed fixture=%s stage=runtime exception_type=%s", request.fixture_name, type(exc).__name__)
+        logger.error("step_through_generation_failed fixture=%s stage=runtime exception_type=%s", request.fixture_name, type(exc).__name__)
         raise HTTPException(status_code=500, detail={"code": "generation_failed", "message": f"Step-through generation failed: {type(exc).__name__}."}) from exc
     latency_ms = (time.perf_counter() - started) * 1000
     if request.save_fixture:

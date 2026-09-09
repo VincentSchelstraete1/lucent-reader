@@ -1,5 +1,14 @@
+import logging
+import time
+from functools import lru_cache
+from pathlib import Path
+
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from dotenv import load_dotenv
 load_dotenv()
 from app.routers.ai import router as ai_router
@@ -13,10 +22,50 @@ from app.routers.routing import router as routing_router
 from app.routers.step_through import router as step_through_router
 from app.routers.learn import router as learn_router
 from app.config import settings
+from app.database import engine
 import app.models  # noqa: F401 - register all SQLAlchemy metadata
 
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
+application_logger = logging.getLogger("app")
+application_logger.setLevel(settings.log_level)
+# Uvicorn deliberately configures its own loggers rather than the root logger.
+# Reuse its error stream for application telemetry so INFO measurements are
+# visible in the deployed process without adding another logging dependency.
+server_handlers = logging.getLogger("uvicorn.error").handlers or logging.getLogger("uvicorn").handlers
+if server_handlers and not application_logger.handlers:
+    application_logger.handlers.extend(server_handlers)
+    application_logger.propagate = False
+
+
+@app.middleware("http")
+async def record_request_telemetry(request, call_next):
+    """Emit one bounded completion event for production latency analysis."""
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        route = request.scope.get("route")
+        logger.error(
+            "http_request_complete method=%s route=%s status=%s outcome=error exception_type=%s duration_ms=%.1f",
+            request.method,
+            getattr(route, "path", "unmatched"),
+            500,
+            type(exc).__name__,
+            (time.perf_counter() - started) * 1000,
+        )
+        raise
+    route = request.scope.get("route")
+    logger.info(
+        "http_request_complete method=%s route=%s status=%s outcome=%s exception_type=none duration_ms=%.1f",
+        request.method,
+        getattr(route, "path", "unmatched"),
+        response.status_code,
+        "success" if response.status_code < 400 else "rejected",
+        (time.perf_counter() - started) * 1000,
+    )
+    return response
 
 @app.middleware("http")
 async def prevent_auth_response_caching(request, call_next):
@@ -49,6 +98,53 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "backend is alive"}
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Process liveness only; dependencies are intentionally not consulted."""
+    return {"status": "alive"}
+
+
+@lru_cache(maxsize=1)
+def _expected_database_revisions() -> frozenset[str]:
+    backend_root = Path(__file__).resolve().parents[1]
+    config = AlembicConfig(str(backend_root / "alembic.ini"))
+    return frozenset(ScriptDirectory.from_config(config).get_heads())
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz():
+    """Confirm PostgreSQL is reachable and its schema is at repository head."""
+    try:
+        expected = _expected_database_revisions()
+    except Exception as exc:
+        # A missing or unreadable alembic script directory is a packaging fault,
+        # not a database outage; reporting it as "unavailable" sends operators
+        # to investigate PostgreSQL while the real problem is the image.
+        logger.error(
+            "readiness_check outcome=not_ready component=migrations reason=unreadable exception_type=%s",
+            type(exc).__name__,
+        )
+        return JSONResponse(status_code=503, content={"status": "not_ready", "component": "migrations", "reason": "unreadable"})
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            current = frozenset(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
+        if current != expected:
+            logger.warning(
+                "readiness_check outcome=not_ready component=database reason=migration_mismatch current_count=%s expected_count=%s",
+                len(current),
+                len(expected),
+            )
+            return JSONResponse(status_code=503, content={"status": "not_ready", "component": "database", "reason": "migration_mismatch"})
+    except Exception as exc:
+        logger.warning(
+            "readiness_check outcome=not_ready component=database reason=unavailable exception_type=%s",
+            type(exc).__name__,
+        )
+        return JSONResponse(status_code=503, content={"status": "not_ready", "component": "database", "reason": "unavailable"})
+    return {"status": "ready"}
 
 app.include_router(ai_router, tags=["AI"])
 app.include_router(notes_router, tags=["Notes"])

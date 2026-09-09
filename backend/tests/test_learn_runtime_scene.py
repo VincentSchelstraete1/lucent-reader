@@ -515,13 +515,32 @@ def test_prerequisite_branch_runtime_teaches_repairs_and_returns():
     assert private and scene.response_interaction_id == "check"
     scene, private = process_tutor_event(session, {"id": "wrong", "type": "RESPONSE", "interactionId": "check", "response": {"optionId": "a"}})
     assert private and session.state["currentObjectiveId"] == "prereq"
-    scene, private = process_tutor_event(session, {"id": "continue-prereq", "type": "CONTINUE"})
-    assert private and private["interaction"]["id"] == "p-check"
-    scene, private = process_tutor_event(session, {"id": "prereq-answer", "type": "RESPONSE", "interactionId": "p-check", "response": {"response": "potential energy"}})
+    parent_evidence = next(item for item in session.state["concepts"] if item["conceptId"] == "energy")
+    assert parent_evidence["attempts"] == 1
+    assert parent_evidence["lastResult"] == "incorrect"
+    assert any(block.kind == "explanation" for block in scene.blocks)
+    assert private["interaction"]["id"].startswith("prereq-repair-")
+    assert private["interaction"]["id"] not in {"p-teach", "p-check"}
+    repair_id = private["interaction"]["id"]
+    scene, private = process_tutor_event(session, {"id": "prereq-partial", "type": "RESPONSE", "interactionId": repair_id, "response": {"response": "height"}})
+    assert session.state["currentObjectiveId"] == "prereq"
+    assert session.state.get("branchStack")
+    assert private and private["interaction"]["id"] != repair_id
+    repair_id = private["interaction"]["id"]
+    scene, private = process_tutor_event(session, {"id": "prereq-answer", "type": "RESPONSE", "interactionId": repair_id, "response": {"response": "Height determines gravitational potential energy."}})
     assert session.state["currentObjectiveId"] == "energy"
     assert not session.state.get("branchStack")
     assert private and private["objectiveId"] == "energy"
     assert scene.objective_id == "energy"
+
+
+def test_demonstrated_declared_prerequisite_does_not_interrupt():
+    from app.services.adaptive_policy import prerequisite_ids
+
+    objective = {"id": "application", "prerequisiteIds": ["foundation"]}
+    concepts = [{"conceptId": "foundation", "state": "DEMONSTRATED"}]
+
+    assert prerequisite_ids(objective, concepts) == []
 
 
 def test_prerequisite_branch_cycle_guard_uses_canonical_key():

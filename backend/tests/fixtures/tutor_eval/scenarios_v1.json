@@ -1,0 +1,204 @@
+{
+  "version": "tutor-diagnosis-eval-v1",
+  "note": "NEW as of this eval: authored by Claude for a resume-accuracy check, not a pre-existing product eval. Ground-truth `expectedResult` / `acceptableRemediation` are this author's pedagogical judgment calls, grounded in the source text below but not independently reviewed. Verify before quoting a derived percentage as an authoritative product metric.",
+  "scenarios": [
+    {
+      "id": "pendulum-01-correct-full",
+      "domain": "physics",
+      "sourceContext": "At either turning point the bob is momentarily at rest, so its speed and kinetic energy are zero. Its height and gravitational potential energy are greatest there, but gravity has a tangential component that begins accelerating the bob back toward the center.",
+      "prompt": "What happens to the bob's speed and kinetic energy at a turning point?",
+      "expected": "Speed and kinetic energy are both zero at the turning point because the bob is momentarily at rest.",
+      "response": "At the turning point the bob is momentarily at rest, so both its speed and its kinetic energy are zero.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Restates the source fact accurately and completely."
+    },
+    {
+      "id": "pendulum-02-correct-terse",
+      "domain": "physics",
+      "sourceContext": "At either turning point the bob is momentarily at rest, so its speed and kinetic energy are zero. Its height and gravitational potential energy are greatest there, but gravity has a tangential component that begins accelerating the bob back toward the center.",
+      "prompt": "At a turning point, what is the bob's speed?",
+      "expected": "Zero -- the bob is momentarily at rest at a turning point.",
+      "response": "Zero.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Terse but factually correct and directly responsive to a narrow prompt."
+    },
+    {
+      "id": "pendulum-03-partial-incomplete",
+      "domain": "physics",
+      "sourceContext": "At the lowest point the bob has minimum gravitational potential energy and maximum speed. Its kinetic energy is greatest, while the tangential component of gravity is zero at that instant; the tension instead helps provide the inward centripetal acceleration.",
+      "prompt": "Compare potential and kinetic energy at the bottom of the swing.",
+      "expected": "Potential energy is at its minimum and kinetic energy is at its maximum at the bottom, because height (and thus PE) is lowest there.",
+      "response": "Kinetic energy is highest at the bottom.",
+      "expectedResult": "partially_correct",
+      "acceptableRemediation": ["simplify", "example"],
+      "rationale": "States a correct fact but omits the PE side of the comparison the prompt asked for."
+    },
+    {
+      "id": "pendulum-04-insufficient-i-dont-know",
+      "domain": "physics",
+      "sourceContext": "A pendulum bob swings back and forth because gravity accelerates it toward the lowest point. If air resistance and pivot friction are neglected, the bob repeatedly trades gravitational potential energy for kinetic energy while total mechanical energy remains constant.",
+      "prompt": "Why does the bob keep swinging back and forth?",
+      "expected": "Gravity accelerates the bob toward the lowest point and it repeatedly trades potential for kinetic energy.",
+      "response": "I don't know.",
+      "expectedResult": "insufficient_evidence",
+      "acceptableRemediation": ["example", "simplify"],
+      "rationale": "Explicit, unambiguous uncertainty with no attempted content."
+    },
+    {
+      "id": "pendulum-05-misconception-reversed",
+      "domain": "physics",
+      "sourceContext": "At either turning point the bob is momentarily at rest, so its speed and kinetic energy are zero. Its height and gravitational potential energy are greatest there, but gravity has a tangential component that begins accelerating the bob back toward the center.",
+      "prompt": "Where is the bob's kinetic energy greatest?",
+      "expected": "Kinetic energy is greatest at the bottom of the swing, not at the turning point.",
+      "response": "Kinetic energy is greatest at the turning point, since that's where the bob has built up the most energy.",
+      "expectedResult": "incorrect",
+      "acceptableRemediation": ["change_modality", "example"],
+      "rationale": "Directly reverses the source-supported location of maximum KE; a genuine conceptual misconception, not a wording slip."
+    },
+    {
+      "id": "pendulum-06-misconception-prerequisite",
+      "domain": "physics",
+      "sourceContext": "A pendulum bob swings back and forth because gravity accelerates it toward the lowest point. If air resistance and pivot friction are neglected, the bob repeatedly trades gravitational potential energy for kinetic energy while total mechanical energy remains constant.",
+      "prompt": "Where is gravitational potential energy greatest during the swing?",
+      "expected": "Potential energy is greatest at the turning points, where height is greatest.",
+      "response": "I'm not sure what potential energy even means, so I can't say where it's highest.",
+      "expectedResult": "insufficient_evidence",
+      "acceptableRemediation": ["prerequisite", "example"],
+      "rationale": "Learner names a missing prerequisite concept rather than attempting the question; abstaining is correct, but the ideal remediation targets the gap directly."
+    },
+    {
+      "id": "satire-01-correct-full",
+      "domain": "humanities",
+      "sourceContext": "Satire uses humor, irony, exaggeration, or ridicule to expose a social flaw and invite judgment. Its aim is not merely to entertain: the comic surface directs attention toward a target such as hypocrisy, corruption, vanity, or an unjust institution.",
+      "prompt": "What is the underlying purpose of satire, beyond entertainment?",
+      "expected": "Satire uses humor/irony/exaggeration to expose a social flaw such as hypocrisy or corruption and invite judgment of it.",
+      "response": "Satire's comic surface is a strategy for directing attention at a social flaw like hypocrisy or corruption, inviting the audience to judge it -- entertainment isn't really the point.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Accurately restates both the mechanism (comic surface) and the goal (exposing a flaw)."
+    },
+    {
+      "id": "satire-02-correct-terse",
+      "domain": "humanities",
+      "sourceContext": "Verbal irony creates a gap between the words a speaker states and the meaning an audience is expected to infer. A satirist may sound as though an absurd policy deserves praise, while contextual contradictions signal that the apparent praise is actually criticism.",
+      "prompt": "What does verbal irony create?",
+      "expected": "A gap between what is literally said and the meaning the audience is meant to infer.",
+      "response": "A gap between the literal words and the intended meaning.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Concise but captures the defining relationship accurately."
+    },
+    {
+      "id": "satire-03-partial-incomplete",
+      "domain": "humanities",
+      "sourceContext": "Verbal irony creates a gap between the words a speaker states and the meaning an audience is expected to infer. A satirist may sound as though an absurd policy deserves praise, while contextual contradictions signal that the apparent praise is actually criticism.",
+      "prompt": "How does a satirist signal that apparent praise is actually criticism?",
+      "expected": "Contextual contradictions in the text signal to the audience that the ostensible praise is actually criticism.",
+      "response": "The satirist says the opposite of what they mean.",
+      "expectedResult": "partially_correct",
+      "acceptableRemediation": ["simplify", "example"],
+      "rationale": "Gets the irony premise right but never explains the signaling mechanism (contextual contradiction) the prompt asked for."
+    },
+    {
+      "id": "satire-04-insufficient-uncertain",
+      "domain": "humanities",
+      "sourceContext": "Satire uses humor, irony, exaggeration, or ridicule to expose a social flaw and invite judgment. Its aim is not merely to entertain: the comic surface directs attention toward a target such as hypocrisy, corruption, vanity, or an unjust institution.",
+      "prompt": "What is satire's comic surface actually for?",
+      "expected": "The comic surface directs attention toward a social flaw it is criticizing, rather than existing purely for entertainment.",
+      "response": "Not sure, maybe just to be funny?",
+      "expectedResult": "insufficient_evidence",
+      "acceptableRemediation": ["example", "simplify"],
+      "rationale": "Hedged, explicitly uncertain guess rather than a committed (wrong) claim."
+    },
+    {
+      "id": "satire-05-misconception-surface-is-goal",
+      "domain": "humanities",
+      "sourceContext": "Satire uses humor, irony, exaggeration, or ridicule to expose a social flaw and invite judgment. Its aim is not merely to entertain: the comic surface directs attention toward a target such as hypocrisy, corruption, vanity, or an unjust institution.",
+      "prompt": "What is satire's real goal?",
+      "expected": "Satire's real goal is to expose and invite judgment of a social flaw; the comic surface is a means to that end, not the goal itself.",
+      "response": "Satire's real goal is just to make the audience laugh -- the social criticism is basically a side effect.",
+      "expectedResult": "incorrect",
+      "acceptableRemediation": ["change_modality", "example"],
+      "rationale": "Inverts means and end: the source explicitly states the aim is 'not merely to entertain'."
+    },
+    {
+      "id": "satire-06-misconception-irony-definition",
+      "domain": "humanities",
+      "sourceContext": "Verbal irony creates a gap between the words a speaker states and the meaning an audience is expected to infer. A satirist may sound as though an absurd policy deserves praise, while contextual contradictions signal that the apparent praise is actually criticism.",
+      "prompt": "If a satirist sounds like they're praising an absurd policy, what does that signal?",
+      "expected": "It signals irony -- the apparent praise is actually criticism, given the contextual contradictions.",
+      "response": "It means the satirist genuinely agrees with the policy and is stating their real opinion.",
+      "expectedResult": "incorrect",
+      "acceptableRemediation": ["change_modality", "example"],
+      "rationale": "Takes the ironic statement at face value, missing the core definition of verbal irony given directly in the source."
+    },
+    {
+      "id": "cache-01-correct-full",
+      "domain": "computer_architecture",
+      "sourceContext": "A cache interprets an address using an offset, an index, and a tag. The offset selects a byte within a block, the index selects a set, and the stored tag determines whether a line in that set contains the requested memory block.",
+      "prompt": "What do the offset, index, and tag fields of a cache address each do?",
+      "expected": "The offset selects a byte within a block, the index selects a set, and the tag determines whether a line in that set holds the requested block.",
+      "response": "The offset picks the byte inside a block, the index picks which set to look in, and the tag checked against the lines in that set determines whether the requested block is actually there.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Correctly maps all three fields to their roles."
+    },
+    {
+      "id": "cache-02-correct-terse",
+      "domain": "computer_architecture",
+      "sourceContext": "A cache keeps recently or nearby used memory blocks close to the processor. Temporal locality means recently accessed data is likely to be used again, while spatial locality means addresses near a recent access are likely to be used soon.",
+      "prompt": "What does temporal locality mean?",
+      "expected": "Recently accessed data is likely to be accessed again soon.",
+      "response": "Recently used data will likely be reused soon.",
+      "expectedResult": "correct",
+      "acceptableRemediation": ["none"],
+      "rationale": "Correct restatement of the definition."
+    },
+    {
+      "id": "cache-03-partial-incomplete",
+      "domain": "computer_architecture",
+      "sourceContext": "In a direct-mapped cache, each memory block can occupy exactly one cache line selected by the index. Lookup is simple, but two frequently used blocks with the same index repeatedly evict one another and cause conflict misses.",
+      "prompt": "What is a downside of a direct-mapped cache?",
+      "expected": "Two frequently used blocks that share the same index repeatedly evict each other, causing conflict misses.",
+      "response": "Lookup is simple but there can be a downside with how blocks are placed.",
+      "expectedResult": "partially_correct",
+      "acceptableRemediation": ["simplify", "example"],
+      "rationale": "Gestures at the tradeoff without naming the actual mechanism (shared index -> mutual eviction -> conflict misses)."
+    },
+    {
+      "id": "cache-04-insufficient-i-dont-remember",
+      "domain": "computer_architecture",
+      "sourceContext": "A cache interprets an address using an offset, an index, and a tag. The offset selects a byte within a block, the index selects a set, and the stored tag determines whether a line in that set contains the requested memory block.",
+      "prompt": "How does a cache decide whether a requested block is present?",
+      "expected": "It uses the index to find a set, then compares the tag against the lines in that set.",
+      "response": "I don't remember how the address fields work.",
+      "expectedResult": "insufficient_evidence",
+      "acceptableRemediation": ["example", "simplify"],
+      "rationale": "Explicit non-attempt due to stated forgetting."
+    },
+    {
+      "id": "cache-05-misconception-direct-mapped",
+      "domain": "computer_architecture",
+      "sourceContext": "In a direct-mapped cache, each memory block can occupy exactly one cache line selected by the index. Lookup is simple, but two frequently used blocks with the same index repeatedly evict one another and cause conflict misses.",
+      "prompt": "In a direct-mapped cache, where can a given memory block be placed?",
+      "expected": "Exactly one cache line, selected by the index -- that constraint is what causes conflict misses.",
+      "response": "A block can go into any free cache line, so there's no way for two blocks to conflict with each other.",
+      "expectedResult": "incorrect",
+      "acceptableRemediation": ["change_modality", "example"],
+      "rationale": "States the opposite of direct-mapped placement and denies the existence of conflict misses, which the source explicitly describes."
+    },
+    {
+      "id": "cache-06-misconception-locality-swap",
+      "domain": "computer_architecture",
+      "sourceContext": "A cache keeps recently or nearby used memory blocks close to the processor. Temporal locality means recently accessed data is likely to be used again, while spatial locality means addresses near a recent access are likely to be used soon.",
+      "prompt": "What is the difference between temporal and spatial locality?",
+      "expected": "Temporal locality: recently accessed data will likely be reused. Spatial locality: addresses near a recent access will likely be used soon.",
+      "response": "Temporal locality means addresses near a recent access will be used soon, and spatial locality means the same data gets reused again.",
+      "expectedResult": "incorrect",
+      "acceptableRemediation": ["change_modality", "example"],
+      "rationale": "Swaps the two definitions -- a classic confused-terms misconception, not a vague or partial answer."
+    }
+  ]
+}

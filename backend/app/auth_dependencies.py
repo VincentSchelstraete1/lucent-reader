@@ -12,21 +12,28 @@ from app.security import token_hash, utcnow
 
 
 AUTHENTICATION_REQUIRED = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+_COOKIE_SESSION_STATE_KEY = "_lucent_active_cookie_session"
+_BEARER_USER_STATE_KEY = "_lucent_active_bearer_user"
 
 
 def _active_cookie_session(request: Request, db: Session) -> WebSession | None:
+    if hasattr(request.state, _COOKIE_SESSION_STATE_KEY):
+        return getattr(request.state, _COOKIE_SESSION_STATE_KEY)
     credential = request.cookies.get(settings.session_cookie_name)
     if not credential:
+        setattr(request.state, _COOKIE_SESSION_STATE_KEY, None)
         return None
     session = db.execute(
         select(WebSession).where(WebSession.credential_hash == token_hash(credential))
     ).scalar_one_or_none()
     now = utcnow()
     if not session or session.revoked_at or session.idle_expires_at <= now or session.absolute_expires_at <= now:
+        setattr(request.state, _COOKIE_SESSION_STATE_KEY, None)
         return None
     session.last_seen_at = now
     session.idle_expires_at = min(now + timedelta(seconds=settings.session_idle_seconds), session.absolute_expires_at)
     db.commit()
+    setattr(request.state, _COOKIE_SESSION_STATE_KEY, session)
     return session
 
 
@@ -38,9 +45,12 @@ def get_current_session(request: Request, db: Session = Depends(get_db)) -> WebS
 
 
 def _bearer_user(request: Request, db: Session) -> User | None:
+    if hasattr(request.state, _BEARER_USER_STATE_KEY):
+        return getattr(request.state, _BEARER_USER_STATE_KEY)
     authorization = request.headers.get("authorization", "")
     scheme, _, credential = authorization.partition(" ")
     if scheme.lower() != "bearer" or not credential:
+        setattr(request.state, _BEARER_USER_STATE_KEY, None)
         return None
     now = utcnow()
     row = db.execute(
@@ -54,11 +64,14 @@ def _bearer_user(request: Request, db: Session) -> User | None:
         )
     ).one_or_none()
     if not row:
+        setattr(request.state, _BEARER_USER_STATE_KEY, None)
         return None
     token, grant = row
     grant.last_seen_at = now
     db.commit()
-    return db.get(User, grant.user_id)
+    user = db.get(User, grant.user_id)
+    setattr(request.state, _BEARER_USER_STATE_KEY, user)
+    return user
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:

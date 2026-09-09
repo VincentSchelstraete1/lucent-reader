@@ -157,6 +157,34 @@ def test_goal_plan_includes_structured_interactions():
     assert "fill_blank" in memorize
     assert "worked_step" in solve
 
+
+def test_plan_infers_only_source_backed_foundation_to_application_dependencies():
+    note = {"title": "Satire", "sectionNotes": [
+        {
+            "id": "foundation", "title": "The gap between surface and critique",
+            "bigIdea": "Satire uses a literal claim and contextual contradiction so an audience can infer an implied critique.",
+            "learningGoals": ["Recognize the gap between a literal claim and implied critique."],
+            "sourceBlockIds": ["satire-purpose"], "components": [],
+        },
+        {
+            "id": "application", "title": "Interpreting an unfamiliar satire",
+            "bigIdea": "Readers interpret satire by comparing its literal claim with context and inferring the implied critique.",
+            "learningGoals": ["Apply the method to interpret an unfamiliar satire."],
+            "sourceBlockIds": ["satire-transfer"], "components": [],
+        },
+        {
+            "id": "unrelated", "title": "A separate chronology",
+            "bigIdea": "The chronology lists publication dates for several works.",
+            "learningGoals": ["Recall the publication order."],
+            "sourceBlockIds": ["chronology"], "components": [],
+        },
+    ]}
+
+    plan = build_learn_plan(note, "understand", "new")
+
+    assert plan.objectives[1].prerequisite_ids == [plan.objectives[0].id]
+    assert plan.objectives[2].prerequisite_ids == []
+
 def test_new_interactions_grade_and_preserve_partial_evidence():
     fill = FillBlankStep(id="f", type="fill_blank", title="Fill", prompt="Complete", acceptedAnswers=["gradient"])
     teach = TeachBackStep(id="t", type="teach_back", title="Teach", prompt="Explain", requiredConcepts=["gradient", "difference"])

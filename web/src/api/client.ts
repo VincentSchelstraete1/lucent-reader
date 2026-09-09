@@ -357,7 +357,7 @@ export type GeneratedLearningNote = { sourceDocument: { filename: string; source
 export type SectionNote = { id: string; title: string; bigIdea: string; learningGoals: string[]; components: Array<{ kind: string; title: string; text?: string; sourceBlockIds: string[]; learningObject?: LearningObject | null; term?: string | null; definition?: string | null; nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>>; root?: Record<string, unknown> | null; items: Array<Record<string, unknown>>; dimensions: string[]; problem?: string | null; steps: Array<Record<string, unknown>>; result?: string | null; interpretation?: string | null; equation?: string | null; takeaway?: string | null }>; keyTakeaways: string[]; sourceBlockIds: string[]; omittedNoise: string[] }
 export type ProgressiveSection = { id: string; title: string | null; learning_block_ids: string[]; status: "pending" | "generating" | "complete" | "failed"; section_note: SectionNote | null; error: string | null }
 export type ProgressiveStart = { job_id: string; filename: string; sections: ProgressiveSection[] }
-export type ProgressivePoll = { job_id: string; filename: string; status: "processing" | "complete" | "failed"; sections: ProgressiveSection[]; result: DocumentIngestionResult | null }
+export type ProgressivePoll = { job_id: string; filename: string; status: "processing" | "complete" | "failed"; sections: ProgressiveSection[]; result: DocumentIngestionResult | null; error: string | null }
 
 export type StepThroughMechanism = {
   type: "step_through_mechanism"
@@ -442,9 +442,9 @@ export const api = {
   ,getLearnSession: (sessionId: string) => get<LearnSession>(`/learn-sessions/${sessionId}`)
   ,getActiveLearnSession: (documentId: number) => get<LearnSession | null>(`/documents/${documentId}/learn-sessions/active`)
   ,submitLearnResponse: (sessionId: string, request: { sceneId?: string; sceneRevision?: number; interactionId?: string; eventType?: "RESPONSE" | "CONTINUE"; response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/responses`, request)
-  ,getLearnHint: (sessionId: string) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, {})
-  ,stopLearnSession: (sessionId: string) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, {})
-  ,askLucent: (sessionId: string, message: string) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message })
-  ,submitAskInteraction: (sessionId: string, interactionId: string, response: { response?: string; optionId?: string; orderedIds?: string[] }) => post<LearnSession>(`/learn-sessions/${sessionId}/ask-interactions/${interactionId}/responses`, response)
+  ,getLearnHint: (sessionId: string, scene?: { id: string; revision: number }) => post<{ hint: string; hintsUsed: number }>(`/learn-sessions/${sessionId}/hints`, { sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,stopLearnSession: (sessionId: string, scene?: { id: string; revision: number }) => post<LearnSession>(`/learn-sessions/${sessionId}/stop`, { sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,askLucent: (sessionId: string, message: string, scene?: { id: string; revision: number }) => post<AskLucentResponse>(`/learn-sessions/${sessionId}/ask`, { message, sceneId: scene?.id, sceneRevision: scene?.revision })
+  ,submitAskInteraction: (sessionId: string, interactionId: string, response: { response?: string; optionId?: string; orderedIds?: string[]; sceneId?: string; sceneRevision?: number }) => post<LearnSession>(`/learn-sessions/${sessionId}/ask-interactions/${interactionId}/responses`, response)
   ,learnVisualEvent: (sessionId: string, request: { sceneId: string; sceneRevision: number; event: "set_stage" | "highlight" | "replay"; stage?: number; elementId?: string }) => post<LearnSession>(`/learn-sessions/${sessionId}/visual-events`, request)
 }

@@ -3,16 +3,13 @@ import styles from "./marketing.module.css"
 
 export function MarketingNav() {
   return (
-    <nav className={styles.nav}>
+    <nav className={styles.nav} aria-label="Main navigation">
       <Link to="/" className={styles.wordmark}>
         Lucent
       </Link>
       <div className={styles.navLinks}>
-        <a href="#features" className={styles.navLink}>
-          Product
-        </a>
-        <a href="#reading-mode" className={styles.navLink}>
-          Reading Mode
+        <a href="#learn-in-action" className={styles.navLink}>
+          Explore Learn
         </a>
       </div>
       <div className={styles.navActions}>

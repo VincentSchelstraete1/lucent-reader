@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 import hashlib
 import json
+import logging
 import os
 import time
 from typing import Any, Sequence
@@ -17,8 +18,10 @@ from app.models.document import Document
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
 from app.models.source import Source
 from app.services.embeddings import EmbeddingError, get_embedding_provider
-from app.services.source_index import embedding_input_for
+from app.services.source_index import embedding_input_for, expire_stale_index_lease
 
+
+logger = logging.getLogger(__name__)
 
 QUERY_VERSION = "source-query-v1"
 RETRIEVAL_VERSION = "exact-cosine-v1"
@@ -139,6 +142,11 @@ def exact_cosine(unit_query: Sequence[float], unit_document: Sequence[float]) ->
 def _empty_context(status: RetrievalStatus, *, document_id: int, generation_id: uuid.UUID | None,
                    fingerprint: str, index: DocumentSourceIndex | None = None,
                    failure_code: str | None = None) -> RetrievedSourceContext:
+    log = logger.error if status in {RetrievalStatus.FAILED} else logger.warning
+    log(
+        "retrieval_unavailable document_id=%s status=%s generation_id=%s fingerprint=%s failure_code=%s",
+        document_id, status.value, generation_id, fingerprint, failure_code,
+    )
     return RetrievedSourceContext(status=status, document_id=document_id, generation_id=generation_id,
         query_fingerprint=fingerprint, provider=index.provider if index else None,
         model=index.model if index else None, dimensions=index.dimensions if index else None,
@@ -159,6 +167,7 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     if expected_generation is not None and source_index.generation_id != expected_generation:
         return _empty_context(RetrievalStatus.SOURCE_CHANGED, document_id=document_id, generation_id=source_index.generation_id,
                               fingerprint=fingerprint, index=source_index)
+    expire_stale_index_lease(source_index)
     if source_index.status != "READY":
         status = RetrievalStatus.INDEXING if source_index.status in {"PENDING", "INDEXING"} else RetrievalStatus.FAILED
         return _empty_context(status, document_id=document_id, generation_id=source_index.generation_id,
@@ -190,7 +199,11 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
                 generation_id=source_index.generation_id, fingerprint=fingerprint, index=source_index,
                 failure_code="embedding_configuration_mismatch")
         query_vector = provider.embed_query(query.text)
-    except EmbeddingError:
+    except EmbeddingError as exc:
+        logger.error(
+            "retrieval_embedding_failed document_id=%s fingerprint=%s purpose=%s exception=%s code=%s",
+            document_id, fingerprint, query.purpose, type(exc).__name__, getattr(exc, "code", "embedding_error"),
+        )
         return _empty_context(RetrievalStatus.FAILED, document_id=document_id,
             generation_id=source_index.generation_id, fingerprint=fingerprint, index=source_index,
             failure_code="embedding_unavailable")
@@ -259,6 +272,15 @@ def retrieve_source(db, *, user_id: uuid.UUID, document_id: int, expected_genera
     if semantic_scores and max(semantic_scores) < threshold and not any(block.selection == "anchor" for block in output):
         status = RetrievalStatus.WEAK
     selected_ids = {block_id for block in output for block_id in block.block_ids}
+    top_score = max(semantic_scores) if semantic_scores else None
+    (logger.info if status == RetrievalStatus.SUPPORTED else logger.warning)(
+        "retrieval_complete document_id=%s status=%s purpose=%s fingerprint=%s corpus_blocks=%s "
+        "returned=%s top_score=%s threshold=%.5f truncated=%s coverage_incomplete=%s "
+        "embedding_ms=%.1f search_ms=%.1f total_ms=%.1f",
+        document_id, status.value, query.purpose, fingerprint, len(rows), len(output),
+        f"{top_score:.5f}" if top_score is not None else "none", threshold, truncated, missing_anchor,
+        embedding_ms, search_ms, (time.perf_counter() - started) * 1000,
+    )
     return RetrievedSourceContext(status=status, document_id=document_id, generation_id=source_index.generation_id,
         query_fingerprint=fingerprint, provider=source_index.provider, model=source_index.model,
         dimensions=source_index.dimensions, blocks=output, raw_ranked_block_ids=raw_ranked_block_ids,

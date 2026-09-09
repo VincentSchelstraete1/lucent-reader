@@ -31,6 +31,43 @@ def _words(value: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9]+", value.lower()) if len(word) > 2}
 
 
+_DEPENDENCY_STOP_WORDS = {
+    "about", "actual", "again", "against", "also", "another", "because",
+    "between", "concept", "different", "does", "each", "from", "into",
+    "material", "other", "should", "that", "their", "these", "they",
+    "this", "through", "understand", "using", "what", "when", "where",
+    "which", "while", "with", "works",
+}
+_HIGHER_ORDER_GOAL_WORDS = {
+    "analyze", "apply", "compare", "distinguish", "evaluate", "explain",
+    "infer", "interpret", "predict", "reason", "solve", "trace",
+}
+
+
+def _dependency_terms(section: dict) -> set[str]:
+    """Return bounded domain terms from a generated, source-backed section."""
+    values = [section.get("title"), section.get("bigIdea"), *(section.get("keyTakeaways") or [])]
+    for component in _components(section):
+        values.extend((component.get("title"), component.get("term"), component.get("definition")))
+    return _words(" ".join(_clean(value) for value in values if value)) - _DEPENDENCY_STOP_WORDS
+
+
+def _source_backed_prerequisite(previous: dict, current: dict) -> bool:
+    """Infer only an adjacent foundation -> application dependency.
+
+    Generated SectionNotes intentionally order ideas for learning and expose
+    explicit learning goals.  A later section may depend on the immediately
+    preceding section when it asks for higher-order use of the same bounded
+    domain vocabulary.  Requiring both signals avoids turning document order
+    alone into a prerequisite graph.
+    """
+    goals = " ".join(_clean(value).casefold() for value in current.get("learningGoals", []) if value)
+    if not any(re.search(rf"\b{word}\w*\b", goals) for word in _HIGHER_ORDER_GOAL_WORDS):
+        return False
+    shared = _dependency_terms(previous) & _dependency_terms(current)
+    return len(shared) >= 2
+
+
 def _bounded_plan_id(prefix: str, *parts: object) -> str:
     """Build stable Learn plan IDs without copying arbitrary source IDs."""
     digest = hashlib.sha256("|".join(str(part) for part in parts).encode()).hexdigest()[:14]
@@ -311,7 +348,10 @@ def build_learn_plan(note_payload: dict, goal: str, familiarity: str) -> LearnPl
         # such as "Explain how <title> works" makes later grading reward title
         # repetition rather than understanding of the material.
         outcome = big_idea
-        objectives.append(LearningObjective(id=_bounded_plan_id("objective", section_identity), title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, steps=steps))
+        prerequisite_ids: list[str] = []
+        if objectives and _source_backed_prerequisite(sections[len(objectives) - 1], section):
+            prerequisite_ids = [objectives[-1].id]
+        objectives.append(LearningObjective(id=_bounded_plan_id("objective", section_identity), title=title, outcome=outcome, bottleneck=bottleneck, sourceSectionIds=section_ids, sourceBlockIds=block_ids, prerequisiteIds=prerequisite_ids, steps=steps))
 
     if not objectives:
         objectives = [LearningObjective(id="objective-overview", title="Material overview", outcome="Recall the main idea.", bottleneck="Identify what matters most.", steps=[TeachStep(id="overview-teach", type="teach", title="Main idea", content=_clean(note_payload.get("title")) or "Review the material.")])]

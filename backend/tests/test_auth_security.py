@@ -7,6 +7,7 @@ from starlette.requests import Request
 
 from app.config import settings
 from app.main import app
+from app.auth_dependencies import _active_cookie_session
 from app.models.auth import User, WebSession
 from app.security import token_hash, utcnow
 from app.routers.auth import _rotate_web_session, _verified_google_claims
@@ -45,6 +46,49 @@ def test_valid_session_resolves_user():
     response = _client_for(user).get("/auth/me")
     assert response.status_code == 200
     assert response.json()["user"]["id"] == str(user.id)
+
+
+def test_cookie_session_is_resolved_and_touched_only_once_per_request():
+    user = _user("request-cache")
+    credential = "credential-request-cache"
+    now = utcnow()
+    with TestSessionLocal() as db:
+        db.add(WebSession(
+            user_id=user.id,
+            credential_hash=token_hash(credential),
+            csrf_hash=token_hash("csrf-request-cache"),
+            idle_expires_at=now + timedelta(hours=1),
+            absolute_expires_at=now + timedelta(hours=2),
+        ))
+        db.commit()
+
+        class CountingSession:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.execute_count = 0
+                self.commit_count = 0
+
+            def execute(self, *args, **kwargs):
+                self.execute_count += 1
+                return self.wrapped.execute(*args, **kwargs)
+
+            def commit(self):
+                self.commit_count += 1
+                return self.wrapped.commit()
+
+        counted = CountingSession(db)
+        request = Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/sources",
+            "headers": [(b"cookie", f"{settings.session_cookie_name}={credential}".encode())],
+        })
+        first = _active_cookie_session(request, counted)
+        second = _active_cookie_session(request, counted)
+
+        assert first is second
+        assert counted.execute_count == 1
+        assert counted.commit_count == 1
 
 
 def test_expired_revoked_and_random_sessions_are_rejected():

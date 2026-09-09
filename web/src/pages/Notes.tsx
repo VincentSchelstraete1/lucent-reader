@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote, type SourceIndexStatus } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 import { StructuredVisual } from "../learning/visuals/StructuredVisual"
+import { pollProgressiveJob } from "../progressivePolling"
 
 type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
@@ -125,7 +126,7 @@ function LearningSceneView({ session, note, onVisualStageChange }: { session: Le
     (!(["tutor_message", "explanation", "analogy"].includes(block.kind) && /another way|reframe|ask lucent/i.test(`${String(block.label ?? "")} ${String(block.title ?? "")}`)) || block.id === latestReframeId),
   )
   const visualBlocks = blocks.filter((block) => block.kind === "visual" && (block.visualSpec || block.visualRef))
-  const primaryVisual = visualBlocks.at(-1)
+  const primaryVisual = visualBlocks[visualBlocks.length - 1]
   const visualAnchor = visualBlocks[0]
   // Keep the current reframe attached to the Watch surface.  Scene blocks are
   // persisted in tutor-event order, but a reframe is part of the visual
@@ -333,19 +334,19 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
   }
   async function stop() {
     if (!session) return
-    try { const stopped = await api.stopLearnSession(session.id); sessionRef.current = stopped; setSession(stopped) }
+    try { const stopped = await api.stopLearnSession(session.id, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); sessionRef.current = stopped; setSession(stopped) }
     catch (e) { setError(e instanceof Error ? e.message : "This session could not be saved.") }
   }
   async function requestHint() {
     if (!session) return
-    try { const result = await api.getLearnHint(session.id); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
+    try { const result = await api.getLearnHint(session.id, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); setHint(result.hint); setSession((current) => current ? { ...current, hintsUsed: result.hintsUsed } : current) }
     catch (e) { setError(e instanceof Error ? e.message : "No hint is available right now.") }
   }
   async function askLucent(messageOverride?: string) {
     const message = messageOverride?.trim() || askMessage.trim()
     if (!session || !message) return
     setAskLoading(true); setError(null)
-    try { const result = await api.askLucent(session.id, message); setAskAnswer(result); if (result.scene) setSession((current) => current ? { ...current, scene: result.scene } : current); setAskMessage("") }
+    try { const result = await api.askLucent(session.id, message, session.scene ? { id: session.scene.id, revision: session.scene.revision } : undefined); setAskAnswer(result); if (result.scene) setSession((current) => current ? { ...current, scene: result.scene } : current); setAskMessage("") }
     catch (e) { setError(e instanceof Error ? e.message : "Ask Lucent could not respond right now.") }
     finally { setAskLoading(false) }
   }
@@ -353,7 +354,7 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     const inline = session?.scene?.inlineInteraction
     if (!session || !inline) return
     setLoading(true); setError(null)
-    try { setSession(await api.submitAskInteraction(session.id, inline.id, response)) }
+    try { setSession(await api.submitAskInteraction(session.id, inline.id, { ...response, sceneId: session.scene?.id, sceneRevision: session.scene?.revision })) }
     catch (e) { setError(e instanceof Error ? e.message : "That extra practice could not be checked right now.") }
     finally { setLoading(false) }
   }
@@ -489,8 +490,14 @@ export function Notes() {
         const start = await api.startProgressiveDocument(file, depth)
         if (run !== runRef.current) return
         setState({ status: "processing", filename: start.filename, sections: start.sections })
-        let poll = await api.pollProgressiveDocument(start.job_id)
-        while (poll.status === "processing") { if (run !== runRef.current) return; setState({ status: "processing", filename: poll.filename, sections: poll.sections }); await new Promise((resolve) => window.setTimeout(resolve, 500)); poll = await api.pollProgressiveDocument(start.job_id) }
+        const poll = await pollProgressiveJob(
+          () => api.pollProgressiveDocument(start.job_id),
+          {
+            shouldContinue: () => run === runRef.current,
+            onProgress: (next) => setState({ status: "processing", filename: next.filename, sections: next.sections }),
+          },
+        )
+        if (!poll) return
         if (!poll.result) throw new Error("Lucent could not finish this document")
         saveResult(poll.result, run)
       } else {

@@ -103,7 +103,7 @@ def _block(
 
 
 def compose_learning_scene(
-    *, session_id: str, objective: dict, steps: list[dict], step_index: int,
+    *, session_id: str, objective: dict, steps: list[dict],
     current_step, action: TutorAction | None, decision: TutorDecision | None,
     concept: dict, state: dict, feedback: str | None = None,
     feedback_kind: str | None = None, evaluation: LearnEvaluation | None = None,
@@ -115,10 +115,6 @@ def compose_learning_scene(
     their validated outputs with source-grounded teaching and interaction
     components. It never lets the model mutate state or emit executable UI.
     """
-    # ``step_index`` remains accepted only so old callers can be upgraded
-    # without a flag day. It is deliberately ignored: candidate assets are
-    # unordered and the authoritative runtime supplies the selected
-    # ``current_step``.
     source_text = _source_text(objective, steps)
     section_ids = list(dict.fromkeys(list(objective.get("sourceSectionIds", [])) + list(getattr(current_step, "source_section_ids", []) or [])))[:8]
     block_ids = list(dict.fromkeys(list(objective.get("sourceBlockIds", [])) + list(getattr(current_step, "source_block_ids", []) or [])))[:12]
@@ -278,7 +274,7 @@ def compose_learning_scene(
         "numeric": ["application"], "problem": ["application"], "worked_step": ["procedural reasoning"],
         "fill_blank": ["recall"],
     }.get(getattr(current_step, "type", ""), [])
-    response_step_id = next((block.step.id for block in blocks if block.kind == "practice" and block.step), None)
+    response_interaction_id = next((block.step.id for block in blocks if block.kind == "practice" and block.step), None)
     return LearningScene(
         id=scene_seed, revision=int(state.get("sceneRevision", 0)), objectiveId=str(objective.get("id", "concept")),
         objective=str(objective.get("title", "Current concept")), targetConcepts=[str(objective.get("title", "Current concept"))],
@@ -289,5 +285,5 @@ def compose_learning_scene(
             evidenceTargets=evidence, sourceSectionIds=section_ids, sourceBlockIds=block_ids,
             visualState=(state.get("visualState") if isinstance(state.get("visualState"), dict) else {}),
             completionCondition=(decision.scene_plan.completion_condition if decision and decision.scene_plan and decision.scene_plan.completion_condition else f"Show that you can explain or apply {objective.get('title', 'this idea')} with less support."),
-            responseInteractionId=response_step_id,
+            responseInteractionId=response_interaction_id,
         )

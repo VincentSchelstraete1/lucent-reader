@@ -501,11 +501,11 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
     source = "\n\n".join(f"[{block.id}] {block.text}" for block in section.blocks)
     key = hashlib.sha256(f"{model_version}:{depth}:{section.title}:{source}".encode()).hexdigest()
     if key in _SECTION_CACHE:
-        logger.info("section_generation_cache_hit section_id=%s title=%r model=claude-haiku-4-5-20251001", section.id, section.title)
+        logger.info("section_generation_cache_hit section_id=%s model=claude-haiku-4-5-20251001", section.id)
         return _SECTION_CACHE[key].model_copy()
     schema = GeneratedSectionNote.model_json_schema(by_alias=True)
     started = time.perf_counter()
-    logger.info("section_generation_start section_id=%s title=%r model=claude-haiku-4-5-20251001 depth=%s cache_hit=false source_chars=%d blocks=%d max_tokens=%d", section.id, section.title, depth, len(source), len(section.blocks), SECTION_NOTE_MAX_TOKENS)
+    logger.info("section_generation_start section_id=%s model=claude-haiku-4-5-20251001 depth=%s cache_hit=false source_chars=%d blocks=%d max_tokens=%d", section.id, depth, len(source), len(section.blocks), SECTION_NOTE_MAX_TOKENS)
     try:
         depth_instruction = {
             "concise": "Teaching depth: CONCISE STUDY GUIDE. Prefer the fewest components that preserve exam-relevant mechanisms, definitions, equations, and relationships; use terse phrases and minimal supporting prose.",
@@ -529,10 +529,10 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
                   "Every component must cite sourceBlockIds from the supplied blocks, and all required fields must be present. Return no fields outside the schema.\n\n" + source)
         raw = _run_structured_tool(prompt, "section_learning_note", schema, SECTION_NOTE_MAX_TOKENS, timeout=SECTION_NOTE_TIMEOUT_SECONDS, max_retries=0)
     except Exception as exc:
-        logger.exception("section_generation_failure section_id=%s title=%r stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
+        logger.warning("section_generation_failure section_id=%s stage=anthropic_request exception_type=%s latency_ms=%.1f fallback=true", section.id, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
     try:
-        logger.info("section_generation_response section_id=%s title=%r top_level_keys=%s", section.id, section.title, sorted(raw.keys()) if isinstance(raw, dict) else [])
+        logger.info("section_generation_response section_id=%s top_level_keys=%s", section.id, sorted(raw.keys()) if isinstance(raw, dict) else [])
         generated = GeneratedSectionNote.model_validate(_normalize_generated_section_payload(raw))
         generated_payload = generated.model_dump(by_alias=True)
         for index, component in enumerate(generated_payload.get("components", [])):
@@ -542,9 +542,9 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
                 component["mechanism"] = generated_component.mechanism.to_canonical().model_dump(by_alias=True)
         note = SectionNote.model_validate({**generated_payload, "id": section.id, "sourceBlockIds": section.learning_block_ids})
     except Exception as exc:
-        logger.exception("section_generation_failure section_id=%s title=%r stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, section.title, type(exc).__name__, (time.perf_counter() - started) * 1000)
+        logger.warning("section_generation_failure section_id=%s stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
-    logger.info("section_generation_success section_id=%s title=%r model=claude-haiku-4-5-20251001 latency_ms=%.1f fallback=false components=%d", section.id, section.title, (time.perf_counter() - started) * 1000, len(note.components))
+    logger.info("section_generation_success section_id=%s model=claude-haiku-4-5-20251001 latency_ms=%.1f fallback=false components=%d", section.id, (time.perf_counter() - started) * 1000, len(note.components))
     _SECTION_CACHE[key] = note
     return note.model_copy()
 
@@ -558,7 +558,7 @@ async def generate_sections_concurrently(sections: list[SectionInput], objects: 
                 try:
                     return await asyncio.to_thread(model_section_note, section, depth=depth)
                 except Exception as exc:
-                    logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
+                    logger.warning("section_generation_fallback section_id=%s stage=section_task exception_type=%s fallback=true", section.id, type(exc).__name__)
                     pass
             return safe_deterministic_section_note(section, objects)
 
@@ -575,7 +575,7 @@ async def generate_sections_progressively(sections: list[SectionInput], objects:
                 note = await asyncio.to_thread(model_section_note, section, depth=depth) if use_model else deterministic_section_note(section, objects)
             except Exception as exc:
                 note = safe_deterministic_section_note(section, objects)
-                logger.warning("section_generation_fallback section_id=%s title=%r stage=section_task exception_type=%s fallback=true", section.id, section.title, type(exc).__name__)
+                logger.warning("section_generation_fallback section_id=%s stage=section_task exception_type=%s fallback=true", section.id, type(exc).__name__)
                 await on_complete(index, note, str(exc))
             else:
                 await on_complete(index, note, None)
