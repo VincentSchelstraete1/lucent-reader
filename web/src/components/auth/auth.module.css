@@ -121,67 +121,6 @@
   opacity: 0.92;
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--lm-card-caption);
-  font-size: 12px;
-  margin: 16px 0;
-}
-
-.divider::before,
-.divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--lm-card-border);
-}
-
-.emailLink {
-  background: none;
-  border: none;
-  color: var(--lm-card-caption);
-  font-size: 13px;
-  text-decoration: underline;
-  cursor: pointer;
-  padding: 0;
-}
-
-.emailForm {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  text-align: left;
-}
-
-.input {
-  font-family: inherit;
-  font-size: 14px;
-  border: 1px solid var(--lm-card-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #fff;
-  color: var(--lm-card-text);
-}
-
-.submitBtn {
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  background: #1c1c1a;
-  color: #fff;
-  border: none;
-  border-radius: var(--lucent-radius-control);
-  padding: 11px 16px;
-  cursor: pointer;
-  margin-top: 4px;
-}
-
-.submitBtn:hover {
-  opacity: 0.92;
-}
-
 .switchMode {
   margin-top: 20px;
   font-size: 13px;
@@ -200,9 +139,6 @@
 
 .googleBtn:focus-visible,
 .developmentBtn:focus-visible,
-.emailLink:focus-visible,
-.input:focus-visible,
-.submitBtn:focus-visible,
 .switchMode a:focus-visible,
 .wordmark:focus-visible {
   outline: 3px solid rgba(88, 115, 93, 0.35);

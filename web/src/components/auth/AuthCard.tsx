@@ -1,11 +1,10 @@
-import { useState, type FormEvent } from "react"
+import { useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { authAdapter } from "../../lib/authAdapter"
 import { useAuth } from "../../lib/AuthContext"
 import styles from "./auth.module.css"
 
 export function AuthCard({ mode }: { mode: "login" | "signup" }) {
-  const [showEmailForm, setShowEmailForm] = useState(false)
   const [notice, setNotice] = useState("")
   const navigate = useNavigate()
   const location = useLocation()
@@ -21,15 +20,9 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
     }
   }
 
-  async function handleAuth(provider: "google" | "email", e?: FormEvent) {
-    e?.preventDefault()
-    if (provider === "google") {
-      const requestedPath = (location.state as { from?: string } | null)?.from
-      authAdapter.continueWithGoogle(requestedPath)
-      return
-    }
-    const result = await authAdapter.continueWithEmail()
-    setNotice(result.message)
+  function handleGoogleAuth() {
+    const requestedPath = (location.state as { from?: string } | null)?.from
+    authAdapter.continueWithGoogle(requestedPath)
   }
 
   return (
@@ -37,26 +30,9 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
       <p className={styles.cardWordmark}>Your Lucent learner card</p>
       <h1 className={styles.cardTitle}>{mode === "login" ? "Welcome back." : "Create your account."}</h1>
 
-      <button className={styles.googleBtn} onClick={() => handleAuth("google")}>
+      <button className={styles.googleBtn} onClick={handleGoogleAuth}>
         <span aria-hidden="true">G</span> Continue with Google
       </button>
-
-      {!showEmailForm ? (
-        <>
-          <div className={styles.divider}>or</div>
-          <button className={styles.emailLink} onClick={() => setShowEmailForm(true)}>
-            Use email instead
-          </button>
-        </>
-      ) : (
-        <form className={styles.emailForm} onSubmit={(event) => handleAuth("email", event)} style={{ marginTop: 16 }}>
-          <input className={styles.input} type="email" placeholder="Email address" required />
-          {mode === "signup" && <input className={styles.input} type="password" placeholder="Password" required />}
-          <button type="submit" className={styles.submitBtn}>
-            {mode === "login" ? "Continue" : "Create account"}
-          </button>
-        </form>
-      )}
 
       {notice && <p className={styles.authNotice} role="status">{notice}</p>}
 
