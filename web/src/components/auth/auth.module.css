@@ -137,9 +137,13 @@
   text-decoration: underline;
 }
 
+.legalLinks { margin: 18px 0 0; color: var(--lm-card-caption); font-size: 11px; line-height: 1.5; }
+.legalLinks a { color: var(--lm-moss); }
+
 .googleBtn:focus-visible,
 .developmentBtn:focus-visible,
 .switchMode a:focus-visible,
+.legalLinks a:focus-visible,
 .wordmark:focus-visible {
   outline: 3px solid rgba(88, 115, 93, 0.35);
   outline-offset: 3px;

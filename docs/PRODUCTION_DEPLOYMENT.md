@@ -20,6 +20,45 @@ Provider inputs can contain authorized uploaded material. Production use with
 real student documents remains gated on the separate privacy/legal review of
 Anthropic and Voyage processing and retention terms.
 
+The application uses server-generated opaque session credentials and stores
+only their hashes, so there is no static session-signing secret. Treat the
+Google client secret, Anthropic and Voyage keys, PostgreSQL password, and any
+hosting credentials as strong application secrets: generate independent
+high-entropy values, store them in the hosting provider's secret manager,
+restrict operator access, and rotate them after suspected exposure. Never put
+production values in an image, Compose file, frontend build argument, or Git.
+
+### Origins and Google OAuth
+
+- `PUBLIC_API_ORIGIN` and `API_ORIGIN` are the exact public HTTPS API origin,
+  with no path and no trailing slash.
+- Put the exact HTTPS web origin first in `ALLOWED_ORIGINS`; list only the
+  production web origin and explicitly approved Chrome extension origins.
+- Register exactly `${API_ORIGIN}/auth/google/callback` in the production
+  Google OAuth client and set that same value as `GOOGLE_REDIRECT_URI`.
+- Keep `COOKIE_SECURE=true`, `ENABLE_DEVELOPMENT_AUTH=false`, and
+  `ENABLE_LEGACY_CLAIM=false`. Production startup rejects unsafe auth values.
+- Set `SUPPORT_EMAIL` and `POLICY_EFFECTIVE_DATE` before building the frontend;
+  these values are compiled into the public Privacy and Terms pages.
+
+### Provider-spend safeguards
+
+The single API process enforces atomic per-user and process-global windows for
+document ingestion and provider-backed generation. Ask Lucent also retains its
+database-backed per-user request check. Ingestion is rejected before its first
+provider request when normalized source characters or estimated provider
+fan-out exceed configured limits. The estimate includes representation
+classifier fallbacks, section generation, Voyage embedding batches, and
+configured retries.
+
+All thresholds in `.env.production.example` are conservative starting points,
+not product entitlements. Compare them with the active Anthropic/Voyage tier
+before launch and lower them if necessary. Process counters reset on API
+restart, so configure provider-account budgets and billing alerts as the
+durable, account-wide backstop. Do not add another API replica: these counters
+and progressive ingestion intentionally rely on the documented single-process
+topology.
+
 ## Build, migrate, and start
 
 The checked-in Compose file is a reproducible reference deployment:
@@ -59,7 +98,55 @@ Before directing traffic:
 5. Inspect logs for bounded `http_request_complete`,
    `provider_operation_complete`, `retrieval_complete`, and
    `ingestion_job_complete` events.
+6. Exercise a configured usage limit and verify the API returns HTTP 429 with
+   `usage_limit_reached` and `Retry-After`, and that the UI shows the safe
+   temporary-limit message.
 
 Rollback the application image independently of the database. Database rollback
 requires an explicitly reviewed Alembic downgrade; never discard the PostgreSQL
 volume or run a destructive reset as part of an application rollback.
+
+## Database backup and restore readiness
+
+Use a managed PostgreSQL service with encrypted storage, automated daily
+backups, and point-in-time recovery. For the initial public release, retain at
+least seven days of recovery history, assign an operator to review backup
+failures, and test a restore into an isolated database before sending traffic.
+These are infrastructure actions; checking in this runbook does not prove that
+the production database has been backed up.
+
+For a portable logical backup, run `pg_dump --format=custom --no-owner` against
+the managed database and write the result directly to encrypted operator-owned
+storage. Never commit a dump. To verify recovery, create an isolated empty
+database, restore with `pg_restore --clean --if-exists --no-owner`, run
+`alembic current`, and exercise `/readyz`, authentication, an authorized upload,
+Learn, and Ask Lucent against the restored instance. Destroy the isolated copy
+only after recording the outcome. Follow the managed provider's native
+point-in-time restore procedure for incident recovery rather than overwriting
+the affected production database in place.
+
+## Logging and alert ownership
+
+Send stdout/stderr to a production log collector with access controls and a
+documented retention period. Assign one named operator before launch. Alert on
+repeated readiness failures, `ingestion_job_complete outcome=error`, source
+index terminal failures, sustained provider errors/fallbacks, and global usage
+limits. Dashboards and alerts must use the structured metadata fields and must
+not capture request bodies, uploaded text, learner responses, prompts, provider
+payloads, cookies, authorization headers, or query strings.
+
+## External launch gates
+
+Before accepting real student documents, the service owner must:
+
+1. approve the final Privacy notice and Terms with appropriate legal advice;
+2. confirm Anthropic and Voyage processing, retention, region, and contractual
+   terms for the intended users and content;
+3. decide and publish application, log, and backup retention periods plus the
+   account deletion/export support process;
+4. verify the production support address is monitored;
+5. configure provider budgets/alerts and name the operator who receives them;
+6. record a successful managed-database backup and isolated restore drill.
+
+Until these actions are recorded, the code may be deployment-ready but the
+service is not approved for unrestricted public document ingestion.

@@ -138,6 +138,7 @@
 .storyIndex i { width: 70px; height: 1px; background: #f1f3e470; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 6%; padding: 24px 0; border-top: 1px solid #f1f3e426; font-size: 11px; color: #c7d2c5; }
 .footer a { text-decoration: none; }
+.footer nav { display: flex; gap: 18px; }
 
 /* One reading order at narrower sizes and when camera motion is disabled. */
 .spatialStory[data-static-story=true] { height: auto; }

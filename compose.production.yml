@@ -43,6 +43,8 @@ services:
       context: ./web
       args:
         VITE_API_URL: ${PUBLIC_API_ORIGIN:?set PUBLIC_API_ORIGIN}
+        VITE_SUPPORT_EMAIL: ${SUPPORT_EMAIL:?set SUPPORT_EMAIL}
+        VITE_POLICY_EFFECTIVE_DATE: ${POLICY_EFFECTIVE_DATE:?set POLICY_EFFECTIVE_DATE}
     restart: unless-stopped
     ports:
       - "8080:8080"

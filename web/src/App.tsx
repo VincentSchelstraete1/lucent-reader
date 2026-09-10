@@ -12,6 +12,7 @@ import { DocumentIngestionDemo } from "./pages/DocumentIngestionDemo"
 import { Notes } from "./pages/Notes"
 import { StepThroughDev } from "./pages/StepThroughDev"
 import { useAuth } from "./lib/AuthContext"
+import { PrivacyPage, TermsPage } from "./pages/PolicyPage"
 
 function LegacyDocumentRedirect() {
   const { documentId } = useParams()
@@ -53,6 +54,8 @@ export function App() {
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/signup" element={<AuthPage mode="signup" />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>

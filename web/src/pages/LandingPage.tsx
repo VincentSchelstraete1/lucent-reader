@@ -11,7 +11,7 @@ export function LandingPage() {
       </header>
 
       <SpatialStory />
-      <footer className={styles.footer}><Link to="/" className={styles.wordmark}>Lucent</Link><span>Learning, made clearer.</span><Link to="/login">Log in <span aria-hidden="true">↗</span></Link></footer>
+      <footer className={styles.footer}><Link to="/" className={styles.wordmark}>Lucent</Link><span>Learning, made clearer.</span><nav aria-label="Legal and account"><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/login">Log in <span aria-hidden="true">↗</span></Link></nav></footer>
     </div>
   )
 }

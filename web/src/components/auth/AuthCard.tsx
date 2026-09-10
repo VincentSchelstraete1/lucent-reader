@@ -53,6 +53,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
           </>
         )}
       </p>
+      <p className={styles.legalLinks}>By continuing, you agree to the <Link to="/terms">Terms</Link> and acknowledge the <Link to="/privacy">Privacy notice</Link>.</p>
     </div>
   )
 }
