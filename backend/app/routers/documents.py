@@ -11,6 +11,7 @@ from app.models.source import Source
 from app.schemas.ingestion import SourceIndexStatusResponse
 from app.services.source_index import expire_stale_index_lease
 from app.services.anthropic_service import generate_structured_note
+from app.services.usage_service import UsageClass, enforce_usage_limit
 from sqlalchemy import select
 from app.auth_dependencies import get_current_user, require_csrf
 from app.models.auth import User
@@ -106,6 +107,7 @@ def generate_note(document_id: int, db = Depends(get_db), user: User = Depends(g
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
 
     try:
         generated = generate_structured_note(document.title, document.content)

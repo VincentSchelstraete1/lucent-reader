@@ -1,23 +1,125 @@
-from datetime import date
-from fastapi import HTTPException
+"""Process-local spend admission for the documented single-API deployment."""
+from __future__ import annotations
 
-DAILY_LIMIT = 100
+from dataclasses import dataclass
+from enum import StrEnum
+from math import ceil
+from threading import Lock
+import logging
+import time
 
-# In-memory usage tracking: { install_id: {"date": "2026-08-07", "count": 3} }
-usage_tracker = {}
+from fastapi import HTTPException, status
 
-def check_and_increment(install_id: str):
-    today = str(date.today())
-    record = usage_tracker.get(install_id)
+from app.config import settings
 
-    if record is None or record["date"] != today:
-        record = {"date": today, "count": 0}
 
-    if record["count"] >= DAILY_LIMIT:
+logger = logging.getLogger(__name__)
+
+
+class UsageClass(StrEnum):
+    DOCUMENT_INGESTION = "document_ingestion"
+    PROVIDER_GENERATION = "provider_generation"
+    ASK_LUCENT = "ask_lucent"
+
+
+@dataclass(frozen=True)
+class LimitPolicy:
+    user_limit: int | None
+    global_limit: int
+    window_seconds: int
+
+
+@dataclass
+class _Counter:
+    window: int
+    count: int
+
+
+class FixedWindowLimiter:
+    """Atomically enforce user and process-global limits in one fixed window."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._counters: dict[tuple[str, str], _Counter] = {}
+
+    def reset(self) -> None:
+        with self._lock:
+            self._counters.clear()
+
+    def consume(
+        self,
+        usage_class: UsageClass,
+        *,
+        user_key: str | None,
+        policy: LimitPolicy,
+        now: float | None = None,
+    ) -> None:
+        current = time.monotonic() if now is None else now
+        window = int(current // policy.window_seconds)
+        retry_after = max(1, ceil(((window + 1) * policy.window_seconds) - current))
+        keys = [(usage_class.value, "global")]
+        limits = [policy.global_limit]
+        if user_key is not None and policy.user_limit is not None:
+            keys.append((usage_class.value, f"user:{user_key}"))
+            limits.append(policy.user_limit)
+
+        with self._lock:
+            counters = []
+            for key in keys:
+                counter = self._counters.get(key)
+                if counter is None or counter.window != window:
+                    counter = _Counter(window=window, count=0)
+                    self._counters[key] = counter
+                counters.append(counter)
+            denied_scope = next(
+                (
+                    "global" if index == 0 else "user"
+                    for index, (counter, limit) in enumerate(zip(counters, limits))
+                    if counter.count >= limit
+                ),
+                None,
+            )
+            if denied_scope is None:
+                for counter in counters:
+                    counter.count += 1
+                return
+
+        logger.warning(
+            "usage_limit_reached usage_class=%s scope=%s retry_after_seconds=%s",
+            usage_class.value,
+            denied_scope,
+            retry_after,
+        )
         raise HTTPException(
-            status_code=429,
-            detail=f"Daily limit reached."
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "usage_limit_reached",
+                "message": "Lucent has reached a temporary usage limit. Please try again later.",
+                "limitClass": usage_class.value,
+            },
+            headers={"Retry-After": str(retry_after)},
         )
 
-    record["count"] += 1
-    usage_tracker[install_id] = record
+
+limiter = FixedWindowLimiter()
+
+
+def policy_for(usage_class: UsageClass) -> LimitPolicy:
+    if usage_class == UsageClass.DOCUMENT_INGESTION:
+        return LimitPolicy(settings.usage_ingestion_user_limit, settings.usage_ingestion_global_limit, 3600)
+    if usage_class == UsageClass.PROVIDER_GENERATION:
+        return LimitPolicy(settings.usage_generation_user_limit, settings.usage_generation_global_limit, 3600)
+    return LimitPolicy(settings.usage_ask_user_limit, settings.usage_ask_global_limit, settings.usage_ask_window_seconds)
+
+
+def enforce_usage_limit(usage_class: UsageClass, user_id: object) -> None:
+    limiter.consume(usage_class, user_key=str(user_id), policy=policy_for(usage_class))
+
+
+def enforce_global_usage_limit(usage_class: UsageClass) -> None:
+    policy = policy_for(usage_class)
+    limiter.consume(
+        usage_class,
+        user_key=None,
+        policy=LimitPolicy(user_limit=None, global_limit=policy.global_limit, window_seconds=policy.window_seconds),
+    )

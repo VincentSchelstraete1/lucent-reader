@@ -34,6 +34,15 @@ class Settings:
     database_pool_timeout_seconds: int
     progressive_job_ttl_seconds: int
     progressive_job_max_entries: int
+    usage_ingestion_user_limit: int
+    usage_ingestion_global_limit: int
+    usage_generation_user_limit: int
+    usage_generation_global_limit: int
+    usage_ask_user_limit: int
+    usage_ask_global_limit: int
+    usage_ask_window_seconds: int
+    ingestion_max_source_characters: int
+    ingestion_max_provider_requests: int
     session_idle_seconds: int = 60 * 60 * 24
     session_absolute_seconds: int = 60 * 60 * 24 * 30
 
@@ -97,6 +106,15 @@ def load_settings() -> Settings:
         database_pool_timeout_seconds=int(os.getenv("DATABASE_POOL_TIMEOUT_SECONDS", "15")),
         progressive_job_ttl_seconds=int(os.getenv("PROGRESSIVE_JOB_TTL_SECONDS", "1800")),
         progressive_job_max_entries=int(os.getenv("PROGRESSIVE_JOB_MAX_ENTRIES", "200")),
+        usage_ingestion_user_limit=int(os.getenv("USAGE_INGESTION_USER_LIMIT_PER_HOUR", "3")),
+        usage_ingestion_global_limit=int(os.getenv("USAGE_INGESTION_GLOBAL_LIMIT_PER_HOUR", "30")),
+        usage_generation_user_limit=int(os.getenv("USAGE_GENERATION_USER_LIMIT_PER_HOUR", "30")),
+        usage_generation_global_limit=int(os.getenv("USAGE_GENERATION_GLOBAL_LIMIT_PER_HOUR", "120")),
+        usage_ask_user_limit=int(os.getenv("USAGE_ASK_USER_LIMIT_PER_MINUTE", "12")),
+        usage_ask_global_limit=int(os.getenv("USAGE_ASK_GLOBAL_LIMIT_PER_MINUTE", "60")),
+        usage_ask_window_seconds=int(os.getenv("USAGE_ASK_WINDOW_SECONDS", "60")),
+        ingestion_max_source_characters=int(os.getenv("INGESTION_MAX_SOURCE_CHARACTERS", "200000")),
+        ingestion_max_provider_requests=int(os.getenv("INGESTION_MAX_PROVIDER_REQUESTS", "30")),
     )
     if settings.pdf_upload_max_bytes <= 0:
         raise RuntimeError("PDF_UPLOAD_MAX_BYTES must be greater than zero")
@@ -118,6 +136,20 @@ def load_settings() -> Settings:
         raise RuntimeError("PROGRESSIVE_JOB_TTL_SECONDS must be greater than zero")
     if settings.progressive_job_max_entries <= 0:
         raise RuntimeError("PROGRESSIVE_JOB_MAX_ENTRIES must be greater than zero")
+    positive_limits = {
+        "USAGE_INGESTION_USER_LIMIT_PER_HOUR": settings.usage_ingestion_user_limit,
+        "USAGE_INGESTION_GLOBAL_LIMIT_PER_HOUR": settings.usage_ingestion_global_limit,
+        "USAGE_GENERATION_USER_LIMIT_PER_HOUR": settings.usage_generation_user_limit,
+        "USAGE_GENERATION_GLOBAL_LIMIT_PER_HOUR": settings.usage_generation_global_limit,
+        "USAGE_ASK_USER_LIMIT_PER_MINUTE": settings.usage_ask_user_limit,
+        "USAGE_ASK_GLOBAL_LIMIT_PER_MINUTE": settings.usage_ask_global_limit,
+        "USAGE_ASK_WINDOW_SECONDS": settings.usage_ask_window_seconds,
+        "INGESTION_MAX_SOURCE_CHARACTERS": settings.ingestion_max_source_characters,
+        "INGESTION_MAX_PROVIDER_REQUESTS": settings.ingestion_max_provider_requests,
+    }
+    invalid_limits = [name for name, value in positive_limits.items() if value <= 0]
+    if invalid_limits:
+        raise RuntimeError(f"Usage limits must be greater than zero: {', '.join(invalid_limits)}")
     settings.validate()
     return settings
 

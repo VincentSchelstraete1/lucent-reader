@@ -54,6 +54,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, engine, get_db
 from app.main import app  # noqa: E402 - imports models, runs create_all against the test db
 from app.config import settings
+from app.services.usage_service import limiter
 from app.models.auth import User, WebSession
 from app.routers.ingestion import get_classifier
 from app.security import token_hash, utcnow
@@ -118,7 +119,9 @@ def unauthenticated_client():
 
 @pytest.fixture(autouse=True)
 def _clean_tables():
+    limiter.reset()
     yield
+    limiter.reset()
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             conn.execute(table.delete())

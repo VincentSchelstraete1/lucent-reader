@@ -4,7 +4,6 @@ import json
 import hashlib
 import logging
 import re
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -13,6 +12,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 
 from app.auth_dependencies import get_current_user, require_csrf
+from app.config import settings
 from app.database import get_db
 from app.models.auth import User
 from app.models.document import Document
@@ -30,13 +30,11 @@ from app.services.retrieval import (
 from app.models.learning_block import DocumentSourceIndex
 from app.services.adaptive_policy import content_policy
 from app.services.learner_content import bounded_student_copy
+from app.services.usage_service import UsageClass, enforce_usage_limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 STEP_ADAPTER = TypeAdapter(LearnStep)
-_ASK_RATE: dict[str, list[float]] = {}
-_ASK_WINDOW_SECONDS = 60
-_ASK_MAX_REQUESTS = 12
 
 
 def _bounded_id(prefix: str, *parts: object, max_length: int = 60) -> str:
@@ -355,18 +353,16 @@ def _record_tutor_event(db, *, user_id, session_id, document_id, event_type: str
         logger.warning("learn tutor telemetry unavailable event=%s error=%s", event_type, type(exc).__name__)
 
 def _ask_rate_allowed(db, user_id, session_id) -> bool:
-    now = datetime.now(timezone.utc); window_start = now - timedelta(seconds=_ASK_WINDOW_SECONDS); key = str(user_id); recent = [stamp for stamp in _ASK_RATE.get(key, []) if time.monotonic() - stamp < _ASK_WINDOW_SECONDS]
+    now = datetime.now(timezone.utc); window_start = now - timedelta(seconds=settings.usage_ask_window_seconds)
     try:
         # Use a savepoint around the optional durable read.  A missing table or
         # transient DB error must not poison the transaction used for the
         # actual Ask Lucent request and note retrieval.
         with db.begin_nested():
             durable = db.execute(select(LearnTutorEvent).where(LearnTutorEvent.user_id == user_id, LearnTutorEvent.event_type == "ask_request", LearnTutorEvent.created_at >= window_start)).scalars().all()
-        if len(durable) >= _ASK_MAX_REQUESTS: return False
+        if len(durable) >= settings.usage_ask_user_limit: return False
     except Exception as exc:
         logger.warning("durable Ask Lucent rate check unavailable error=%s", type(exc).__name__)
-    if len(recent) >= _ASK_MAX_REQUESTS: return False
-    recent.append(time.monotonic()); _ASK_RATE[key] = recent
     return True
 
 @router.post("/learn-sessions/{session_id}/ask", response_model=AskLucentResponse, dependencies=[Depends(require_csrf)])
@@ -377,7 +373,8 @@ def ask_lucent(session_id: UUID, request: AskLucentRequest, db=Depends(get_db), 
         raise HTTPException(status_code=409, detail="This learning session is no longer active")
     if not _ask_rate_allowed(db, user.id, session.id):
         _record_tutor_event(db, user_id=user.id, session_id=session.id, document_id=session.document_id, event_type="rate_limit", metadata={"scope": "ask"}); db.commit()
-        raise HTTPException(status_code=429, detail="Ask Lucent is taking a short pause. Try again in a moment.")
+        raise HTTPException(status_code=429, detail={"code": "usage_limit_reached", "message": "Ask Lucent is taking a short pause. Try again in a moment.", "limitClass": "ask_lucent"}, headers={"Retry-After": str(settings.usage_ask_window_seconds)})
+    enforce_usage_limit(UsageClass.ASK_LUCENT, user.id)
     objectives = session.plan.get("objectives", [])
     # `session.objective_index` is a legacy compatibility column the runtime
     # never updates once a session is on the authoritative scene path; the
@@ -808,6 +805,7 @@ def submit_ask_interaction(session_id: UUID, interaction_id: str, request: Learn
     inline = scene.inline_interaction if scene else None
     if inline is None or str(inline.id) != str(interaction_id):
         raise HTTPException(status_code=409, detail="That Ask Lucent interaction is no longer active")
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
     try:
         process_tutor_event(session, {"type": "ASK_INTERACTION_RESPONSE", "interactionId": interaction_id, "response": request.response, "optionId": request.option_id, "orderedIds": request.ordered_ids}, db=db)
     except SourceContextUnavailable as exc:
@@ -941,6 +939,7 @@ def submit_learn_response(session_id: UUID, request: LearnResponseRequest, db=De
     _reject_stale_scene(session, request)
     if session.status != "active":
         return _session_payload(session, feedback="This session is no longer active.", feedback_kind="info")
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
     scene = load_current_scene(session)
     private = (session.state or {}).get("currentScenePrivate") or {}
     interaction_id = request.interaction_id or private.get("interaction", {}).get("id")

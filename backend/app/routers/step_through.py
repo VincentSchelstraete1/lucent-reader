@@ -17,6 +17,7 @@ from app.auth_dependencies import get_current_user, require_csrf
 from app.models.auth import User
 from app.schemas.step_through import GeneratedStepThroughMechanism, StepThroughMechanism
 from app.services.anthropic_service import StructuredToolResult, StructuredToolTruncatedError, _run_structured_tool
+from app.services.usage_service import UsageClass, enforce_usage_limit
 
 router = APIRouter(prefix="/dev/step-through", tags=["Development"])
 logger = logging.getLogger(__name__)
@@ -212,7 +213,7 @@ def list_fixtures(_user: User = Depends(get_current_user)) -> list[StepThroughFi
 
 
 @router.post("/generate", response_model=StepThroughResponse, dependencies=[Depends(require_csrf)])
-def generate_step_through(request: StepThroughRequest, _user: User = Depends(get_current_user)) -> StepThroughResponse:
+def generate_step_through(request: StepThroughRequest, user: User = Depends(get_current_user)) -> StepThroughResponse:
     source_hash = _hash_source(request.source_text)
     started = time.perf_counter()
     if request.mode == "replay":
@@ -228,6 +229,7 @@ def generate_step_through(request: StepThroughRequest, _user: User = Depends(get
         kind = "golden_manual" if is_golden else "sample_manual" if is_builtin_source and request.fixture_name in {"tcp-handshake", "bubble-sort", "insertion-sort"} else "recorded_live"
         return StepThroughResponse(mechanism=mechanism, metadata=StepThroughMetadata(fixture_name=request.fixture_name, source_hash=source_hash, mode="replay", fixture_kind=kind, cache_hit=True, model_call_count=0, latency_ms=(time.perf_counter() - started) * 1000, parsed=True, truncated=False, validation="passed"))
 
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
     tool_result: StructuredToolResult | None = None
     try:
         result = _run_structured_tool(
