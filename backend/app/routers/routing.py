@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -6,7 +8,7 @@ from app.models.auth import User
 from app.routers.ingestion import get_classifier, get_semantic_generator
 from app.routing import ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
 from app.schemas.ingestion import RepresentationDecisionResponse
-from app.semantic import SemanticGenerator, plain_text_fallback, build_context_packet
+from app.semantic import SemanticGenerator, DeterministicSemanticGenerator, build_context_packet
 from app.normalization import SourceReference
 from app.segmentation import LearningBlock, SegmentationMetadata
 
@@ -50,7 +52,8 @@ def route_canvas_text(
         plan, learning_object = semantic_generator.generate_with_plan(block, decision, build_context_packet(block))
     except Exception:
         plan = semantic_generator.plan(block, decision, build_context_packet(block))
-        learning_object = plain_text_fallback(block)
+        effective = replace(decision, type=plan.final_representation) if plan.final_representation != decision.type else decision
+        learning_object = DeterministicSemanticGenerator().generate(block, effective)
     return RoutingResponse(
         decision=RepresentationDecisionResponse.from_decision(decision),
         learning_object=learning_object.model_dump(by_alias=True),
