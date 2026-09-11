@@ -20,6 +20,10 @@ os.environ["DATABASE_URL"] = _dev_url
 os.environ["APP_ENV"] = "test"
 os.environ["ALLOWED_ORIGINS"] = "http://testserver"
 os.environ["API_ORIGIN"] = "http://testserver"
+# Runtime stress tests deliberately execute more turns than a production user
+# should receive in one hour. Limit-specific tests replace these explicitly.
+os.environ["USAGE_GENERATION_USER_LIMIT_PER_HOUR"] = "1000"
+os.environ["USAGE_GENERATION_GLOBAL_LIMIT_PER_HOUR"] = "10000"
 # Force this off regardless of backend/.env: tests that want the tutor model
 # inject a fake via learn_tutor.set_tutor_provider() (see
 # learn_agent_scenarios/harness.py), which bypasses this flag entirely. Tests

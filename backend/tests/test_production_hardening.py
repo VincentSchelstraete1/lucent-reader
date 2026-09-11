@@ -173,7 +173,7 @@ def test_tutor_provider_failure_is_logged_safely_and_uses_fallback(monkeypatch):
     assert "private learner response" not in str(logged)
 
 
-def test_tutor_length_fallback_log_excludes_generated_text(monkeypatch, caplog):
+def test_tutor_length_fallback_log_excludes_generated_text(monkeypatch):
     private_marker = "SYNTHETIC_PRIVATE_LEARNER_CONTENT"
     overlong = private_marker + (" x" * 260)
     fallback = LearnEvaluation(result="incorrect", confidence=0.5, evidence="fallback", remediationCategory="simplify")
@@ -188,7 +188,8 @@ def test_tutor_length_fallback_log_excludes_generated_text(monkeypatch, caplog):
             "remediationCategory": "simplify",
         }
 
-    caplog.set_level("INFO", logger="app.services.learn_tutor")
+    logged = []
+    monkeypatch.setattr(learn_tutor.logger, "warning", lambda message, *args: logged.append((message, args)))
     learn_tutor.set_tutor_provider(overlong_provider)
     try:
         result = learn_tutor.diagnose_response(
@@ -203,9 +204,10 @@ def test_tutor_length_fallback_log_excludes_generated_text(monkeypatch, caplog):
         learn_tutor.set_tutor_provider(None)
 
     assert result is fallback
-    assert "tutor_provider_length_fallback" in caplog.text
-    assert "field=evidence" in caplog.text
-    assert private_marker not in caplog.text
+    assert logged
+    assert "tutor_provider_length_fallback" in logged[-1][0]
+    assert logged[-1][1][1] == "evidence"
+    assert private_marker not in str(logged)
 
 
 def test_request_telemetry_uses_route_template_without_query_content(client, monkeypatch):
