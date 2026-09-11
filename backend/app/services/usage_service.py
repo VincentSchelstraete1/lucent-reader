@@ -33,6 +33,7 @@ class LimitPolicy:
 class _Counter:
     window: int
     count: int
+    expires_at: float
 
 
 class FixedWindowLimiter:
@@ -64,11 +65,18 @@ class FixedWindowLimiter:
             limits.append(policy.user_limit)
 
         with self._lock:
+            expired = [key for key, counter in self._counters.items() if counter.expires_at <= current]
+            for key in expired:
+                del self._counters[key]
             counters = []
             for key in keys:
                 counter = self._counters.get(key)
                 if counter is None or counter.window != window:
-                    counter = _Counter(window=window, count=0)
+                    counter = _Counter(
+                        window=window,
+                        count=0,
+                        expires_at=(window + 1) * policy.window_seconds,
+                    )
                     self._counters[key] = counter
                 counters.append(counter)
             denied_scope = next(

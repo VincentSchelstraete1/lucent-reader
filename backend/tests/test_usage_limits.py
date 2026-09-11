@@ -45,6 +45,22 @@ def test_fixed_window_limit_is_per_user_and_resets():
     local.consume(UsageClass.PROVIDER_GENERATION, user_key="one", policy=policy, now=61)
 
 
+def test_fixed_window_limiter_prunes_expired_user_counters():
+    local = FixedWindowLimiter()
+    policy = LimitPolicy(user_limit=2, global_limit=200, window_seconds=60)
+    for index in range(100):
+        local.consume(UsageClass.PROVIDER_GENERATION, user_key=str(index), policy=policy, now=1)
+    assert len(local._counters) == 101
+
+    local.consume(UsageClass.PROVIDER_GENERATION, user_key="current", policy=policy, now=61)
+
+    assert len(local._counters) == 2
+    assert set(local._counters) == {
+        (UsageClass.PROVIDER_GENERATION.value, "global"),
+        (UsageClass.PROVIDER_GENERATION.value, "user:current"),
+    }
+
+
 def test_global_limit_is_atomic_under_concurrency():
     local = FixedWindowLimiter()
     policy = LimitPolicy(user_limit=100, global_limit=20, window_seconds=60)
