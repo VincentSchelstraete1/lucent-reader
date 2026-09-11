@@ -7,6 +7,12 @@ type Material = { document: Document; source?: Source; note?: Note; quizzes: Qui
 type State = { status: "loading" | "error" | "loaded"; materials: Material[]; message?: string }
 type LibraryView = "library" | "learn" | "flashcards" | "quiz"
 
+export function materialAvailableForView(view: LibraryView, hasNotes: boolean, quizCount: number) {
+  if (view === "learn" || view === "flashcards") return hasNotes
+  if (view === "quiz") return quizCount > 0
+  return true
+}
+
 function materialType(material: Material) {
   const title = material.document.title.toLowerCase()
   if (title.endsWith(".pdf")) return "PDF"
@@ -87,9 +93,7 @@ export function Library() {
   }, [])
 
   const materials = useMemo(() => state.materials.filter((material) => {
-    if (view === "learn" && noteExperienceCount(material.note) === 0) return false
-    if (view === "flashcards" && !material.note) return false
-    if (view === "quiz" && material.quizzes.length === 0) return false
+    if (!materialAvailableForView(view, Boolean(material.note), material.quizzes.length)) return false
     const haystack = `${materialTitle(material)} ${material.source?.url ?? ""}`.toLowerCase()
     const matchesQuery = !query.trim() || haystack.includes(query.trim().toLowerCase())
     const type = materialType(material)
@@ -117,7 +121,7 @@ export function Library() {
   }
 
   return <div className="page library-page">
-    <header className="library-header"><div><p className="note-kicker">Lucent library</p><h1>{view === "library" ? "Study materials" : view === "learn" ? "Learn" : view === "flashcards" ? "Flashcards" : "Quiz"}</h1><p className="page-subtitle">{view === "library" ? "Your lectures, chapters, and articles in one place." : view === "learn" ? "Open a guided experience from any material that has one." : view === "flashcards" ? "Review recall cards from your saved study materials." : "Choose a material to test your understanding."}</p></div><div className="library-new-wrap"><button className="btn btn-primary" type="button" aria-haspopup="menu" aria-expanded={newOpen} onKeyDown={(event) => { if (event.key === "Escape") setNewOpen(false) }} onClick={() => setNewOpen((open) => !open)}>+ New</button>{newOpen && <div className="library-new-menu" role="menu"><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Upload document <small>PDF, DOCX, PPTX</small></Link><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Add webpage <small>Save a webpage to Lucent</small></Link></div>}</div></header>
+    <header className="library-header"><div><p className="note-kicker">Lucent library</p><h1>{view === "library" ? "Study materials" : view === "learn" ? "Learn" : view === "flashcards" ? "Flashcards" : "Quiz"}</h1><p className="page-subtitle">{view === "library" ? "Your lectures, chapters, and articles in one place." : view === "learn" ? "Choose any saved material to open it in Learn mode." : view === "flashcards" ? "Review recall cards from your saved study materials." : "Choose a material to test your understanding."}</p></div><div className="library-new-wrap"><button className="btn btn-primary" type="button" aria-haspopup="menu" aria-expanded={newOpen} onKeyDown={(event) => { if (event.key === "Escape") setNewOpen(false) }} onClick={() => setNewOpen((open) => !open)}>+ New</button>{newOpen && <div className="library-new-menu" role="menu"><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Upload document <small>PDF, DOCX, PPTX</small></Link><Link to="/app/notes" role="menuitem" onClick={() => setNewOpen(false)}>Add webpage <small>Save a webpage to Lucent</small></Link></div>}</div></header>
     <div className="library-toolbar"><label className="library-search"><input aria-label="Search materials" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search materials" /></label><div className="library-controls"><div className="library-filters" role="group" aria-label="Filter materials">{([['all', 'All'], ['documents', 'Documents'], ['websites', 'Websites']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}</button>)}</div><label className="library-sort">Sort <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")}><option value="recent">Recent</option><option value="name">Name</option></select></label></div></div>
     {state.status === "loading" && <Skeleton rows={3} />}
     {state.status === "error" && <p className="error">Could not load your study materials: {state.message}</p>}
