@@ -313,8 +313,9 @@ coherent checkpoints after `fef7fa1`:
 - Optimize Ask latency, tutor structured-output truncation frequency, and quiz
   retrieval fan-out only from production telemetry.
 - Add optional email authentication only if the product requires it.
-- Add self-service account export/deletion after owner/legal requirements are
-  defined; the current policy accurately says these are not yet self-service.
+- Add self-service account export after owner/legal requirements are defined.
+  Account deletion is available from Settings and removes the account's active
+  application data; backup retention remains an owner/legal policy decision.
 - Continue onboarding and other non-blocking UX polish.
 - Polish the rare text-only section-generation fallback so a visual request
   never verbally promises an illustration when the source produced no grounded

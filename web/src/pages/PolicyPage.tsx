@@ -33,7 +33,7 @@ export function PrivacyPage() {
       <p>Lucent records limited operational metadata needed to diagnose reliability and usage, such as route names, status codes, timings, provider operation names, and error categories. Application logging is designed not to include uploaded passages, prompts, learner answers, or generated tutor text.</p>
 
       <h2>Your choices</h2>
-      <p>You can delete saved sources and documents through the application. Account-level deletion and export are not yet self-service; contact support for assistance. Backup copies may persist until the applicable backup retention period expires.</p>
+      <p>You can delete saved sources and documents through the application, or permanently delete your account and its application data from Settings. Account export is not yet self-service; contact support for assistance. Backup copies may persist until the applicable backup retention period expires.</p>
 
       <h2>Important launch review</h2>
       <p>The service owner must approve final retention periods and confirm Anthropic and Voyage processing terms before accepting real student documents in production.</p>

@@ -6,13 +6,18 @@ import httpx
 from authlib.jose import JsonWebToken, JoseError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.auth_dependencies import _active_cookie_session, get_current_session, get_current_user, require_csrf
 from app.config import settings
 from app.database import get_db
 from app.models.auth import ExtensionAccessToken, ExtensionAuthorizationCode, ExtensionGrant, ExtensionRefreshToken, LegacyClaim, OAuthTransaction, User, WebSession
+from app.models.document import Document
+from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
+from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
+from app.models.note import Note
+from app.models.quiz import Quiz, QuizAttempt
 from app.models.source import Source
 from app.schemas.auth import AuthResponse, ExtensionRefreshRequest, ExtensionTokenExchange, ExtensionTokenResponse, UserResponse
 from app.security import pkce_challenge, random_token, token_hash, utcnow
@@ -44,6 +49,11 @@ def _set_auth_cookies(response: Response, credential: str, csrf: str) -> None:
     common = dict(secure=settings.cookie_secure, samesite="lax", path="/")
     response.set_cookie(settings.session_cookie_name, credential, httponly=True, max_age=settings.session_absolute_seconds, **common)
     response.set_cookie("lucent_csrf", csrf, httponly=False, max_age=settings.session_absolute_seconds, **common)
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(settings.session_cookie_name, path="/", secure=settings.cookie_secure, httponly=True, samesite="lax")
+    response.delete_cookie("lucent_csrf", path="/", secure=settings.cookie_secure, samesite="lax")
 
 
 def _new_session(db: Session, user: User) -> tuple[str, str, WebSession]:
@@ -237,8 +247,38 @@ def me(request: Request, user: User = Depends(get_current_user)):
 def logout(response: Response, session: WebSession = Depends(get_current_session), db: Session = Depends(get_db)):
     session.revoked_at = utcnow()
     db.commit()
-    response.delete_cookie(settings.session_cookie_name, path="/", secure=settings.cookie_secure, httponly=True, samesite="lax")
-    response.delete_cookie("lucent_csrf", path="/", secure=settings.cookie_secure, samesite="lax")
+    _clear_auth_cookies(response)
+
+
+@router.delete("/account", status_code=204, dependencies=[Depends(require_csrf)])
+def delete_account(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Permanently remove the authenticated account and its owned application data."""
+    source_ids = list(db.execute(select(Source.id).where(Source.user_id == user.id)).scalars())
+    document_ids = list(db.execute(select(Document.id).where(Document.source_id.in_(source_ids))).scalars())
+    quiz_ids = list(db.execute(select(Quiz.id).where(Quiz.document_id.in_(document_ids))).scalars())
+    session_ids = list(db.execute(select(LearnSession.id).where(LearnSession.user_id == user.id)).scalars())
+    grant_ids = list(db.execute(select(ExtensionGrant.id).where(ExtensionGrant.user_id == user.id)).scalars())
+
+    db.execute(delete(LearnAttempt).where(LearnAttempt.session_id.in_(session_ids)))
+    db.execute(delete(LearnTutorEvent).where(LearnTutorEvent.user_id == user.id))
+    db.execute(delete(LearnSession).where(LearnSession.user_id == user.id))
+    db.execute(delete(QuizAttempt).where(or_(QuizAttempt.user_id == user.id, QuizAttempt.quiz_id.in_(quiz_ids))))
+    db.execute(delete(Quiz).where(Quiz.id.in_(quiz_ids)))
+    db.execute(delete(Note).where(Note.document_id.in_(document_ids)))
+    db.execute(delete(PersistedLearningBlock).where(PersistedLearningBlock.document_id.in_(document_ids)))
+    db.execute(delete(DocumentSourceIndex).where(DocumentSourceIndex.document_id.in_(document_ids)))
+    db.execute(delete(Document).where(Document.id.in_(document_ids)))
+    db.execute(delete(Source).where(Source.user_id == user.id))
+
+    db.execute(delete(ExtensionAccessToken).where(ExtensionAccessToken.grant_id.in_(grant_ids)))
+    db.execute(delete(ExtensionRefreshToken).where(ExtensionRefreshToken.grant_id.in_(grant_ids)))
+    db.execute(delete(ExtensionAuthorizationCode).where(ExtensionAuthorizationCode.user_id == user.id))
+    db.execute(delete(ExtensionGrant).where(ExtensionGrant.user_id == user.id))
+    db.execute(delete(LegacyClaim).where(LegacyClaim.user_id == user.id))
+    db.execute(delete(WebSession).where(WebSession.user_id == user.id))
+    db.execute(delete(User).where(User.id == user.id))
+    db.commit()
+    _clear_auth_cookies(response)
 
 
 @router.post("/development-login", response_model=AuthResponse)

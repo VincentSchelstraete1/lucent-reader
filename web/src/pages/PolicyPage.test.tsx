@@ -9,7 +9,8 @@ describe("public policy pages", () => {
     expect(html).toContain("Anthropic")
     expect(html).toContain("Voyage")
     expect(html).toContain("learning-session state")
-    expect(html).toContain("not yet self-service")
+    expect(html).toContain("permanently delete your account")
+    expect(html).toContain("Account export is not yet self-service")
   })
 
   it("states the core service and upload conditions", () => {

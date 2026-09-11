@@ -22,5 +22,10 @@ export const authAdapter = {
     const csrf = document.cookie.split("; ").find((entry) => entry.startsWith("lucent_csrf="))?.split("=")[1]
     const response = await fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include", headers: csrf ? { "X-CSRF-Token": decodeURIComponent(csrf) } : {} })
     if (!response.ok) throw new Error("Logout failed")
+  },
+  async deleteAccount(): Promise<void> {
+    const csrf = document.cookie.split("; ").find((entry) => entry.startsWith("lucent_csrf="))?.split("=")[1]
+    const response = await fetch(`${API_URL}/auth/account`, { method: "DELETE", credentials: "include", headers: csrf ? { "X-CSRF-Token": decodeURIComponent(csrf) } : {} })
+    if (!response.ok) throw new Error("We couldn't delete your account. Please try again.")
   }
 }

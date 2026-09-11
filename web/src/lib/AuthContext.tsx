@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { authAdapter, type AuthUser } from "./authAdapter"
 import { setCsrfToken } from "../api/client"
 
-type AuthContextValue = { user: AuthUser | null; isAuthenticated: boolean; isLoading: boolean; continueAsDevelopmentUser: () => Promise<void>; logout: () => Promise<void> }
+type AuthContextValue = { user: AuthUser | null; isAuthenticated: boolean; isLoading: boolean; continueAsDevelopmentUser: () => Promise<void>; logout: () => Promise<void>; deleteAccount: () => Promise<void> }
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -24,7 +24,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const session = await authAdapter.continueAsDevelopmentUser()
       setCsrfToken(session.csrf_token); setUser(session.user)
     },
-    async logout() { await authAdapter.logout(); setCsrfToken(null); setUser(null) }
+    async logout() { await authAdapter.logout(); setCsrfToken(null); setUser(null) },
+    async deleteAccount() { await authAdapter.deleteAccount(); setCsrfToken(null); setUser(null) }
   }), [user, isLoading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

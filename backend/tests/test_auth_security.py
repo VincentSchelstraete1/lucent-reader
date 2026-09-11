@@ -9,6 +9,11 @@ from app.config import settings
 from app.main import app
 from app.auth_dependencies import _active_cookie_session
 from app.models.auth import User, WebSession
+from app.models.document import Document
+from app.models.learn import LearnAttempt, LearnSession, LearnTutorEvent
+from app.models.note import Note
+from app.models.quiz import Quiz, QuizAttempt
+from app.models.source import Source
 from app.security import token_hash, utcnow
 from app.routers.auth import _rotate_web_session, _verified_google_claims
 from conftest import TestSessionLocal
@@ -102,6 +107,48 @@ def test_logout_revokes_server_session():
     client = _client_for(_user("logout"))
     assert client.post("/auth/logout").status_code == 204
     assert client.get("/auth/me").status_code == 401
+
+
+def test_delete_account_removes_owned_data_and_preserves_other_users():
+    user = _user("delete-account")
+    other = _user("keep-account")
+    client = _client_for(user)
+
+    with TestSessionLocal() as db:
+        source = Source(user_id=user.id, type="upload", url="delete-account.txt")
+        other_source = Source(user_id=other.id, type="upload", url="keep-account.txt")
+        db.add_all([source, other_source]); db.flush()
+        document = Document(source_id=source.id, title="Private material", content="synthetic test content")
+        db.add(document); db.flush()
+        note = Note(title="Private note", content="synthetic", content_type="text", document_id=document.id)
+        quiz = Quiz(document_id=document.id, title="Private quiz", questions=[])
+        session = LearnSession(
+            user_id=user.id, document_id=document.id, note_id=None, goal="understand",
+            familiarity="new", plan={}, state={}, plan_fingerprint="delete-account-test",
+        )
+        db.add_all([note, quiz, session]); db.flush()
+        db.add_all([
+            QuizAttempt(user_id=user.id, quiz_id=quiz.id, score=1, total=1),
+            LearnAttempt(session_id=session.id, objective_id="objective-1", step_id="step-1", step_type="practice", result="correct"),
+            LearnTutorEvent(user_id=user.id, session_id=session.id, document_id=document.id, event_type="test", event_metadata={}),
+        ])
+        db.commit()
+        owned_ids = {"source": source.id, "document": document.id, "note": note.id, "quiz": quiz.id, "session": session.id}
+        other_source_id = other_source.id
+
+    response = client.delete("/auth/account")
+    assert response.status_code == 204
+    assert client.get("/auth/me").status_code == 401
+
+    with TestSessionLocal() as db:
+        assert db.get(User, user.id) is None
+        assert db.get(Source, owned_ids["source"]) is None
+        assert db.get(Document, owned_ids["document"]) is None
+        assert db.get(Note, owned_ids["note"]) is None
+        assert db.get(Quiz, owned_ids["quiz"]) is None
+        assert db.get(LearnSession, owned_ids["session"]) is None
+        assert db.get(User, other.id) is not None
+        assert db.get(Source, other_source_id) is not None
 
 
 def test_successful_authentication_rotates_existing_session():
