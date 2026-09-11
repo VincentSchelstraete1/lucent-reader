@@ -1,7 +1,7 @@
 # Lucent productionization handoff
 
-Updated: 2026-09-07  
-Branch: `feature/public-auth-flow`
+Updated: 2026-09-10
+Branch: `codex/production-launch-readiness`
 
 This handoff tracks the phased move from the accepted RAG V1 implementation to an initial production-ready application. The validated RAG/Learn behavior in `docs/RAG_V1_IMPLEMENTATION_HANDOFF.md` remains an invariant.
 
@@ -174,7 +174,7 @@ The audit's security/ownership, async ingestion, batch indexing, and production 
 - Embeddings remain JSONB and exact retrieval loads full persisted block entities. Both are measured as negligible at present scale and should be revisited only with evidence.
 - The production frontend build emits a large-chunk warning. It does not affect correctness; targeted code splitting can be considered after launch metrics identify a user impact.
 - Tutor-decision model output can occasionally reach its structured-output limit. The bounded deterministic fallback is functioning and observable; monitor this event rate in production before changing token budgets or prompts.
-- A clean npm install currently reports four transitive dependency audit findings (three moderate, one high). No automatic breaking upgrade was applied during deployment validation; review the dependency advisories as part of routine release dependency management.
+- The dependency advisories present before the public-launch pass are resolved. Both the complete and production-only npm audits report zero vulnerabilities; routine dependency review remains an operator responsibility.
 
 ### External, privacy, legal, and operator launch gates
 
@@ -210,3 +210,137 @@ The pre-existing deleted cohesive-tutor plan, its untracked `_OLD` copy, `.tmp/`
   and two simultaneous database sessions preserving both state changes.
 
 Phases 1–5 and the local container deployment smoke are complete. The next action is operational release preparation: satisfy the external/privacy gates above and deploy the accepted single-API topology on the chosen host. No further productionization feature work is part of this master goal.
+
+## Public launch-readiness follow-up
+
+### Implemented checkpoints
+
+The public-launch pass preserved all accepted RAG/Learn behavior and added five
+coherent checkpoints after `fef7fa1`:
+
+1. `b395001` — privacy-safe tutor logging and Google-only launch auth UI.
+2. `35ed565` — named provider-spend limits and measured ingestion admission.
+3. `b45b1a0` — factual Privacy/Terms surfaces and production operations guidance.
+4. `18e4537` — Vite and React Router security upgrades with a clean npm audit.
+5. `af37e0c`, `f2aef59`, and `d154549` — deterministic final validation,
+   bounded limiter cleanup, authoritative entrypoint convergence, and an
+   authenticated logout control.
+
+### Launch blocker disposition
+
+| Original launch blocker | Status | Evidence / remaining responsibility |
+| --- | --- | --- |
+| Tutor/provider logs could include generated, learner, or source text | **FIXED** | Failure logs retain bounded operation metadata, identifiers where needed, exception class, status, and latency. Regression tests inject a synthetic private marker and prove it never enters logs. The final tracked-file audit found no credential pattern and no remaining content-bearing provider failure event. |
+| Nonfunctional email/password launch UI | **FIXED** | Login and signup expose Google OAuth only. Development login remains compiled only into Vite development builds and the backend rejects it outside `APP_ENV=development`. |
+| Missing factual public Privacy and Terms surfaces | **FIXED** | `/privacy` and `/terms` disclose stored learning data, Anthropic/Voyage processing, operational metadata, upload responsibility, service limitations, support contact, and decisions that still require the owner. They do not invent retention, deletion, residency, or provider guarantees. |
+| Unbounded provider spend paths | **FIXED** | The thread-safe named limiter covers `document_ingestion`, `provider_generation`, and `ask_lucent` with authenticated-user and process-global counters. Ask retains its durable per-user event check. All provider-backed public routes are admitted under one of these classes; the stale legacy `backend/main.py` is now only an alias to the authoritative guarded application. Expired user counters are pruned so open registration does not grow limiter memory indefinitely. |
+| No learner-safe limit contract | **FIXED** | Rejections return HTTP 429, stable `usage_limit_reached`, a safe message, the limit class, and `Retry-After`; the shared frontend API error path renders that message. Container browser acceptance observed `Retry-After: 60` and the visible Ask pause message. |
+| Ingestion cost was bounded only by upload bytes / a proposed 40-block cap | **FIXED** | Admission occurs before the first provider call and measures normalized characters, deterministic fallback candidates, eligible generated sections, embedding batches, and configured retries. Defaults are 200,000 characters and 30 worst-case provider requests. Checked-in CC0 Pendulum, Satire, and Cache fixtures estimate 17, 25, and 21 requests respectively. |
+| Production/security/privacy operating requirements were incomplete | **FIXED (code/docs)** | `docs/PRODUCTION_DEPLOYMENT.md` and `.env.production.example` now specify HTTPS origins, OAuth redirect, CORS/CSRF, secure cookies, strong secrets, provider credentials, single-API topology, managed PostgreSQL backup/restore, limit tuning, logging, alert ownership, and release verification. Supplying and approving the production values remains external. |
+| Frontend dependency advisories | **FIXED** | Vite is `6.4.3`, React Router DOM is `7.18.3`, clean install/test/typecheck/build passes, and complete plus production-only npm audits report zero vulnerabilities. User-influenced OAuth return paths remain constrained to local absolute paths on both client and server. |
+| Persistent quota database or distributed limiter | **VERIFIED NOT APPLICABLE** | The accepted deployment is one API process; a process-local atomic limiter is the smallest correct implementation. Provider-account budgets and alerts are the durable backstop. A persistent quota subsystem becomes necessary only if the topology changes. |
+| Broad React Router mitigation instead of upgrade | **VERIFIED NOT APPLICABLE** | The smallest compatible patched upgrade passed without broad behavior changes. No route architecture rewrite was needed. |
+| Remaining P0/P1 code issue after focused audit | **RESOLVED / NONE OPEN** | The audit found and fixed two small issues: an accidentally launchable unguarded legacy entrypoint and the absence of a visible logout control. No unresolved P0/P1 code finding remains. |
+| Live production credentials, domains, database, legal/privacy approval, and alert ownership | **EXTERNALLY BLOCKED** | These require owner/provider/hosting decisions and are listed below. They are intentionally not represented as complete. |
+
+### Final validation
+
+- Backend: **444 passed**, with 7 dependency deprecation warnings and no test
+  failure. Python application/test compilation and `pip check` pass.
+- Frontend: **131 passed** across 20 files. TypeScript typecheck and the
+  production Vite build pass. The existing large-chunk warning is non-blocking.
+- Dependencies: complete and production-only `npm audit` both report **0
+  vulnerabilities**.
+- Database: Alembic repository head and local current both report
+  `0010_persist_learning_blocks (head)`.
+- Repository: `git diff --check` passes. Pre-existing untracked workspace files
+  remain unmodified and unstaged.
+- Docker: current backend/migration/frontend images built with `--no-cache`.
+  A fresh isolated PostgreSQL volume migrated from empty through `0010`; the
+  migration container exited successfully. The single API and Nginx frontend
+  both became healthy. API `/healthz`, API `/readyz`, frontend `/`, and
+  frontend `/healthz` all returned 200. A second strict `APP_ENV=production`
+  API with HTTPS origins, secure cookies, disabled development auth, and inert
+  smoke credentials also returned 200 from liveness and readiness. All
+  disposable containers, the network, and the smoke database volume were then
+  removed cleanly.
+- Container browser smoke: a DOCX generated solely from the checked-in CC0
+  Pendulum fixture was uploaded through the real production-built web UI.
+  Document `2` reached a `READY` Voyage source index and visibly rendered
+  substantive pendulum notes. Fresh Learn session
+  `9807fa43-2f4f-4198-9821-b166fccdeb66` rendered grounded teaching,
+  `Energy and Acceleration Through One Swing Cycle`, and active ordering
+  practice. Ask `Show me visually` replaced the main scene visual with
+  `Relationship view: Energy and Acceleration Through One Swing Cycle` while
+  preserving the active interaction. Scene `scene-6e2839bd8eab1e`, revision
+  `2`, interaction `order-fd88a97dd36bd7`, and that visual title remained exact
+  after reload. A deliberately lowered local-only Ask limit produced HTTP 429,
+  `Retry-After: 60`, and the visible learner-safe pause message. Clicking the
+  new logout control returned to `/login`; `/auth/me` then returned 401. No
+  browser page error or server 5xx was observed in the accepted run.
+- Container logs: fresh migrations, startup, readiness, authorized CC0 section
+  generation, Voyage indexing/retrieval, Learn, Ask, configured limit, and
+  logout requests were observed. No startup exception, migration error,
+  readiness failure, crash loop, or repeated provider failure remained. The
+  existing bounded tutor-decision truncation fallback occurred once and the
+  learner request completed successfully without content-bearing telemetry.
+
+### Focused final audit
+
+- **Provider admission:** every externally reachable Anthropic/Voyage path is
+  guarded by ingestion, generation, or Ask admission. Retrieval-only helpers
+  are reached through guarded Learn/Ask/quiz flows; source indexing is admitted
+  at ingestion. Evaluation/seeding modules are not application routes.
+- **Sensitive logging:** structured events exclude prompts, uploaded passages,
+  learner answers, generated payloads, exception messages, cookies, and
+  credentials. A tracked-file secret-pattern scan was clean.
+- **Authentication/security:** production startup validation requires the
+  configured Google OAuth/security values, production disables development and
+  legacy auth, write routes retain CSRF protection, OAuth returns are local-path
+  constrained, and logout is now reachable in the authenticated UI.
+- **RAG/Learn convergence:** the authoritative `app.main` is the sole effective
+  application entrypoint. The accepted remediation, prerequisites, delayed
+  review, scaffold fading, transfer, completion, Ask visual mutation, and
+  refresh persistence suites remain green.
+- **Conclusion:** no unresolved P0/P1 launch-readiness code issue was found.
+
+### Remaining Tier 2 work (not required for initial public launch)
+
+- Improve prerequisite pedagogy when a weak prerequisite cannot be repaired in
+  the current source plan.
+- Split the large frontend visual bundle only if field metrics show a meaningful
+  load-time impact.
+- Optimize Ask latency, tutor structured-output truncation frequency, and quiz
+  retrieval fan-out only from production telemetry.
+- Add optional email authentication only if the product requires it.
+- Add self-service account export/deletion after owner/legal requirements are
+  defined; the current policy accurately says these are not yet self-service.
+- Continue onboarding and other non-blocking UX polish.
+- Resolve the low-severity expired-index-lease rollback observability gap for an
+  operator dashboard if that dashboard is added.
+- Move progressive jobs and usage counters to shared durable infrastructure
+  before multiple API replicas; consider specialized vector storage only when
+  measured corpus scale justifies it.
+- Build cloud-specific infrastructure only after the host/topology is chosen.
+
+### External actions required before public traffic
+
+1. Rotate/revoke the prior GitHub personal access token that had been embedded
+   in this checkout's local remote URL. The local remote is sanitized, but
+   revocation must be completed by the repository owner.
+2. Provision production Anthropic and Voyage credentials in the host's secret
+   manager. Set account budgets/alerts and lower Lucent's configurable limits to
+   the provider tier if necessary.
+3. Choose final HTTPS web/API domains; configure the exact Google OAuth client
+   and redirect URI, CORS/CSRF origins, secure cookies, and strong random
+   application/database secrets.
+4. Provision managed PostgreSQL, enable backups, perform and record a restore
+   drill, and apply Alembic through `0010` before serving traffic.
+5. Obtain owner/legal approval for the Privacy and Terms text and authorization
+   to send real student documents to Anthropic and Voyage. Development
+   acceptance sent only authorized CC0 fixture content.
+6. Set the real support address and policy effective date, appoint the incident
+   and privacy contact, connect the structured log stream, and own alerts for
+   readiness, provider spend/errors, ingestion failures, and latency.
+7. Deploy the documented single-API topology and repeat the release checklist
+   against the real domain and credentials before opening registration.
