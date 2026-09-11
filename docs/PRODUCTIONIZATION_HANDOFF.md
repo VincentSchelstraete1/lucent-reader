@@ -316,6 +316,11 @@ coherent checkpoints after `fef7fa1`:
 - Add self-service account export/deletion after owner/legal requirements are
   defined; the current policy accurately says these are not yet self-service.
 - Continue onboarding and other non-blocking UX polish.
+- Polish the rare text-only section-generation fallback so a visual request
+  never verbally promises an illustration when the source produced no grounded
+  visual asset. The accepted grounded-visual path is working and persisted; this
+  is a degraded-fallback UX issue rather than a launch reliability or security
+  blocker.
 - Resolve the low-severity expired-index-lease rollback observability gap for an
   operator dashboard if that dashboard is added.
 - Move progressive jobs and usage counters to shared durable infrastructure
