@@ -427,8 +427,11 @@ main {
 .app-sidebar-nav a:hover { color: #30342f; }
 .app-sidebar-nav a:focus-visible { color: #30342f; outline: 2px solid transparent; text-decoration: underline; text-underline-offset: 4px; }
 .app-sidebar-nav a.active { background: transparent; color: #30342f; font-weight: 600; }
-.app-sidebar-account { display: flex; align-items: center; gap: .6rem; margin-top: auto; padding: .65rem .55rem; border-top: 1px solid #e5dfd3; color: #575b55; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-sidebar-account { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .35rem .6rem; margin-top: auto; padding: .65rem .55rem; border-top: 1px solid #e5dfd3; color: #575b55; font-size: .8rem; }
 .account-avatar { display: grid; flex: 0 0 1.8rem; place-items: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #dce8dd; color: #315d4d; font-size: .68rem; font-weight: 600; }
+.account-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-sidebar-account button { grid-column: 2; justify-self: start; padding: 0; border: 0; background: none; color: #315d4d; font: inherit; cursor: pointer; }
+.app-sidebar-account button:hover { text-decoration: underline; }
 .app-shell > main { max-width: none; margin-left: 216px; padding: 0 1.5rem 64px 2.5rem; }
 
 .app-header {

@@ -27,7 +27,7 @@ function SidebarIcon({ name }: { name: "library" | "learn" | "cards" | "quiz" })
 // Wraps only the existing logged-in app routes with the original header, so
 // the new public pages (landing/login/signup/onboarding) render without it.
 function AppLayout() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Study navigation">
@@ -38,12 +38,20 @@ function AppLayout() {
           <NavLink to="/app?view=flashcards" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="cards" />Flashcards</NavLink>
           <NavLink to="/app?view=quiz" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="quiz" />Quiz</NavLink>
         </nav>
-        {user && <div className="app-sidebar-account" aria-label="Account"><span className="account-avatar">{(user.display_name || user.email || "U").slice(0, 2).toUpperCase()}</span><span>{user.display_name || user.email || "Account"}</span></div>}
+        {user && <SidebarAccount user={user} onLogout={() => void logout()} />}
       </aside>
       <main><Outlet /></main>
       <AppWalkthrough />
     </div>
   )
+}
+
+export function SidebarAccount({ user, onLogout }: {
+  user: { display_name: string | null; email: string | null }
+  onLogout: () => void
+}) {
+  const label = user.display_name || user.email || "Account"
+  return <div className="app-sidebar-account" aria-label="Account"><span className="account-avatar">{label.slice(0, 2).toUpperCase()}</span><span className="account-label">{label}</span><button type="button" onClick={onLogout}>Log out</button></div>
 }
 
 export function App() {
