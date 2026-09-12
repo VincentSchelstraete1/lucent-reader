@@ -15,7 +15,7 @@ from app.models.note import Note
 from app.models.quiz import Quiz, QuizAttempt
 from app.models.source import Source
 from app.security import token_hash, utcnow
-from app.routers.auth import _rotate_web_session, _verified_google_claims
+from app.routers.auth import _post_auth_return_to, _rotate_web_session, _verified_google_claims
 from conftest import TestSessionLocal
 
 
@@ -182,6 +182,11 @@ def test_wrong_or_replayed_oauth_state_rejected(monkeypatch):
     monkeypatch.setattr(auth_router, "settings", replace(settings, google_client_id="client", google_client_secret="secret", google_redirect_uri="http://testserver/auth/google/callback"))
     client = TestClient(app)
     assert client.get("/auth/google/callback?code=x&state=wrong").status_code == 400
+
+
+def test_new_google_account_is_sent_to_first_run_walkthrough():
+    assert _post_auth_return_to("/app", is_new_user=True) == "/app?welcome=1"
+    assert _post_auth_return_to("/app/material/7", is_new_user=False) == "/app/material/7"
 
 
 def _google_token(*, aud="client", nonce="nonce", expires=300):

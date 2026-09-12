@@ -45,6 +45,10 @@ def _web_redirect(path: str) -> str:
     return f"{web_origins[0]}{_safe_return_to(path)}"
 
 
+def _post_auth_return_to(requested_path: str, *, is_new_user: bool) -> str:
+    return "/app?welcome=1" if is_new_user else requested_path
+
+
 def _set_auth_cookies(response: Response, credential: str, csrf: str) -> None:
     common = dict(secure=settings.cookie_secure, samesite="lax", path="/")
     response.set_cookie(settings.session_cookie_name, credential, httponly=True, max_age=settings.session_absolute_seconds, **common)
@@ -211,7 +215,8 @@ def google_callback(request: Request, code: str, state: str, db: Session = Depen
         jwks_response.raise_for_status()
     claims = _verified_google_claims(id_token, jwks_response.json(), transaction.nonce)
     user = db.execute(select(User).where(User.provider == "google", User.provider_subject == claims["sub"])).scalar_one_or_none()
-    if not user:
+    is_new_user = user is None
+    if is_new_user:
         user = User(provider="google", provider_subject=claims["sub"])
         db.add(user)
         db.flush()
@@ -230,7 +235,7 @@ def google_callback(request: Request, code: str, state: str, db: Session = Depen
         return RedirectResponse(f"{transaction.extension_redirect_uri}?{query}", status_code=303)
     credential, csrf, _ = _rotate_web_session(db, request, user)
     db.commit()
-    response = RedirectResponse(_web_redirect(transaction.return_to), status_code=303)
+    response = RedirectResponse(_web_redirect(_post_auth_return_to(transaction.return_to, is_new_user=is_new_user)), status_code=303)
     _set_auth_cookies(response, credential, csrf)
     return response
 

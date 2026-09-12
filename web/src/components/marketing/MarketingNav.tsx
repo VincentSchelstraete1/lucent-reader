@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { CHROME_EXTENSION_URL } from "../../lib/extension"
 import styles from "./marketing.module.css"
 
 export function MarketingNav() {
@@ -10,6 +11,9 @@ export function MarketingNav() {
       <div className={styles.navLinks}>
         <a href="#learn-in-action" className={styles.navLink}>
           Explore Learn
+        </a>
+        <a href={CHROME_EXTENSION_URL} className={styles.navLink} target="_blank" rel="noreferrer">
+          Chrome extension
         </a>
       </div>
       <div className={styles.navActions}>
