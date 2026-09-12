@@ -1,9 +1,59 @@
 # Lucent productionization handoff
 
-Updated: 2026-09-10
+Updated: 2026-09-11
 Branch: `codex/production-launch-readiness`
 
 This handoff tracks the phased move from the accepted RAG V1 implementation to an initial production-ready application. The validated RAG/Learn behavior in `docs/RAG_V1_IMPLEMENTATION_HANDOFF.md` remains an invariant.
+
+## Public deployment repository preparation — complete
+
+- **Extension endpoints:** the Chrome extension now reads its API and web
+  origins from Plasmo build-time variables. Local development keeps the
+  existing `127.0.0.1:8000` and `localhost:5173` defaults. The supported
+  release commands default to `https://api.lucentreader.com` and
+  `https://lucentreader.com`, require plain HTTPS origins, and reject an origin
+  that is absent from the checked-in host permissions.
+- **Extension release artifact:** root `build` and `package` commands now run
+  through the fail-closed release configuration, while explicit development
+  build/package commands remain available. CI tests, builds, and packages the
+  extension. The locally validated production archive is
+  `build/chrome-mv3-prod.zip`; build output remains ignored and is not committed.
+- **Render topology:** `render.yaml` defines one paid API instance, one static
+  frontend, and one private-network-only paid PostgreSQL 16 database. It uses
+  `alembic upgrade head` as the API pre-deploy command and `/readyz` as the
+  traffic health check. The API is fixed at one instance because the accepted
+  ingestion jobs and global cost limiters are process-local.
+- **Platform compatibility:** standard Render `postgresql://` connection
+  strings are normalized to the installed Psycopg 3 SQLAlchemy driver. The
+  backend container respects Render's `PORT` while keeping port 8000 as its
+  local/Compose default.
+- **Fail-closed production inputs:** backend startup now requires a plain HTTPS
+  API origin, the exact Google callback, at least one HTTPS web origin, valid
+  bare Chrome extension IDs, and matching allowed extension origins. Vite
+  production builds reject missing or non-HTTPS API origins.
+- **Still external:** this checkpoint prepares but does not create the Render
+  Blueprint, DNS records, live OAuth/provider secrets, extension ID allowlist,
+  support/policy values, budgets/alerts, or legal/privacy approvals. Those
+  remain owner-controlled launch steps.
+
+Validation for this checkpoint:
+
+- Extension: 4 release-configuration tests passed; development and production
+  builds passed; the production package passed and its archive/manifest were
+  inspected for the two HTTPS origins and required permissions. Deliberately
+  supplying an HTTP release API was rejected before Plasmo ran.
+- Backend: 454 tests passed; application/test compilation, dependency checks,
+  and Alembic current/head verification passed. A strict production-settings
+  import accepted the Render PostgreSQL URL and selected
+  `postgresql+psycopg`. Both the backend and frontend production images built.
+- Frontend: 146 tests passed across 25 files; TypeScript typecheck and the
+  production build passed. An HTTP production API build was rejected. The
+  existing large-chunk warning remains non-blocking.
+- Deployment artifacts: `render.yaml` parsed with exactly two services and one
+  database. The backend image started on an injected Render-style port 8123,
+  returned HTTP 200 from `/healthz`, logged clean startup, and shut down cleanly.
+  Readiness behavior remains covered by the backend suite and requires the
+  migrated managed database at deployment time.
 
 ## Phase status
 

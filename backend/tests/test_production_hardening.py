@@ -5,12 +5,62 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import settings
-from app.database import engine
+from app.database import _psycopg_database_url, engine
 from app.schemas.learn import LearnEvaluation
 import app.routers.ingestion as ingestion_router
 import app.main as main_module
 import app.services.anthropic_service as anthropic_service
 import app.services.learn_tutor as learn_tutor
+
+
+PRODUCTION_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop"
+
+
+def production_settings(**changes):
+    configured = replace(
+        settings,
+        environment="production",
+        api_origin="https://api.lucentreader.com",
+        web_origins=(
+            "https://lucentreader.com",
+            f"chrome-extension://{PRODUCTION_EXTENSION_ID}",
+        ),
+        google_client_id="client-id",
+        google_client_secret="client-secret",
+        google_redirect_uri="https://api.lucentreader.com/auth/google/callback",
+        cookie_secure=True,
+        enable_development_auth=False,
+        enable_legacy_claim=False,
+        extension_ids=(PRODUCTION_EXTENSION_ID,),
+    )
+    return replace(configured, **changes)
+
+
+def test_render_postgres_url_uses_installed_psycopg_driver():
+    assert _psycopg_database_url("postgresql://user:pass@host/db") == "postgresql+psycopg://user:pass@host/db"
+    assert _psycopg_database_url("postgres://user:pass@host/db") == "postgresql+psycopg://user:pass@host/db"
+    explicit = "postgresql+psycopg://user:pass@host/db"
+    assert _psycopg_database_url(explicit) == explicit
+
+
+def test_safe_production_configuration_is_accepted():
+    production_settings().validate()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"api_origin": "http://api.lucentreader.com"}, "HTTPS"),
+        ({"api_origin": "https://api.lucentreader.com/path"}, "HTTPS"),
+        ({"google_redirect_uri": "https://evil.example/auth/google/callback"}, "production API callback"),
+        ({"web_origins": ("http://lucentreader.com",)}, "HTTPS web origin"),
+        ({"extension_ids": ("not-an-extension-id",)}, "valid Chrome extension IDs"),
+        ({"web_origins": ("https://lucentreader.com",)}, "allowed origin"),
+    ],
+)
+def test_unsafe_production_configuration_is_rejected(changes, message):
+    with pytest.raises(RuntimeError, match=message):
+        production_settings(**changes).validate()
 
 
 def test_shared_anthropic_client_has_bounded_defaults():

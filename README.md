@@ -161,6 +161,7 @@ accessibility-reader/
 │       ├── learning/       # step-through mechanisms, structured visuals, schemas
 │       ├── components/
 │       └── api/
+├── render.yaml                                  # single-API Render Blueprint
 └── docs/
 ```
 
@@ -176,6 +177,18 @@ pnpm dev
 ```
 
 Load `build/chrome-mv3-dev` as an unpacked extension in Chrome.
+
+Production extension archives are fail-closed HTTPS builds:
+
+```bash
+pnpm test
+pnpm build
+pnpm package
+```
+
+The checked-in defaults target `api.lucentreader.com` and
+`lucentreader.com`; see `docs/PRODUCTION_DEPLOYMENT.md` for validated build-time
+overrides and the Render Blueprint workflow.
 
 **Backend**
 

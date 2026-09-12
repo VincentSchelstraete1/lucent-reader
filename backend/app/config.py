@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 import os
+import re
 from urllib.parse import urlsplit
+
+
+_CHROME_EXTENSION_ID = re.compile(r"^[a-p]{32}$")
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -67,14 +71,43 @@ class Settings:
             missing = [key for key, value in required.items() if not value]
             if missing:
                 raise RuntimeError(f"Missing production security configuration: {', '.join(missing)}")
-            if not self.cookie_secure or not self.api_origin.startswith("https://"):
+            api = urlsplit(self.api_origin)
+            if (
+                not self.cookie_secure
+                or api.scheme != "https"
+                or not api.netloc
+                or api.username
+                or api.password
+                or api.path not in {"", "/"}
+                or api.query
+                or api.fragment
+            ):
                 raise RuntimeError("Production requires HTTPS and secure cookies")
             if self.enable_development_auth or self.enable_legacy_claim:
                 raise RuntimeError("Development auth and legacy claim cannot be enabled in production")
+            if self.google_redirect_uri != f"{self.api_origin}/auth/google/callback":
+                raise RuntimeError("GOOGLE_REDIRECT_URI must match the production API callback")
+            if not self.extension_ids or any(not _CHROME_EXTENSION_ID.fullmatch(value) for value in self.extension_ids):
+                raise RuntimeError("Production requires valid Chrome extension IDs")
+            if not any(urlsplit(origin).scheme == "https" for origin in self.web_origins):
+                raise RuntimeError("Production requires an HTTPS web origin")
+            missing_extension_origins = [
+                extension_id
+                for extension_id in self.extension_ids
+                if f"chrome-extension://{extension_id}" not in self.web_origins
+            ]
+            if missing_extension_origins:
+                raise RuntimeError("Every production Chrome extension ID must have an allowed origin")
         for origin in self.web_origins:
             parsed = urlsplit(origin)
             if parsed.scheme not in {"http", "https", "chrome-extension"} or not parsed.netloc:
                 raise RuntimeError(f"Invalid allowed origin: {origin}")
+            if parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+                raise RuntimeError(f"Allowed origins must not contain credentials, paths, queries, or fragments: {origin}")
+            if self.production and parsed.scheme == "http":
+                raise RuntimeError(f"Production allowed origins must use HTTPS: {origin}")
+            if parsed.scheme == "chrome-extension" and not _CHROME_EXTENSION_ID.fullmatch(parsed.netloc):
+                raise RuntimeError(f"Invalid Chrome extension origin: {origin}")
 
 
 def load_settings() -> Settings:

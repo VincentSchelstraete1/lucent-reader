@@ -1,8 +1,15 @@
-// Single place the backend's base URL is defined. Swapping local dev for
-// a deployed backend later is a one-line change here instead of a hunt
-// through every content script that calls fetch().
-export const BACKEND_URL = "http://127.0.0.1:8000"
+const configuredOrigin = (value: string | undefined, developmentDefault: string): string =>
+  (value?.trim() || developmentDefault).replace(/\/+$/, "")
 
-// The Library web app (web/) - the side panel's Notes tab just opens this
-// in a new tab rather than reimplementing notes browsing in the panel.
-export const WEB_APP_URL = "http://localhost:5173"
+// Plasmo exposes PLASMO_PUBLIC_* values at build time. Local development keeps
+// working without an env file; release builds are validated by the production
+// build/package command before Plasmo runs.
+export const BACKEND_URL = configuredOrigin(
+  process.env.PLASMO_PUBLIC_API_URL,
+  "http://127.0.0.1:8000"
+)
+
+export const WEB_APP_URL = configuredOrigin(
+  process.env.PLASMO_PUBLIC_WEB_APP_URL,
+  "http://localhost:5173"
+)

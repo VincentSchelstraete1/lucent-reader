@@ -26,7 +26,9 @@ explicit comma-separated `ALLOWED_ORIGINS`, `GOOGLE_CLIENT_ID`,
 comma-separated Chrome extension IDs in `LUCENT_EXTENSION_IDS`. The Google
 redirect URI must exactly match `/auth/google/callback` on the public API
 origin. Production startup fails closed when its required settings are absent
-or development-only switches are enabled.
+or development-only switches are enabled. Extension IDs are bare 32-character
+Chrome IDs; their matching `chrome-extension://<id>` origins must also appear
+in `ALLOWED_ORIGINS`.
 
 The web app uses an opaque server-side session in an HttpOnly cookie. The
 extension uses an independent device grant with a 15-minute opaque access

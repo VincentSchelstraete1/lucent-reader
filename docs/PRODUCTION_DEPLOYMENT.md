@@ -13,8 +13,11 @@ switches are configured.
 
 `PUBLIC_API_ORIGIN` is baked into the frontend at build time. It must equal the
 public HTTPS API origin. `ALLOWED_ORIGINS` is the comma-separated list of the
-web origin and any approved extension origins. The Google console redirect URI
-must exactly equal `GOOGLE_REDIRECT_URI`.
+web origin and approved `chrome-extension://...` origins. `LUCENT_EXTENSION_IDS`
+contains the corresponding bare 32-character Chrome IDs, not URLs. The Google
+console redirect URI must exactly equal `GOOGLE_REDIRECT_URI`.
+The Vite production build also fails unless `VITE_API_URL` (provided from
+`PUBLIC_API_ORIGIN` in Compose) is a plain HTTPS origin.
 
 Provider inputs can contain authorized uploaded material. Production use with
 real student documents remains gated on the separate privacy/legal review of
@@ -60,6 +63,34 @@ and progressive ingestion intentionally rely on the documented single-process
 topology.
 
 ## Build, migrate, and start
+
+### Render Blueprint
+
+The repository-root `render.yaml` prepares the intended public topology:
+
+- exactly one paid API instance at `api.lucentreader.com`;
+- one static frontend at `lucentreader.com`;
+- one private-network-only paid PostgreSQL 16 database;
+- `alembic upgrade head` as the API pre-deploy command; and
+- `/readyz` as Render's traffic health check.
+
+Create a Render Blueprint from this repository and branch. Before its first
+deploy, supply every `sync: false` value in the dashboard. Set
+`ALLOWED_ORIGINS` to
+`https://lucentreader.com,chrome-extension://<production-extension-id>` and set
+`LUCENT_EXTENSION_IDS` to the same bare extension ID. Render supplies
+`DATABASE_URL`; the backend safely selects the installed Psycopg 3 driver for
+Render's standard `postgresql://` connection string.
+
+The Blueprint uses one API instance intentionally. Do not enable autoscaling or
+increase `numInstances` without first replacing the documented process-local
+ingestion jobs and global cost limiters.
+
+After the Blueprint deploys, verify both `GET /healthz` and `GET /readyz`
+return 200 and open the frontend root and `/app`. Render monitors `/readyz`;
+`/healthz` remains the independent liveness check used during diagnosis.
+
+### Portable Docker deployment
 
 The checked-in Compose file is a reproducible reference deployment:
 
@@ -150,3 +181,36 @@ Before accepting real student documents, the service owner must:
 
 Until these actions are recorded, the code may be deployment-ready but the
 service is not approved for unrestricted public document ingestion.
+
+## Chrome extension release
+
+The extension reads `PLASMO_PUBLIC_API_URL` and
+`PLASMO_PUBLIC_WEB_APP_URL` at build time. `npm run dev` retains the local
+defaults `http://127.0.0.1:8000` and `http://localhost:5173`.
+
+From the repository root:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm test
+pnpm build
+pnpm package
+```
+
+The release commands default to `https://api.lucentreader.com` and
+`https://lucentreader.com`. They reject HTTP, credentials, paths, query
+strings, fragments, and any origin not explicitly present in the checked-in
+manifest host permissions. An alternate authorized domain can be supplied at
+build time, but its exact `https://.../*` permission must be reviewed and
+checked in first:
+
+```bash
+PLASMO_PUBLIC_API_URL=https://api.example.com \
+PLASMO_PUBLIC_WEB_APP_URL=https://app.example.com \
+pnpm package
+```
+
+The packaged archive is written under `build/`. Inspect its generated manifest
+and upload that archive through the Chrome Web Store publisher account; creating
+the archive does not publish it.

@@ -1,0 +1,142 @@
+services:
+  - type: web
+    name: lucent-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: 1c-2g
+    region: oregon
+    numInstances: 1
+    autoDeployTrigger: checksPass
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /readyz
+    domains:
+      - api.lucentreader.com
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lucent-postgres
+          property: connectionString
+      - key: API_ORIGIN
+        value: https://api.lucentreader.com
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ENABLE_DEVELOPMENT_AUTH
+        value: "false"
+      - key: ENABLE_LEGACY_CLAIM
+        value: "false"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://api.lucentreader.com/auth/google/callback
+      - key: LUCENT_EXTENSION_IDS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_TIMEOUT_SECONDS
+        value: "20"
+      - key: ANTHROPIC_MAX_RETRIES
+        value: "1"
+      - key: LEARN_TUTOR_MODEL_ENABLED
+        value: "1"
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: RAG_EMBEDDING_MODEL
+        value: voyage-3-lite
+      - key: RAG_EMBEDDING_DIMENSIONS
+        value: "512"
+      - key: RAG_EMBEDDING_TIMEOUT_SECONDS
+        value: "20"
+      - key: RAG_EMBEDDING_MAX_RETRIES
+        value: "2"
+      - key: RAG_EMBEDDING_RETRY_BACKOFF_SECONDS
+        value: "0.25"
+      - key: RAG_EMBEDDING_RATE_LIMIT_BACKOFF_SECONDS
+        value: "1"
+      - key: RAG_EMBEDDING_BATCH_SIZE
+        value: "32"
+      - key: DATABASE_POOL_SIZE
+        value: "5"
+      - key: DATABASE_MAX_OVERFLOW
+        value: "5"
+      - key: DATABASE_POOL_TIMEOUT_SECONDS
+        value: "15"
+      - key: DATABASE_POOL_RECYCLE_SECONDS
+        value: "1800"
+      - key: PDF_UPLOAD_MAX_BYTES
+        value: "20971520"
+      - key: PROGRESSIVE_JOB_TTL_SECONDS
+        value: "1800"
+      - key: PROGRESSIVE_JOB_MAX_ENTRIES
+        value: "200"
+      - key: USAGE_INGESTION_USER_LIMIT_PER_HOUR
+        value: "3"
+      - key: USAGE_INGESTION_GLOBAL_LIMIT_PER_HOUR
+        value: "30"
+      - key: USAGE_GENERATION_USER_LIMIT_PER_HOUR
+        value: "30"
+      - key: USAGE_GENERATION_GLOBAL_LIMIT_PER_HOUR
+        value: "120"
+      - key: USAGE_ASK_USER_LIMIT_PER_MINUTE
+        value: "12"
+      - key: USAGE_ASK_GLOBAL_LIMIT_PER_MINUTE
+        value: "60"
+      - key: USAGE_ASK_WINDOW_SECONDS
+        value: "60"
+      - key: INGESTION_MAX_SOURCE_CHARACTERS
+        value: "200000"
+      - key: INGESTION_MAX_PROVIDER_REQUESTS
+        value: "30"
+
+  - type: web
+    name: lucent-web
+    runtime: static
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: checksPass
+    domains:
+      - lucentreader.com
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_API_URL
+        value: https://api.lucentreader.com
+      - key: VITE_SUPPORT_EMAIL
+        sync: false
+      - key: VITE_POLICY_EFFECTIVE_DATE
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+databases:
+  - name: lucent-postgres
+    plan: 0.5c-1g
+    region: oregon
+    postgresMajorVersion: "16"
+    databaseName: lucent
+    user: lucent
+    diskSizeGB: 15
+    storageAutoscalingEnabled: true
+    ipAllowList: []

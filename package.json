@@ -6,8 +6,11 @@
   "author": "Vincent Schelstraete",
   "scripts": {
     "dev": "plasmo dev",
-    "build": "plasmo build",
-    "package": "plasmo package"
+    "build": "node scripts/extension-release.mjs build",
+    "package": "node scripts/extension-release.mjs package",
+    "build:development": "plasmo build",
+    "package:development": "plasmo package",
+    "test": "node --test scripts/extension-release-config.test.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
@@ -31,8 +34,10 @@
       "identity"
     ],
     "host_permissions": [
-      "https://adaptive-reader.onrender.com/*",
-      "http://127.0.0.1:8000/*"
+      "https://api.lucentreader.com/*",
+      "https://lucentreader.com/*",
+      "http://127.0.0.1:8000/*",
+      "http://localhost:5173/*"
     ]
   }
 }
