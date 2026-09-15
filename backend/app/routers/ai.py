@@ -3,15 +3,13 @@ from app.services.anthropic_service import explain_text
 from app.services.anthropic_service import summarize_text
 from app.schemas.ai import SimplifyRequest, ExplanationRequest, SummarizeRequest
 from app.services.usage_service import UsageClass, enforce_usage_limit
-from fastapi import APIRouter, Depends
-from app.auth_dependencies import get_current_user, require_csrf
-from app.models.auth import User
+from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.post("/simplify", dependencies=[Depends(require_csrf)])
-def simplify(request: SimplifyRequest, user: User = Depends(get_current_user)):
-    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
+@router.post("/simplify")
+def simplify(request: SimplifyRequest):
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, request.install_id)
 
     result = simplify_text(request.text, 
                            request.target_grade_level,
@@ -19,9 +17,9 @@ def simplify(request: SimplifyRequest, user: User = Depends(get_current_user)):
    
     return {"simplified": result}
 
-@router.post("/explain", dependencies=[Depends(require_csrf)])
-def explain(request: ExplanationRequest, user: User = Depends(get_current_user)):
-    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
+@router.post("/explain")
+def explain(request: ExplanationRequest):
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, request.install_id)
 
     result = explain_text(request.text,
                           request.context,
@@ -30,9 +28,9 @@ def explain(request: ExplanationRequest, user: User = Depends(get_current_user))
 
     return {"explanation" : result}
 
-@router.post("/summarize", dependencies=[Depends(require_csrf)])
-def summarize(request: SummarizeRequest, user: User = Depends(get_current_user)):
-    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
+@router.post("/summarize")
+def summarize(request: SummarizeRequest):
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, request.install_id)
 
     result = summarize_text(request.text,
                             request.target_grade_level,

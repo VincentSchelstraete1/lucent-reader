@@ -1,4 +1,5 @@
 import { authenticatedFetch, authStatus, login, logout } from "./lib/extension-auth"
+import { BACKEND_URL } from "./lib/config"
 import {
   ENSURE_DOCUMENT_MESSAGE_TYPE,
   EXPLAIN_MESSAGE_TYPE,
@@ -25,7 +26,9 @@ import { openLucent } from "./lib/lucent-panel"
 async function apiError(response: Response, fallback: string): Promise<string> {
   try {
     const data = await response.json()
-    return typeof data.detail === "string" ? data.detail : fallback
+    if (typeof data.detail === "string") return data.detail
+    if (typeof data.detail?.message === "string") return data.detail.message
+    return fallback
   } catch {
     return fallback
   }
@@ -76,7 +79,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 
 async function handleSimplify(message: SimplifyMessage): Promise<SimplifyResponse> {
-  const response = await authenticatedFetch(`/simplify`, {
+  const response = await fetch(`${BACKEND_URL}/simplify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -88,8 +91,7 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
   })
 
   if (response.status === 429) {
-    const errorData = await response.json()
-    return { ok: false, error: errorData.detail }
+    return { ok: false, error: await apiError(response, "Lucent has reached a temporary usage limit. Please try again later.") }
   }
 
   if (!response.ok) {
@@ -101,7 +103,7 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
 }
 
 async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> {
-  const response = await authenticatedFetch(`/explain`, {
+  const response = await fetch(`${BACKEND_URL}/explain`, {
     method: "POST",
     headers: {"Content-Type" : "application/json"},
     body: JSON.stringify({
@@ -114,8 +116,7 @@ async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> 
   })
 
   if (response.status === 429) {
-    const errorData = await response.json()
-    return { ok: false, error: errorData.detail}
+    return { ok: false, error: await apiError(response, "Lucent has reached a temporary usage limit. Please try again later.") }
   }
 
   if (!response.ok){
@@ -127,7 +128,7 @@ async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> 
 }
 
 async function handleSummarize(message: SummarizeMessage): Promise<SummarizeResponse> {
-  const response = await authenticatedFetch(`/summarize`, {
+  const response = await fetch(`${BACKEND_URL}/summarize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -139,8 +140,7 @@ async function handleSummarize(message: SummarizeMessage): Promise<SummarizeResp
   })
 
   if (response.status === 429) {
-    const errorData = await response.json()
-    return { ok: false, error: errorData.detail }
+    return { ok: false, error: await apiError(response, "Lucent has reached a temporary usage limit. Please try again later.") }
   }
 
   if (!response.ok) {

@@ -77,12 +77,12 @@ def test_global_limit_is_atomic_under_concurrency():
     assert sum(outcomes) == 20
 
 
-def test_generation_endpoint_uses_authenticated_user_limit(client, monkeypatch):
+def test_generation_endpoint_allows_anonymous_use_and_limits_by_install(unauthenticated_client, monkeypatch):
     monkeypatch.setattr(usage_service, "settings", replace(usage_service.settings, usage_generation_user_limit=1))
     monkeypatch.setattr(ai_router, "simplify_text", lambda *args: "safe result")
-    payload = {"text": "fixture", "target_grade_level": 8, "target_length": "same", "install_id": "spoofable"}
-    assert client.post("/simplify", json=payload).status_code == 200
-    denied = client.post("/simplify", json={**payload, "install_id": "different"})
+    payload = {"text": "fixture", "target_grade_level": 8, "target_length": "same", "install_id": "install-one"}
+    assert unauthenticated_client.post("/simplify", json=payload).status_code == 200
+    denied = unauthenticated_client.post("/simplify", json=payload)
     assert denied.status_code == 429
     assert denied.headers["Retry-After"]
     assert denied.json()["detail"] == {
@@ -90,6 +90,37 @@ def test_generation_endpoint_uses_authenticated_user_limit(client, monkeypatch):
         "message": "Lucent has reached a temporary usage limit. Please try again later.",
         "limitClass": "provider_generation",
     }
+    assert unauthenticated_client.post("/simplify", json={**payload, "install_id": "install-two"}).status_code == 200
+
+
+def test_anonymous_generation_still_enforces_process_global_ceiling(unauthenticated_client, monkeypatch):
+    monkeypatch.setattr(
+        usage_service,
+        "settings",
+        replace(usage_service.settings, usage_generation_user_limit=10, usage_generation_global_limit=1),
+    )
+    monkeypatch.setattr(ai_router, "simplify_text", lambda *args: "safe result")
+    payload = {"text": "fixture", "target_grade_level": 8, "target_length": "same", "install_id": "install-one"}
+    assert unauthenticated_client.post("/simplify", json=payload).status_code == 200
+    denied = unauthenticated_client.post("/simplify", json={**payload, "install_id": "install-two"})
+    assert denied.status_code == 429
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "service_name", "response_key"),
+    [
+        ("/simplify", {"text": "fixture", "target_grade_level": 8, "target_length": "same", "install_id": "one"}, "simplify_text", "simplified"),
+        ("/explain", {"text": "fixture", "context": "context", "target_grade_level": 8, "target_length": "same", "install_id": "two"}, "explain_text", "explanation"),
+        ("/summarize", {"text": "fixture", "target_grade_level": 8, "target_length": "same", "install_id": "three"}, "summarize_text", "summary"),
+    ],
+)
+def test_extension_assist_endpoints_do_not_require_authentication(
+    unauthenticated_client, monkeypatch, path, payload, service_name, response_key
+):
+    monkeypatch.setattr(ai_router, service_name, lambda *args: "safe result")
+    response = unauthenticated_client.post(path, json=payload)
+    assert response.status_code == 200
+    assert response.json()[response_key] == "safe result"
 
 
 def test_ingestion_workload_caps_source_characters_without_provider_calls(monkeypatch):
