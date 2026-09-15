@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
-import { getUserInitials, SidebarAccount } from "./App"
+import { getUserInitials, SidebarAccount } from "./components/app/AppLayout"
 
 describe("sidebar account", () => {
   it("exposes an explicit logout control for authenticated users", () => {
