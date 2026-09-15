@@ -93,7 +93,7 @@ async function handleSimplify(message: SimplifyMessage): Promise<SimplifyRespons
   }
 
   if (!response.ok) {
-    return { ok: false, error: "Simplify request failed" }
+    return { ok: false, error: await apiError(response, "Simplify request failed") }
   }
 
   const data = await response.json()
@@ -119,7 +119,7 @@ async function handleExplain(message: ExplainMessage): Promise<ExplainResponse> 
   }
 
   if (!response.ok){
-    return { ok: false, error: "Explanation request failed"}
+    return { ok: false, error: await apiError(response, "Explanation request failed")}
   }
 
   const data = await response.json()
@@ -144,7 +144,7 @@ async function handleSummarize(message: SummarizeMessage): Promise<SummarizeResp
   }
 
   if (!response.ok) {
-    return { ok: false, error: "Summarize request failed" }
+    return { ok: false, error: await apiError(response, "Summarize request failed") }
   }
 
   const data = await response.json()
