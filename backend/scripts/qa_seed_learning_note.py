@@ -19,7 +19,7 @@ from app.models.document import Document
 from app.models.note import Note
 from app.models.source import Source
 from app.normalization import normalize_document
-from app.routers.ingestion import _generate_outputs, _persist_learning_note, _segment_and_route
+from app.routers.ingestion import _generate_outputs, _persist_learning_note, _route_blocks, enforce_ingestion_workload
 from app.routing import ClassifierAdapter
 from app.schemas.ingestion import PdfIngestionResponse
 from app.segmentation import segment_document
@@ -46,7 +46,9 @@ async def main(path: Path, email: str, only: list[int]) -> None:
         path.read_bytes(), filename=path.name
     )
     normalized = normalize_document(extracted)
-    blocks, decisions = _segment_and_route(normalized, NoOpinionClassifier())
+    blocks = segment_document(normalized)
+    enforce_ingestion_workload(blocks)
+    decisions = _route_blocks(blocks, NoOpinionClassifier())
     generator = HybridSemanticGenerator(AnthropicSemanticGenerator(), planner=PedagogicalPlanner())
     if only:
         deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}

@@ -2,6 +2,8 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 import json
 import logging
+import math
+import os
 import re
 import time
 
@@ -28,10 +30,11 @@ from app.models.document import Document
 from app.models.note import Note
 from app.models.source import Source
 from app.normalization import NormalizedDocument, normalize_document
-from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid
+from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, RepresentationDecision, route_learning_block_hybrid, route_representation, should_fallback
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
 from app.services.source_index import SourceCorpusInvalid, index_document, persist_source_corpus
+from app.services.usage_service import UsageClass, enforce_usage_limit
 from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, TeachingDepth, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
 from sqlalchemy import select
 
@@ -88,12 +91,68 @@ def get_semantic_generator() -> SemanticGenerator:
     return HybridSemanticGenerator(AnthropicSemanticGenerator(), planner=PedagogicalPlanner())
 
 
-def _segment_and_route(
-    normalized: NormalizedDocument, classifier: ClassifierAdapter
+def _route_blocks(blocks: list[LearningBlock], classifier: ClassifierAdapter) -> dict[str, RepresentationDecision]:
+    return {block.id: route_learning_block_hybrid(block, classifier) for block in blocks}
+
+
+def estimate_ingestion_workload(blocks: list[LearningBlock]) -> dict[str, int]:
+    """Estimate worst-case provider calls before routing invokes a provider."""
+    source_characters = sum(max(0, int(block.character_count)) for block in blocks)
+    fallback_candidates = sum(1 for block in blocks if should_fallback(route_representation(block.text)))
+    eligible_sections = len([section for section in group_learning_blocks(blocks) if not is_low_value_section(section)])
+    embedding_batch_size = max(1, min(int(os.getenv("RAG_EMBEDDING_BATCH_SIZE", "32")), 128))
+    embedding_retries = max(0, int(os.getenv("RAG_EMBEDDING_MAX_RETRIES", "2")))
+    embedding_batches = math.ceil(len(blocks) / embedding_batch_size) if blocks else 0
+    provider_requests = (
+        fallback_candidates * (settings.anthropic_max_retries + 1)
+        + eligible_sections
+        + embedding_batches * (embedding_retries + 1)
+    )
+    return {
+        "source_characters": source_characters,
+        "fallback_candidates": fallback_candidates,
+        "eligible_sections": eligible_sections,
+        "embedding_batches": embedding_batches,
+        "provider_requests": provider_requests,
+    }
+
+
+def enforce_ingestion_workload(blocks: list[LearningBlock]) -> dict[str, int]:
+    workload = estimate_ingestion_workload(blocks)
+    if workload["source_characters"] > settings.ingestion_max_source_characters:
+        raise _error(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "source_text_too_large",
+            "This document contains too much source text to process safely. Split it into smaller documents.",
+        )
+    if workload["provider_requests"] > settings.ingestion_max_provider_requests:
+        raise _error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "ingestion_workload_too_large",
+            "This document would require too much processing. Split it into smaller documents.",
+        )
+    return workload
+
+
+def _admit_and_route_ingestion(
+    normalized: NormalizedDocument,
+    classifier: ClassifierAdapter,
+    *,
+    user_id: object,
 ) -> tuple[list[LearningBlock], dict[str, RepresentationDecision]]:
     blocks = segment_document(normalized)
-    decisions = {block.id: route_learning_block_hybrid(block, classifier) for block in blocks}
-    return blocks, decisions
+    workload = enforce_ingestion_workload(blocks)
+    enforce_usage_limit(UsageClass.DOCUMENT_INGESTION, user_id)
+    logger.info(
+        "ingestion_workload_admitted block_count=%s source_characters=%s fallback_candidates=%s eligible_sections=%s embedding_batches=%s estimated_provider_requests=%s",
+        len(blocks),
+        workload["source_characters"],
+        workload["fallback_candidates"],
+        workload["eligible_sections"],
+        workload["embedding_batches"],
+        workload["provider_requests"],
+    )
+    return blocks, _route_blocks(blocks, classifier)
 
 async def _generate_note(extracted, blocks, decisions, semantic_generator):
     objects, plans = {}, {}
@@ -288,7 +347,7 @@ async def ingest_pdf(
         )
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    blocks, decisions = await run_in_threadpool(_admit_and_route_ingestion, normalized, classifier, user_id=user.id)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     persisted = _persist_learning_note(db, user_id=user.id, response=response)
@@ -375,7 +434,7 @@ async def start_progressive_pdf(
     except DocumentExtractionError:
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "pdf_extraction_failed", "The PDF could not be extracted")
     normalized = await run_in_threadpool(normalize_document, extracted)
-    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    blocks, decisions = await run_in_threadpool(_admit_and_route_ingestion, normalized, classifier, user_id=user.id)
     deterministic_objects = {block.id: DeterministicSemanticGenerator().generate(block, decisions[block.id]) for block in blocks}
     base_note = assemble_note(extracted.filename, extracted.source_type, extracted.page_count, blocks, decisions, deterministic_objects)
     base = PdfIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, base_note, [], teaching_depth=depth)
@@ -428,7 +487,7 @@ async def ingest_docx(
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "docx_extraction_failed", "The DOCX could not be extracted")
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    blocks, decisions = await run_in_threadpool(_admit_and_route_ingestion, normalized, classifier, user_id=user.id)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     persisted = _persist_learning_note(db, user_id=user.id, response=response)
@@ -467,7 +526,7 @@ async def ingest_pptx(
         raise _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "pptx_extraction_failed", "The PPTX could not be extracted")
 
     normalized = await run_in_threadpool(normalize_document, extracted)
-    blocks, decisions = await run_in_threadpool(_segment_and_route, normalized, classifier)
+    blocks, decisions = await run_in_threadpool(_admit_and_route_ingestion, normalized, classifier, user_id=user.id)
     note, section_notes = await _generate_outputs(extracted, blocks, decisions, semantic_generator, depth)
     response = DocumentIngestionResponse.from_pipeline(extracted, normalized, blocks, decisions, note, section_notes, teaching_depth=depth)
     persisted = _persist_learning_note(db, user_id=user.id, response=response)

@@ -52,19 +52,15 @@ def _length_violations(exc: ValidationError, raw: dict) -> dict[str, dict[str, A
 
 
 def _log_length_fallback(operation: str, violations: dict[str, dict[str, Any]], attempts: int) -> None:
-    """Fires only when retries are exhausted and we still fall back to the
-    deterministic default -- includes the actual over-length text so the
-    over-length content, not just the fact that it happened, is visible in
-    logs/telemetry."""
+    """Record exhausted retries without exposing generated or source text."""
     for field, info in violations.items():
         logger.warning(
-            "tutor_provider_length_fallback operation=%s field=%s length=%d limit=%d attempts=%d outcome=fallback text=%r",
+            "tutor_provider_length_fallback operation=%s field=%s length=%d limit=%d attempts=%d outcome=fallback",
             operation,
             field,
             info["length"],
             info["limit"],
             attempts,
-            info["text"],
         )
 
 
@@ -122,8 +118,7 @@ def diagnose_response(*, prompt: str, expected: str, response: str, source_conte
     re-prompted up to `max_length_retries` times with an explicit instruction
     to shorten the offending field(s), instead of silently falling back on
     the first overrun. Any other validation failure, or a length overrun
-    that survives every retry, still falls back -- but the fallback is
-    logged with the actual over-length text via `_log_length_fallback`.
+    that survives every retry still falls back with metadata-only logging.
     """
     if os.getenv("LEARN_TUTOR_MODEL_ENABLED", "0").lower() not in {"1", "true", "yes"} and _PROVIDER is None:
         return fallback

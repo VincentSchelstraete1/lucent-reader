@@ -5,12 +5,62 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import settings
-from app.database import engine
+from app.database import _psycopg_database_url, engine
 from app.schemas.learn import LearnEvaluation
 import app.routers.ingestion as ingestion_router
 import app.main as main_module
 import app.services.anthropic_service as anthropic_service
 import app.services.learn_tutor as learn_tutor
+
+
+PRODUCTION_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop"
+
+
+def production_settings(**changes):
+    configured = replace(
+        settings,
+        environment="production",
+        api_origin="https://api.lucentreader.com",
+        web_origins=(
+            "https://lucentreader.com",
+            f"chrome-extension://{PRODUCTION_EXTENSION_ID}",
+        ),
+        google_client_id="client-id",
+        google_client_secret="client-secret",
+        google_redirect_uri="https://api.lucentreader.com/auth/google/callback",
+        cookie_secure=True,
+        enable_development_auth=False,
+        enable_legacy_claim=False,
+        extension_ids=(PRODUCTION_EXTENSION_ID,),
+    )
+    return replace(configured, **changes)
+
+
+def test_render_postgres_url_uses_installed_psycopg_driver():
+    assert _psycopg_database_url("postgresql://user:pass@host/db") == "postgresql+psycopg://user:pass@host/db"
+    assert _psycopg_database_url("postgres://user:pass@host/db") == "postgresql+psycopg://user:pass@host/db"
+    explicit = "postgresql+psycopg://user:pass@host/db"
+    assert _psycopg_database_url(explicit) == explicit
+
+
+def test_safe_production_configuration_is_accepted():
+    production_settings().validate()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"api_origin": "http://api.lucentreader.com"}, "HTTPS"),
+        ({"api_origin": "https://api.lucentreader.com/path"}, "HTTPS"),
+        ({"google_redirect_uri": "https://evil.example/auth/google/callback"}, "production API callback"),
+        ({"web_origins": ("http://lucentreader.com",)}, "HTTPS web origin"),
+        ({"extension_ids": ("not-an-extension-id",)}, "valid Chrome extension IDs"),
+        ({"web_origins": ("https://lucentreader.com",)}, "allowed origin"),
+    ],
+)
+def test_unsafe_production_configuration_is_rejected(changes, message):
+    with pytest.raises(RuntimeError, match=message):
+        production_settings(**changes).validate()
 
 
 def test_shared_anthropic_client_has_bounded_defaults():
@@ -171,6 +221,43 @@ def test_tutor_provider_failure_is_logged_safely_and_uses_fallback(monkeypatch):
     assert logged["args"] == ("diagnose_response", "request_or_validation", "RuntimeError")
     assert "SECRET PROMPT" not in str(logged)
     assert "private learner response" not in str(logged)
+
+
+def test_tutor_length_fallback_log_excludes_generated_text(monkeypatch):
+    private_marker = "SYNTHETIC_PRIVATE_LEARNER_CONTENT"
+    overlong = private_marker + (" x" * 260)
+    fallback = LearnEvaluation(result="incorrect", confidence=0.5, evidence="fallback", remediationCategory="simplify")
+
+    def overlong_provider(*args, **kwargs):
+        return {
+            "result": "incorrect",
+            "confidence": 0.5,
+            "misconception": None,
+            "evidence": overlong,
+            "studentMessage": "Let's try a shorter explanation.",
+            "remediationCategory": "simplify",
+        }
+
+    logged = []
+    monkeypatch.setattr(learn_tutor.logger, "warning", lambda message, *args: logged.append((message, args)))
+    learn_tutor.set_tutor_provider(overlong_provider)
+    try:
+        result = learn_tutor.diagnose_response(
+            prompt="fixture prompt",
+            expected="fixture idea",
+            response="fixture response",
+            source_context="fixture source",
+            fallback=fallback,
+            max_length_retries=1,
+        )
+    finally:
+        learn_tutor.set_tutor_provider(None)
+
+    assert result is fallback
+    assert logged
+    assert "tutor_provider_length_fallback" in logged[-1][0]
+    assert logged[-1][1][1] == "evidence"
+    assert private_marker not in str(logged)
 
 
 def test_request_telemetry_uses_route_template_without_query_content(client, monkeypatch):

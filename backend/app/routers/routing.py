@@ -11,6 +11,7 @@ from app.schemas.ingestion import RepresentationDecisionResponse
 from app.semantic import SemanticGenerator, DeterministicSemanticGenerator, build_context_packet
 from app.normalization import SourceReference
 from app.segmentation import LearningBlock, SegmentationMetadata
+from app.services.usage_service import UsageClass, enforce_usage_limit
 
 router = APIRouter(prefix="/routing")
 
@@ -42,10 +43,11 @@ def _canvas_learning_block(text: str) -> LearningBlock:
 @router.post("/representation", response_model=RoutingResponse, dependencies=[Depends(require_csrf)])
 def route_canvas_text(
     request: RoutingRequest,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     classifier: ClassifierAdapter = Depends(get_classifier),
     semantic_generator: SemanticGenerator = Depends(get_semantic_generator),
 ) -> RoutingResponse:
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
     block = _canvas_learning_block(request.text.strip())
     decision: RepresentationDecision = route_learning_block_hybrid(block, classifier)
     try:

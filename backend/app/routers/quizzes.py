@@ -16,6 +16,7 @@ from app.models.learning_block import DocumentSourceIndex
 from app.schemas.quiz import QuizResponse, QuizAttemptCreateRequest, QuizAttemptResponse
 from app.services.anthropic_service import generate_quiz_questions
 from app.services.retrieval import RetrievalStatus, SourceQuery, retrieve_source
+from app.services.usage_service import UsageClass, enforce_usage_limit
 
 router = APIRouter()
 
@@ -97,6 +98,7 @@ def create_quiz(document_id: int, db = Depends(get_db), user: User = Depends(get
     document = db.execute(select(Document).join(Source).where(Document.id == document_id, Source.user_id == user.id)).scalar_one_or_none()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    enforce_usage_limit(UsageClass.PROVIDER_GENERATION, user.id)
 
     note = db.execute(select(Note).where(
         Note.document_id == document.id,

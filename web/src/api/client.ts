@@ -76,26 +76,30 @@ export class ApiError extends Error {
   code: string | null
   details: Array<{ location: string; message: string; type: string }>
   diagnostics: GenerationDiagnostics | null
-  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = [], diagnostics: GenerationDiagnostics | null = null) {
+  retryAfterSeconds: number | null
+  constructor(path: string, status: number, message?: string, code?: string, details: Array<{ location: string; message: string; type: string }> = [], diagnostics: GenerationDiagnostics | null = null, retryAfterSeconds: number | null = null) {
     super(message || `${path} failed: ${status}`)
     this.status = status
     this.code = code ?? null
     this.details = details
     this.diagnostics = diagnostics
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
 export type GenerationDiagnostics = { stop_reason?: string | null; input_tokens?: number | null; output_tokens?: number | null; max_tokens?: number | null; parsed?: boolean; truncated?: boolean; top_level_keys?: string[] }
 
 async function apiError(path: string, response: Response): Promise<ApiError> {
+  const retryAfter = response.headers.get("Retry-After")
+  const retryAfterSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : null
   try {
     const payload = await response.json() as { detail?: string | { code?: string; message?: string; validation_errors?: Array<{ location: string; message: string; type: string }>; diagnostics?: GenerationDiagnostics } }
-    if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail)
-    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors, payload.detail.diagnostics ?? null)
+    if (typeof payload.detail === "string") return new ApiError(path, response.status, payload.detail, undefined, [], null, retryAfterSeconds)
+    if (payload.detail?.message) return new ApiError(path, response.status, payload.detail.message, payload.detail.code, payload.detail.validation_errors, payload.detail.diagnostics ?? null, retryAfterSeconds)
   } catch {
     // Some existing endpoints intentionally return no JSON error body.
   }
-  return new ApiError(path, response.status)
+  return new ApiError(path, response.status, undefined, undefined, [], null, retryAfterSeconds)
 }
 
 async function get<T>(path: string): Promise<T> {

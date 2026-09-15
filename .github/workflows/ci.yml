@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test release configuration
+        run: pnpm test
+      - name: Build production extension
+        run: pnpm build
+      - name: Package production extension
+        run: pnpm package
+
   backend:
     runs-on: ubuntu-latest
     services:
@@ -71,4 +92,6 @@ jobs:
       - name: Run frontend tests
         run: npm test -- --run
       - name: Build production frontend
+        env:
+          VITE_API_URL: https://api.example.invalid
         run: npm run build

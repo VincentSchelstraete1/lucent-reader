@@ -8,8 +8,17 @@ from app.config import settings
 
 DATABASE_URL = settings.database_url
 
+
+def _psycopg_database_url(url: str) -> str:
+    """Select the installed Psycopg 3 driver for platform-provided URLs."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    return url
+
 engine = create_engine(
-    DATABASE_URL,
+    _psycopg_database_url(DATABASE_URL),
     pool_pre_ping=True,
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
