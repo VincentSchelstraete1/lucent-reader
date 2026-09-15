@@ -1,102 +1,67 @@
-import { BrowserRouter, Routes, Route, Navigate, Link, NavLink, Outlet, useParams } from "react-router-dom"
-import { Library } from "./pages/Library"
-import { SourceDetail } from "./pages/SourceDetail"
-import { QuizGenerationPage, QuizPage } from "./pages/QuizPage"
+import { lazy, Suspense } from "react"
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom"
 import { LandingPage } from "./pages/LandingPage"
-import { AuthPage } from "./pages/AuthPage"
-import { OnboardingPage } from "./pages/OnboardingPage"
-import { AppWalkthrough } from "./components/walkthrough/AppWalkthrough"
 import { ProtectedRoute } from "./components/auth/ProtectedRoute"
-import { LearningCanvasDemo } from "./learning/components/LearningCanvasDemo"
-import { DocumentIngestionDemo } from "./pages/DocumentIngestionDemo"
-import { Notes } from "./pages/Notes"
-import { StepThroughDev } from "./pages/StepThroughDev"
-import { useAuth } from "./lib/AuthContext"
-import { PrivacyPage, TermsPage } from "./pages/PolicyPage"
-import { SettingsPage } from "./pages/SettingsPage"
+
+const AppLayout = lazy(() => import("./components/app/AppLayout").then(module => ({ default: module.AppLayout })))
+const AuthPage = lazy(() => import("./pages/AuthPage").then(module => ({ default: module.AuthPage })))
+const OnboardingPage = lazy(() => import("./pages/OnboardingPage").then(module => ({ default: module.OnboardingPage })))
+const PrivacyPage = lazy(() => import("./pages/PolicyPage").then(module => ({ default: module.PrivacyPage })))
+const TermsPage = lazy(() => import("./pages/PolicyPage").then(module => ({ default: module.TermsPage })))
+const Library = lazy(() => import("./pages/Library").then(module => ({ default: module.Library })))
+const SourceDetail = lazy(() => import("./pages/SourceDetail").then(module => ({ default: module.SourceDetail })))
+const QuizGenerationPage = lazy(() => import("./pages/QuizPage").then(module => ({ default: module.QuizGenerationPage })))
+const QuizPage = lazy(() => import("./pages/QuizPage").then(module => ({ default: module.QuizPage })))
+const LearningCanvasDemo = lazy(() => import("./learning/components/LearningCanvasDemo").then(module => ({ default: module.LearningCanvasDemo })))
+const Notes = lazy(() => import("./pages/Notes").then(module => ({ default: module.Notes })))
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then(module => ({ default: module.SettingsPage })))
+const DocumentIngestionDemo = import.meta.env.DEV
+  ? lazy(() => import("./pages/DocumentIngestionDemo").then(module => ({ default: module.DocumentIngestionDemo })))
+  : null
+const StepThroughDev = import.meta.env.DEV
+  ? lazy(() => import("./pages/StepThroughDev").then(module => ({ default: module.StepThroughDev })))
+  : null
 
 function LegacyDocumentRedirect() {
   const { documentId } = useParams()
   return <Navigate to={`/app/material/${documentId}?mode=notes`} replace />
 }
 
-function SidebarIcon({ name }: { name: "library" | "learn" | "cards" | "quiz" | "settings" }) {
-  const paths = { library: <><path d="M3 5.5h6l1.5 2H21v11H3z" /><path d="M3 8h18" /></>, learn: <><path d="M3 5.5c3.4-.8 6 .2 9 2.2v11c-3-2-5.6-3-9-2.2z" /><path d="M21 5.5c-3.4-.8-6 .2-9 2.2v11c3-2 5.6-3 9-2.2z" /></>, cards: <><rect x="4" y="6" width="14" height="11" rx="1.5" /><path d="M7 4h13v11" /></>, quiz: <><circle cx="12" cy="12" r="8.5" /><path d="M9.8 9.5a2.3 2.3 0 1 1 3.8 1.7c-1 .7-1.6 1.1-1.6 2.3" /><path d="M12 16.2h.01" /></>, settings: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></> }[name]
-  return <svg className="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
-}
-
-// Wraps only the existing logged-in app routes with the original header, so
-// the new public pages (landing/login/signup/onboarding) render without it.
-function AppLayout() {
-  const { user, logout } = useAuth()
-  return (
-    <div className="app-shell">
-      <aside className="app-sidebar" aria-label="Study navigation">
-        <Link to="/app" className="brand" data-tour="app-brand">Lucent</Link>
-        <nav className="app-sidebar-nav">
-          <NavLink to="/app" end className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="library" />Library</NavLink>
-          <NavLink to="/app?view=learn" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="learn" />Learn</NavLink>
-          <NavLink to="/app?view=flashcards" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="cards" />Flashcards</NavLink>
-          <NavLink to="/app?view=quiz" className={({ isActive }) => isActive ? "active" : ""}><SidebarIcon name="quiz" />Quiz</NavLink>
-        </nav>
-        <div className="app-sidebar-footer">
-          <NavLink to="/app/settings" className={({ isActive }) => `app-sidebar-settings${isActive ? " active" : ""}`}><SidebarIcon name="settings" />Settings</NavLink>
-          {user && <SidebarAccount user={user} onLogout={() => void logout()} />}
-        </div>
-      </aside>
-      <main><Outlet /></main>
-      <AppWalkthrough />
-    </div>
-  )
-}
-
-export function SidebarAccount({ user, onLogout }: {
-  user: { display_name: string | null; email: string | null }
-  onLogout: () => void
-}) {
-  const label = user.display_name || user.email || "Account"
-  return <div className="app-sidebar-account" aria-label="Account"><span className="account-avatar">{getUserInitials(user)}</span><span className="account-label">{label}</span><button type="button" onClick={onLogout}>Log out</button></div>
-}
-
-export function getUserInitials(user: { display_name: string | null; email: string | null }): string {
-  const displayName = user.display_name?.trim()
-  const identity = displayName || user.email?.split("@")[0]?.trim() || ""
-  const parts = identity.split(/[\s._-]+/).filter(Boolean)
-  if (parts.length === 0) return "A"
-  const first = Array.from(parts[0])[0]
-  const last = parts.length > 1 ? Array.from(parts[parts.length - 1])[0] : ""
-  return `${first}${last}`.toUpperCase()
+function RouteLoading() {
+  return <div className="route-loading" role="status">Opening Lucent…</div>
 }
 
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<AuthPage mode="login" />} />
-        <Route path="/signup" element={<AuthPage mode="signup" />} />
-        <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/privacy" element={<PrivacyPage />} />
-        <Route path="/terms" element={<TermsPage />} />
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<AuthPage mode="login" />} />
+          <Route path="/signup" element={<AuthPage mode="signup" />} />
+          <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
 
-        <Route element={<ProtectedRoute />}>
-          <Route element={<AppLayout />}>
-            <Route path="/app" element={<Library />} />
-            <Route path="/app/settings" element={<SettingsPage />} />
-            <Route path="/app/notes" element={<Notes />} />
-            <Route path="/app/material/:documentId" element={<Notes />} />
-            <Route path="/sources/:sourceId" element={<SourceDetail />} />
-            <Route path="/documents/:documentId" element={<LegacyDocumentRedirect />} />
-            <Route path="/quizzes/:quizId" element={<QuizPage />} />
-            <Route path="/quizzes/generating" element={<QuizGenerationPage />} />
-            <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
-            {import.meta.env.DEV && <Route path="/app/dev/ingestion" element={<DocumentIngestionDemo />} />}
-            {import.meta.env.DEV && <Route path="/app/dev/step-through" element={<StepThroughDev />} />}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route path="/app" element={<Library />} />
+              <Route path="/app/settings" element={<SettingsPage />} />
+              <Route path="/app/notes" element={<Notes />} />
+              <Route path="/app/material/:documentId" element={<Notes />} />
+              <Route path="/sources/:sourceId" element={<SourceDetail />} />
+              <Route path="/documents/:documentId" element={<LegacyDocumentRedirect />} />
+              <Route path="/quizzes/:quizId" element={<QuizPage />} />
+              <Route path="/quizzes/generating" element={<QuizGenerationPage />} />
+              <Route path="/app/learning-canvas" element={<LearningCanvasDemo />} />
+              {DocumentIngestionDemo && <Route path="/app/dev/ingestion" element={<DocumentIngestionDemo />} />}
+              {StepThroughDev && <Route path="/app/dev/step-through" element={<StepThroughDev />} />}
+            </Route>
           </Route>
-        </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

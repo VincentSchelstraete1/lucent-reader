@@ -1,0 +1,68 @@
+@import "./styles/public-tokens.css";
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --lucent-bg: #f5f1e8;
+  --lucent-surface: #ffffff;
+  --lucent-text: #2c2c2a;
+  --lucent-caption: #5e5e5b;
+  --lucent-border: #e4ded0;
+  --lucent-accent: #1d9e75;
+  --lucent-accent-dark: #167a5a;
+  --lucent-accent-soft-bg: #eeedfe;
+  --lucent-accent-soft-text: #26215c;
+  --lucent-amber-bg: #fdf1d9;
+  --lucent-amber-text: #7a5a12;
+  --lucent-error-bg: #fbeaea;
+  --lucent-error-text: #8a2e2e;
+  --lucent-shadow: 0 2px 8px rgba(44, 44, 42, 0.08);
+  --lucent-shadow-hover: 0 6px 20px rgba(44, 44, 42, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--lucent-bg);
+  color: var(--lucent-text);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 20px 64px;
+}
+
+.route-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--lucent-bg);
+  color: var(--lucent-caption);
+  font: 500 14px/1.4 Inter, system-ui, sans-serif;
+}

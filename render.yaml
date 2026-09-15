@@ -129,6 +129,12 @@ services:
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
+      - path: /fonts/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /lucent-landscape.jpg
+        name: Cache-Control
+        value: public, max-age=604800, stale-while-revalidate=86400
 
 databases:
   - name: lucent-postgres
