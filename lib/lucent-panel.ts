@@ -74,6 +74,7 @@ type RuntimeWithContexts = typeof chrome.runtime & {
 
 const NATIVE_PANEL_CHECK_ATTEMPTS = 3
 const NATIVE_PANEL_CHECK_INTERVAL_MS = 100
+const POPUP_FALLBACK_WIDTH = 220
 
 const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
 
@@ -116,7 +117,7 @@ async function openPopupFallback(windowId: number) {
     const createOptions: chrome.windows.CreateData = {
       url: chrome.runtime.getURL("sidepanel.html"),
       type: "popup",
-      width: 300,
+      width: POPUP_FALLBACK_WIDTH,
       height: 640
     }
 
