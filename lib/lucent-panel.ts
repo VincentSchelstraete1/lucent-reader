@@ -3,7 +3,12 @@
 // on-page top-right toggle (via OPEN_SIDE_PANEL_MESSAGE_TYPE) both just
 // call openLucent(windowId); everything else lives here instead of
 // scattered across background.ts.
-import { USE_POPUP_FALLBACK_STORAGE_KEY, DEFAULT_USE_POPUP_FALLBACK, getUsePopupFallback } from "./side-panel-mode"
+import {
+  USE_POPUP_FALLBACK_STORAGE_KEY,
+  DEFAULT_USE_POPUP_FALLBACK,
+  getUsePopupFallback,
+  setUsePopupFallback
+} from "./side-panel-mode"
 
 // Cached in memory rather than read fresh from chrome.storage.local on
 // every click - chrome.sidePanel.open() has a hard requirement that it's
@@ -45,16 +50,58 @@ function hasSidePanelApi(): boolean {
   return typeof chrome.sidePanel?.open === "function"
 }
 
-// Named for what it actually decides, not "is the API present" -
-// confirmed directly that Arc exposes chrome.sidePanel.open() and it
-// resolves with no error, while never showing anything. There's no
-// observable signal exposed to extension code that distinguishes "really
-// supported" from "present but non-functional," so cachedUsePopupFallback
-// (a manual, one-time, user-confirmed override - see lib/side-panel-mode.ts
-// and its toggle on the options page) covers the gap pure feature
-// detection can't.
+// Named for what it actually decides, not "is the API present". Arc exposes
+// chrome.sidePanel.open() and resolves it without actually creating a side
+// panel. We therefore verify the resulting extension context below instead of
+// treating the resolved promise as proof that the UI opened.
 export function shouldUseNativeSidePanel(): boolean {
   return hasSidePanelApi() && !cachedUsePopupFallback
+}
+
+type RuntimeContext = {
+  contextType: string
+  documentUrl?: string
+  windowId: number
+}
+
+type RuntimeWithContexts = typeof chrome.runtime & {
+  getContexts?: (filter: {
+    contextTypes?: string[]
+    documentUrls?: string[]
+    windowIds?: number[]
+  }) => Promise<RuntimeContext[]>
+}
+
+const NATIVE_PANEL_CHECK_ATTEMPTS = 3
+const NATIVE_PANEL_CHECK_INTERVAL_MS = 100
+
+const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
+
+async function nativePanelContextAppeared(windowId: number): Promise<boolean> {
+  const getContexts = (chrome.runtime as RuntimeWithContexts).getContexts
+  if (typeof getContexts !== "function") return true
+
+  const documentUrl = chrome.runtime.getURL("sidepanel.html")
+  for (let attempt = 0; attempt < NATIVE_PANEL_CHECK_ATTEMPTS; attempt += 1) {
+    const contexts = await getContexts.call(chrome.runtime, {
+      contextTypes: ["SIDE_PANEL"],
+      documentUrls: [documentUrl],
+      windowIds: [windowId]
+    })
+    if (contexts.some((context) =>
+      context.contextType === "SIDE_PANEL" &&
+      context.windowId === windowId &&
+      context.documentUrl === documentUrl
+    )) return true
+    if (attempt < NATIVE_PANEL_CHECK_ATTEMPTS - 1) await wait(NATIVE_PANEL_CHECK_INTERVAL_MS)
+  }
+  return false
+}
+
+async function rememberPopupFallback(): Promise<void> {
+  cachedUsePopupFallback = true
+  usePopupFallbackLoaded = true
+  await setUsePopupFallback(true)
 }
 
 // Reuses sidepanel.html as-is (it has no dependency on actually being a
@@ -109,7 +156,19 @@ export function openLucent(windowId: number): void {
 
   if (usedNative) {
     chrome.sidePanel.open({ windowId }).then(
-      () => console.log("[Lucent] chrome.sidePanel.open() resolved with no error"),
+      async () => {
+        console.log("[Lucent] chrome.sidePanel.open() resolved; verifying visible panel context")
+        try {
+          if (!(await nativePanelContextAppeared(windowId))) {
+            console.warn("[Lucent] native side panel created no context; remembering popup fallback")
+            await rememberPopupFallback()
+            openPopupFallback(windowId)
+          }
+        } catch (err) {
+          console.error("Lucent: couldn't verify the native side panel, falling back to a window", err)
+          openPopupFallback(windowId)
+        }
+      },
       (err) => {
         console.error("Lucent: sidePanel.open() failed, falling back to a window", err)
         openPopupFallback(windowId)

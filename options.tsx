@@ -132,9 +132,8 @@ function OptionsPage() {
             </button>
           </div>
           <p style={{ fontSize: 12, color: tokens.captionText, margin: "6px 0 0", lineHeight: 1.4 }}>
-            Turn this on if clicking the Lucent icon (or the on-page panel toggle) doesn't
-            open anything - some browsers don't support the native side panel Lucent uses by
-            default, even though they don't report an error when it fails.
+            Lucent automatically detects and remembers when a browser needs a separate window.
+            Turn this on manually only if you always prefer that presentation.
           </p>
         </div>
 
