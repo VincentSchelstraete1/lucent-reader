@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { StructuredVisual, type StructuredVisualSpec } from "../../learning/visuals/StructuredVisual"
+import "../../index.css"
 import styles from "./marketing.module.css"
 
 const qualityControlVisual: StructuredVisualSpec = {
