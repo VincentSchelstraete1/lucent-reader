@@ -7,11 +7,11 @@ from sqlalchemy import engine_from_config, pool
 
 load_dotenv()
 
-from app.database import Base
+from app.database import Base, _psycopg_database_url
 import app.models  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+config.set_main_option("sqlalchemy.url", _psycopg_database_url(os.environ["DATABASE_URL"]))
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

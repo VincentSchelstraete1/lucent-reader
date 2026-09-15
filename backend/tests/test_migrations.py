@@ -11,14 +11,18 @@ from sqlalchemy.orm import Session
 from dataclasses import replace
 import pytest
 
+from app.database import _psycopg_database_url
+
 
 def test_alembic_upgrade_head_on_empty_database():
     original_url = os.environ["DATABASE_URL"]
-    sqlalchemy_parts = urlsplit(original_url)
     parts = urlsplit(original_url.replace("postgresql+psycopg://", "postgresql://"))
     database_name = f"{parts.path.lstrip('/')}_migrations"
     admin_url = urlunsplit(parts._replace(path="/postgres"))
-    migration_url = urlunsplit(sqlalchemy_parts._replace(path=f"/{database_name}"))
+    # Render supplies this driver-neutral form. Alembic must explicitly select
+    # the installed Psycopg 3 driver rather than SQLAlchemy's psycopg2 default.
+    migration_url = urlunsplit(parts._replace(path=f"/{database_name}"))
+    assert migration_url.startswith("postgresql://")
     with psycopg.connect(admin_url, autocommit=True) as connection:
         connection.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database_name)))
         connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
@@ -26,7 +30,7 @@ def test_alembic_upgrade_head_on_empty_database():
         os.environ["DATABASE_URL"] = migration_url
         config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
         command.upgrade(config, "head")
-        engine = create_engine(migration_url)
+        engine = create_engine(_psycopg_database_url(migration_url))
         try:
             tables = set(inspect(engine).get_table_names())
             assert {"users", "web_sessions", "sources", "extension_grants", "extension_refresh_tokens", "document_source_indexes", "learning_blocks"} <= tables
