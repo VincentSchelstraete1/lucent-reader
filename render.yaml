@@ -5,7 +5,7 @@ services:
     rootDir: backend
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: 1c-2g
+    plan: 0.5c-512mb
     region: oregon
     numInstances: 1
     autoDeployTrigger: checksPass
@@ -132,11 +132,11 @@ services:
 
 databases:
   - name: lucent-postgres
-    plan: 0.5c-1g
+    plan: 0.1c-256mb
     region: oregon
     postgresMajorVersion: "16"
     databaseName: lucent
     user: lucent
-    diskSizeGB: 15
-    storageAutoscalingEnabled: true
+    diskSizeGB: 1
+    storageAutoscalingEnabled: false
     ipAllowList: []
