@@ -2,7 +2,7 @@ import { Link } from "react-router-dom"
 import styles from "./policyPage.module.css"
 
 const supportEmail = (import.meta.env.VITE_SUPPORT_EMAIL || "vincent.sch2006@gmail.com").trim()
-const effectiveDate = (import.meta.env.VITE_POLICY_EFFECTIVE_DATE || "September 10, 2026").trim()
+const effectiveDate = (import.meta.env.VITE_POLICY_EFFECTIVE_DATE || "September 14, 2026").trim()
 
 function PolicyShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -30,13 +30,14 @@ export function PrivacyPage() {
       <p>Lucent sends relevant document excerpts, prompts, and learner interactions to Anthropic to generate explanations and tutoring responses. It sends bounded source text to Voyage to create and query embeddings used for source-backed retrieval. Those providers process this information under their own terms and privacy practices.</p>
 
       <h2>Operational data</h2>
-      <p>Lucent records limited operational metadata needed to diagnose reliability and usage, such as route names, status codes, timings, provider operation names, and error categories. Application logging is designed not to include uploaded passages, prompts, learner answers, or generated tutor text.</p>
+      <p>Lucent records limited operational metadata needed to diagnose reliability and usage, such as route names, status codes, timings, provider operation names, and error categories. Application logging is designed not to include uploaded passages, prompts, learner answers, or generated tutor text. These application logs are retained for the period included with Lucent's Render workspace plan: 7 days on Hobby or 14 days on Pro.</p>
+
+      <h2>Retention and deletion</h2>
+      <p>Uploaded documents and associated learning data are retained until you delete the document or delete your account. When you delete a document or account, its application data is removed from the live database promptly. Residual copies may remain in encrypted database backups until the applicable Render recovery window expires: 3 days on Hobby or 7 days on Pro.</p>
+      <p>Anthropic may retain API inputs and outputs for up to 30 days under its standard API retention policy, subject to its stated exceptions. Lucent requires Voyage's data-storage and model-training opt-out before processing real student documents through Voyage; Voyage states that opted-out hosted endpoints have zero-day data retention.</p>
 
       <h2>Your choices</h2>
-      <p>You can delete saved sources and documents through the application, or permanently delete your account and its application data from Settings. Account export is not yet self-service; contact support for assistance. Backup copies may persist until the applicable backup retention period expires.</p>
-
-      <h2>Important launch review</h2>
-      <p>The service owner must approve final retention periods and confirm Anthropic and Voyage processing terms before accepting real student documents in production.</p>
+      <p>You can delete saved sources and documents through the application, or permanently delete your account and its application data from Settings. Account export is not yet self-service; contact support for assistance.</p>
     </PolicyShell>
   )
 }

@@ -114,7 +114,7 @@ services:
       - key: VITE_SUPPORT_EMAIL
         sync: false
       - key: VITE_POLICY_EFFECTIVE_DATE
-        sync: false
+        value: September 14, 2026
     routes:
       - type: rewrite
         source: /*

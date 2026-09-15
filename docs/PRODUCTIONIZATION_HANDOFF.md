@@ -282,7 +282,7 @@ coherent checkpoints after `fef7fa1`:
 | --- | --- | --- |
 | Tutor/provider logs could include generated, learner, or source text | **FIXED** | Failure logs retain bounded operation metadata, identifiers where needed, exception class, status, and latency. Regression tests inject a synthetic private marker and prove it never enters logs. The final tracked-file audit found no credential pattern and no remaining content-bearing provider failure event. |
 | Nonfunctional email/password launch UI | **FIXED** | Login and signup expose Google OAuth only. Development login remains compiled only into Vite development builds and the backend rejects it outside `APP_ENV=development`. |
-| Missing factual public Privacy and Terms surfaces | **FIXED** | `/privacy` and `/terms` disclose stored learning data, Anthropic/Voyage processing, operational metadata, upload responsibility, service limitations, support contact, and decisions that still require the owner. They do not invent retention, deletion, residency, or provider guarantees. |
+| Missing factual public Privacy and Terms surfaces | **FIXED** | `/privacy` and `/terms` disclose stored learning data, Anthropic/Voyage processing, operational metadata, upload responsibility, service limitations, support contact, and the owner-approved September 14, 2026 retention policy. Provider authorization, the Voyage opt-out, and any desired legal review remain external release gates. |
 | Unbounded provider spend paths | **FIXED** | The thread-safe named limiter covers `document_ingestion`, `provider_generation`, and `ask_lucent` with authenticated-user and process-global counters. Ask retains its durable per-user event check. All provider-backed public routes are admitted under one of these classes; the stale legacy `backend/main.py` is now only an alias to the authoritative guarded application. Expired user counters are pruned so open registration does not grow limiter memory indefinitely. |
 | No learner-safe limit contract | **FIXED** | Rejections return HTTP 429, stable `usage_limit_reached`, a safe message, the limit class, and `Retry-After`; the shared frontend API error path renders that message. Container browser acceptance observed `Retry-After: 60` and the visible Ask pause message. |
 | Ingestion cost was bounded only by upload bytes / a proposed 40-block cap | **FIXED** | Admission occurs before the first provider call and measures normalized characters, deterministic fallback candidates, eligible generated sections, embedding batches, and configured retries. Defaults are 200,000 characters and 30 worst-case provider requests. Checked-in CC0 Pendulum, Satire, and Cache fixtures estimate 17, 25, and 21 requests respectively. |
@@ -392,10 +392,12 @@ coherent checkpoints after `fef7fa1`:
    application/database secrets.
 4. Provision managed PostgreSQL, enable backups, perform and record a restore
    drill, and apply Alembic through `0010` before serving traffic.
-5. Obtain owner/legal approval for the Privacy and Terms text and authorization
-   to send real student documents to Anthropic and Voyage. Development
-   acceptance sent only authorized CC0 fixture content.
-6. Set the real support address and policy effective date, appoint the incident
+5. Complete any desired legal review and explicitly authorize sending real
+   student documents to Anthropic and Voyage after confirming the Voyage
+   opt-out. The owner approved the September 14, 2026 effective date and the
+   published retention rules; development acceptance sent only authorized CC0
+   fixture content.
+6. Verify the real support address is monitored, appoint the incident
    and privacy contact, connect the structured log stream, and own alerts for
    readiness, provider spend/errors, ingestion failures, and latency.
 7. Deploy the documented single-API topology and repeat the release checklist

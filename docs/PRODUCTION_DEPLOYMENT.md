@@ -44,6 +44,29 @@ production values in an image, Compose file, frontend build argument, or Git.
 - Set `SUPPORT_EMAIL` and `POLICY_EFFECTIVE_DATE` before building the frontend;
   these values are compiled into the public Privacy and Terms pages.
 
+### Approved public retention policy
+
+The service owner approved September 14, 2026 as the Privacy notice and Terms
+effective date and approved the following initial retention rules:
+
+- uploaded documents and associated learning data remain until the user deletes
+  the document or account;
+- application logs use Render's included retention period: 7 days on Hobby or
+  14 days on Pro;
+- paid Render PostgreSQL point-in-time recovery uses the workspace-plan window:
+  3 days on Hobby or 7 days on Pro;
+- deletion removes application data from the live database promptly, while
+  residual backup copies expire with the applicable recovery window;
+- the Privacy notice discloses Anthropic's standard API retention of up to 30
+  days, subject to Anthropic's stated exceptions; and
+- real student documents must not be sent to Voyage until its organization-level
+  data-storage and model-training opt-out is confirmed; under that setting,
+  Voyage states zero-day retention for hosted endpoints.
+
+These owner-approved rules do not by themselves complete legal review,
+provider authorization, the Voyage opt-out, or production configuration. Those
+remain release gates until separately recorded as complete.
+
 ### Provider-spend safeguards
 
 The single API process enforces atomic per-user and process-global windows for
@@ -139,10 +162,11 @@ volume or run a destructive reset as part of an application rollback.
 
 ## Database backup and restore readiness
 
-Use a managed PostgreSQL service with encrypted storage, automated daily
-backups, and point-in-time recovery. For the initial public release, retain at
-least seven days of recovery history, assign an operator to review backup
-failures, and test a restore into an isolated database before sending traffic.
+Use a managed PostgreSQL service with encrypted storage, automated backups, and
+point-in-time recovery. The approved public policy follows Render's included
+recovery window: 3 days on Hobby or 7 days on Pro. Assign an operator to review
+backup failures and test a restore into an isolated database before sending
+traffic.
 These are infrastructure actions; checking in this runbook does not prove that
 the production database has been backed up.
 
@@ -173,8 +197,8 @@ Before accepting real student documents, the service owner must:
 1. approve the final Privacy notice and Terms with appropriate legal advice;
 2. confirm Anthropic and Voyage processing, retention, region, and contractual
    terms for the intended users and content;
-3. decide and publish application, log, and backup retention periods plus the
-   account deletion/export support process;
+3. verify the approved application, log, and backup retention periods and the
+   account deletion/export support process are configured and published;
 4. verify the production support address is monitored;
 5. configure provider budgets/alerts and name the operator who receives them;
 6. record a successful managed-database backup and isolated restore drill.
