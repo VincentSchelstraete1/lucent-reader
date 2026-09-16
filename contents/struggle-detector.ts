@@ -1304,14 +1304,16 @@ async function summarizeText(text: string, targetLevel: number, length: TextLeng
   return response.summary
 }
 
-// Memoized per page load: the first save on a page creates a Source +
-// Document for it (via the background worker, same reasoning as
+// Memoized per page load: the first successful save on a page creates a
+// Source + Document for it (via the background worker, same reasoning as
 // simplifyText/explainText above for why the fetch itself can't happen
-// here), then every later save on the same page reuses that same
-// document id instead of creating a new one each time.
-let documentIdPromise: Promise<number | null> | null = null
+// here), then every later save on the same page reuses that same result.
+// Failed attempts are deliberately not cached: a common first attempt is
+// rejected because the user has not signed in yet, and Save must retry once
+// authentication completes instead of remaining broken until page reload.
+let documentIdPromise: Promise<EnsureDocumentResponse> | null = null
 
-async function ensureDocumentId(): Promise<number | null> {
+async function ensureDocument(): Promise<EnsureDocumentResponse> {
   if (!documentIdPromise) {
     documentIdPromise = (async () => {
       const article = extractArticle()
@@ -1321,11 +1323,17 @@ async function ensureDocumentId(): Promise<number | null> {
         title: article?.title || document.title,
         content: article?.textContent || document.body.innerText
       }
-      const response = (await chrome.runtime.sendMessage(message)) as EnsureDocumentResponse
-      return response.ok ? response.documentId : null
+      return (await chrome.runtime.sendMessage(message)) as EnsureDocumentResponse
     })()
   }
-  return documentIdPromise
+  try {
+    const response = await documentIdPromise
+    if (response.ok === false) documentIdPromise = null
+    return response
+  } catch (error) {
+    documentIdPromise = null
+    throw error
+  }
 }
 
 // Shared by the highlight/explanation/simplification Save actions below -
@@ -1336,10 +1344,8 @@ async function saveNote(
   content: string,
   options?: { title?: string; tags?: string[]; sourcePassage?: string }
 ): Promise<SaveNoteResponse> {
-  const documentId = await ensureDocumentId()
-  if (!documentId) {
-    return { ok: false, error: "Could not save the source page. Nothing was saved." }
-  }
+  const documentResponse = await ensureDocument()
+  if (documentResponse.ok === false) return documentResponse
   const title = options?.title ?? (content.length > 80 ? `${content.slice(0, 80)}…` : content)
 
   const message: SaveNoteMessage = {
@@ -1349,7 +1355,7 @@ async function saveNote(
     sourcePassage: options?.sourcePassage,
     contentType,
     sourceUrl: location.href,
-    documentId,
+    documentId: documentResponse.documentId,
     tags: options?.tags
   }
 

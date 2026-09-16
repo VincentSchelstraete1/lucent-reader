@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type ChangeEvent } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { api, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type ProgressiveSection, type SectionNote, type SourceIndexStatus } from "../api/client"
+import { api, type Document, type DocumentIngestionResult, type LearnFamiliarity, type LearnGoal, type LearnSession, type Note, type ProgressiveSection, type SectionNote, type SourceIndexStatus } from "../api/client"
 import { generatedMechanismToRendererData, StepThroughMechanism } from "../learning/experiences/StepThroughMechanism"
 import { StructuredVisual } from "../learning/visuals/StructuredVisual"
 import { pollProgressiveJob } from "../progressivePolling"
 
-type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
+type LearningNoteRecord = { filename: string; section_notes: SectionNote[]; saved_notes?: Note[]; document_id?: number | null; note_id?: number | null; source_type?: string; teaching_depth?: DepthMode }
 type State = { status: "idle" | "uploading" | "processing" | "complete" | "error"; filename?: string; sections?: ProgressiveSection[]; result?: LearningNoteRecord; message?: string }
 type DepthMode = "concise" | "balanced" | "detailed"
 type StudyMode = "notes" | "learn" | "flashcards"
@@ -36,6 +36,38 @@ function recordFromSavedNote(note: { id: number; title: string; document_id: num
     if (!Array.isArray(payload.sectionNotes)) return null
     return { filename: payload.filename || note.title, source_type: payload.sourceType, teaching_depth: payload.teachingDepth, section_notes: usableSections(payload.sectionNotes), document_id: note.document_id, note_id: note.id }
   } catch { return null }
+}
+
+function recordFromCapturedNotes(document: Document, notes: Note[]): LearningNoteRecord | null {
+  const captures = notes.filter((note) => note.document_id === document.id && note.content_type !== "section_note")
+  if (!captures.length) return null
+  return {
+    filename: document.title,
+    section_notes: [],
+    saved_notes: [...captures].reverse(),
+    document_id: document.id,
+    source_type: "website",
+  }
+}
+
+function savedContentLabel(contentType: string) {
+  return ({
+    highlight: "Saved highlight",
+    explanation: "Saved explanation",
+    simplification: "Saved simplification",
+    note: "Saved note",
+    summary: "Saved summary",
+  } as Record<string, string>)[contentType] ?? "Saved item"
+}
+
+export function SavedContentView({ notes }: { notes: Note[] }) {
+  return <div className="notes-output saved-content-output">{notes.map((note) => <article className="note-section saved-content-card" id={`saved-note-${note.id}`} key={note.id}>
+    <p className="note-kicker">{savedContentLabel(note.content_type)}</p>
+    <h2>{note.title}</h2>
+    <p className="note-big-idea">{note.content}</p>
+    {note.source_passage && note.source_passage !== note.content && <section className="note-component"><h3>Original passage</h3><p>{note.source_passage}</p></section>}
+    {note.source_url && <p className="saved-content-source"><a href={note.source_url} target="_blank" rel="noreferrer">Open original source ↗</a></p>}
+  </article>)}</div>
 }
 
 function ComponentView({ component, depth = "balanced" }: { component: SectionNote["components"][number]; depth?: DepthMode }) {
@@ -453,15 +485,18 @@ export function Notes() {
   useEffect(() => {
     let cancelled = false
     const requestedDocument = Number(searchParams.get("document_id") ?? routeDocumentId)
-    if (Number.isFinite(requestedDocument) && requestedDocument > 0) {
-      api.getDocument(requestedDocument).then((document) => { if (!cancelled) setMaterialTitle(document.title.replace(/\.(pdf|docx|pptx)$/i, "") || "Untitled material") }).catch(() => { if (!cancelled) setMaterialTitle(null) })
-    }
-    api.getNotes().then((notes) => {
+    const hasRequestedDocument = Number.isFinite(requestedDocument) && requestedDocument > 0
+    const documentRequest = hasRequestedDocument ? api.getDocument(requestedDocument).catch(() => null) : Promise.resolve(null)
+    Promise.all([documentRequest, api.getNotes()]).then(([materialDocument, notes]) => {
       if (cancelled) return
+      setMaterialTitle(materialDocument ? materialDocument.title.replace(/\.(pdf|docx|pptx)$/i, "") || "Untitled material" : null)
       const persisted = notes.filter((note) => note.content_type === "section_note").map(recordFromSavedNote).filter((item): item is LearningNoteRecord => item !== null).reverse()
-      const selected = Number.isFinite(requestedDocument) && requestedDocument > 0 ? persisted.find((item) => item.document_id === requestedDocument) : persisted[0]
-      if (selected) { setHistory(persisted); setSelectedHistory(Math.max(0, persisted.indexOf(selected))); setDepth(selected.teaching_depth ?? "balanced"); setState({ status: "complete", result: selected }) }
-      else if (Number.isFinite(requestedDocument) && requestedDocument > 0) { setHistory([]); setState({ status: "idle", filename: materialTitle ?? undefined }) }
+      const generated = hasRequestedDocument ? persisted.find((item) => item.document_id === requestedDocument) : persisted[0]
+      const captured = materialDocument ? recordFromCapturedNotes(materialDocument, notes) : null
+      const selected = generated ? { ...generated, saved_notes: captured?.saved_notes } : captured
+      const available = selected && generated ? persisted.map((item) => item === generated ? selected : item) : captured ? [captured] : persisted
+      if (selected) { setHistory(available); setSelectedHistory(Math.max(0, available.indexOf(selected))); setDepth(selected.teaching_depth ?? "balanced"); setState({ status: "complete", result: selected }) }
+      else if (hasRequestedDocument) { setHistory([]); setState({ status: "idle", filename: materialDocument?.title }) }
       else { setHistory([]); setState({ status: "idle" }) }
       window.setTimeout(() => { if (window.location.hash) document.querySelector(window.location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }) }, 0)
     }).catch(() => {
@@ -507,6 +542,8 @@ export function Notes() {
   }
   const sections = state.sections ?? []
   const notes = state.result?.section_notes ?? []
+  const savedNotes = state.result?.saved_notes ?? []
+  const displayedMode: StudyMode = notes.length ? mode : "notes"
   const estimatedMinutes = estimateMinutes(notes, depth)
   const availableHistory = history.length ? history : state.result ? [state.result] : []
   const activeNote = notes.find((note) => note.id === requestedSection) ?? notes[0]
@@ -532,6 +569,6 @@ export function Notes() {
     {state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}
     {availableHistory.length > 0 && state.status !== "processing" && <nav className="notes-history" aria-label="Saved notes"><span>Saved notes</span>{availableHistory.map((item, index) => <button key={`${item.document_id ?? item.filename}-${index}`} type="button" className={index === selectedHistory ? "active" : ""} onClick={() => { setSelectedHistory(index); setQuizStatus("idle"); setState({ status: "complete", result: item }) }}>{item.filename}</button>)}</nav>}
     {state.status === "processing" && <section aria-live="polite" className="notes-progress"><h2>{state.filename}</h2><p className="notes-progress-summary">Your study guide is taking shape. Completed sections are ready to read now.</p>{sections.map((section) => <article className={`note-skeleton status-${section.status}`} key={section.id}><div className="section-status"><span>{section.status === "complete" ? "Ready" : section.status === "failed" ? "Source-based fallback" : section.status === "generating" ? "Writing…" : "Waiting"}</span></div><h3>{section.title || "Untitled section"}</h3>{section.section_note && <NoteView notes={[section.section_note]} />}</article>)}</section>}
-    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">Study note</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length} focused section{notes.length === 1 ? "" : "s"} · about {estimatedMinutes} min · {mode === "learn" ? "focused learning" : mode === "flashcards" ? "recall practice" : "ready to review"}</p></div><div className="notes-actions"><div className="study-mode-tabs" role="tablist" aria-label="Study mode"><button type="button" role="tab" aria-selected={mode === "notes"} className={mode === "notes" ? "active" : ""} onClick={() => setMode("notes")}>Notes</button><button type="button" role="tab" aria-selected={mode === "learn"} className={mode === "learn" ? "active" : ""} onClick={() => setMode("learn", activeNote?.id)}>Learn</button><button type="button" role="tab" aria-selected={mode === "flashcards"} className={mode === "flashcards" ? "active" : ""} onClick={() => setMode("flashcards")}>Flashcards</button><button type="button" role="tab" aria-selected={false} onClick={startQuiz}>Quiz</button></div><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={mode === "learn" ? () => setMode("learn", activeNote?.id) : startQuiz}>{mode === "learn" ? "Start learning" : quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{mode === "learn" && activeNote ? <LearnView note={activeNote} documentId={state.result.document_id} onBack={() => setMode("notes", activeNote.id)} /> : mode === "flashcards" ? <FlashcardsView notes={notes} onBack={() => setMode("notes")} /> : <><nav className="section-index" aria-label="Note sections"><span>Sections</span>{notes.map((note, index) => { const hasWalkthrough = note.components.some((component: any) => component.kind === "walkthrough" && component.mechanism); return <span className="section-index-item" key={note.id}><a className={note.id === activeNote?.id ? "active" : ""} href={`#${note.id}`}>{index + 1}. {note.title}</a>{hasWalkthrough && <button type="button" onClick={() => setMode("learn", note.id)} aria-label={`Learn ${note.title}`}>Learn</button>}</span>})}</nav>{notes.length ? <NoteView notes={notes} depth={depth} /> : <p className="empty">No sections were produced for this document.</p>}</>}</>}
+    {state.status === "complete" && state.result && <><header className="notes-document-heading"><div><p className="note-kicker">{notes.length ? "Study note" : "Saved from the extension"}</p><h2 className="notes-document-title">{state.result.filename}</h2><p>{notes.length ? `${notes.length} focused section${notes.length === 1 ? "" : "s"} · about ${estimatedMinutes} min` : `${savedNotes.length} saved item${savedNotes.length === 1 ? "" : "s"}`} · {displayedMode === "learn" ? "focused learning" : displayedMode === "flashcards" ? "recall practice" : "ready to review"}</p></div><div className="notes-actions"><div className="study-mode-tabs" role="tablist" aria-label="Study mode"><button type="button" role="tab" aria-selected={displayedMode === "notes"} className={displayedMode === "notes" ? "active" : ""} onClick={() => setMode("notes")}>Notes</button><button type="button" role="tab" aria-selected={displayedMode === "learn"} className={displayedMode === "learn" ? "active" : ""} disabled={!notes.length} onClick={() => setMode("learn", activeNote?.id)}>Learn</button><button type="button" role="tab" aria-selected={displayedMode === "flashcards"} className={displayedMode === "flashcards" ? "active" : ""} disabled={!notes.length} onClick={() => setMode("flashcards")}>Flashcards</button><button type="button" role="tab" aria-selected={false} disabled={!notes.length} onClick={startQuiz}>Quiz</button></div>{notes.length > 0 && <><label htmlFor="notes-depth">Learning depth</label><select id="notes-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}><option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option></select><button className="btn btn-primary" type="button" disabled={quizStatus === "working" || !state.result.document_id} onClick={displayedMode === "learn" ? () => setMode("learn", activeNote?.id) : startQuiz}>{displayedMode === "learn" ? "Start learning" : quizStatus === "working" ? "Building quiz…" : "Check your understanding"}</button></>}</div></header>{quizStatus === "error" && <p className="error" role="alert">This note is available to study, but Lucent could not start its quiz.</p>}{displayedMode === "learn" && activeNote ? <LearnView note={activeNote} documentId={state.result.document_id} onBack={() => setMode("notes", activeNote.id)} /> : displayedMode === "flashcards" ? <FlashcardsView notes={notes} onBack={() => setMode("notes")} /> : <>{notes.length > 0 && <nav className="section-index" aria-label="Note sections"><span>Sections</span>{notes.map((note, index) => { const hasWalkthrough = note.components.some((component: any) => component.kind === "walkthrough" && component.mechanism); return <span className="section-index-item" key={note.id}><a className={note.id === activeNote?.id ? "active" : ""} href={`#${note.id}`}>{index + 1}. {note.title}</a>{hasWalkthrough && <button type="button" onClick={() => setMode("learn", note.id)} aria-label={`Learn ${note.title}`}>Learn</button>}</span>})}</nav>}{savedNotes.length > 0 && <SavedContentView notes={savedNotes} />}{notes.length > 0 && <NoteView notes={notes} depth={depth} />}</>}</>}
   </div>
 }

@@ -189,6 +189,19 @@ def test_new_google_account_is_sent_to_first_run_walkthrough():
     assert _post_auth_return_to("/app/material/7", is_new_user=False) == "/app/material/7"
 
 
+def test_local_web_redirect_uses_same_hostname_as_api(monkeypatch):
+    import app.routers.auth as auth_router
+
+    configured = replace(
+        settings,
+        api_origin="http://127.0.0.1:8000",
+        web_origins=("http://localhost:5173", "http://127.0.0.1:5173"),
+    )
+    monkeypatch.setattr(auth_router, "settings", configured)
+
+    assert auth_router._web_redirect("/app") == "http://127.0.0.1:5173/app"
+
+
 def _google_token(*, aud="client", nonce="nonce", expires=300):
     key = JsonWebKey.generate_key("RSA", 2048, is_private=True)
     now = int(utcnow().timestamp())

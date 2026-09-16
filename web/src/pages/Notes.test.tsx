@@ -2,8 +2,8 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 
-import { NoteView } from "./Notes"
-import type { SectionNote } from "../api/client"
+import { NoteView, SavedContentView } from "./Notes"
+import type { Note, SectionNote } from "../api/client"
 
 describe("SectionNote product rendering", () => {
   it("renders stable review anchors without leaking source block identifiers", () => {
@@ -68,5 +68,28 @@ describe("SectionNote product rendering", () => {
     expect(concise).not.toContain("final nuance")
     expect(detailed).toContain("open=\"\"")
     expect(detailed).toContain("final nuance")
+  })
+})
+
+describe("extension-saved content rendering", () => {
+  it("shows the saved result, its original passage, and its source", () => {
+    const note: Note = {
+      id: 17,
+      title: "Why domestication matters",
+      content: "Domestication changed dogs through selection alongside humans.",
+      source_passage: "Dogs were the first species to be domesticated.",
+      content_type: "explanation",
+      source_url: "https://example.test/dog",
+      document_id: 4,
+      created_at: "2026-09-15T12:00:00Z",
+      updated_at: "2026-09-15T12:00:00Z",
+    }
+
+    const html = renderToStaticMarkup(createElement(SavedContentView, { notes: [note] }))
+
+    expect(html).toContain("Saved explanation")
+    expect(html).toContain("Domestication changed dogs through selection alongside humans.")
+    expect(html).toContain("Dogs were the first species to be domesticated.")
+    expect(html).toContain('href="https://example.test/dog"')
   })
 })
