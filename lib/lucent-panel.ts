@@ -52,10 +52,24 @@ function hasSidePanelApi(): boolean {
 
 // Named for what it actually decides, not "is the API present". Arc exposes
 // chrome.sidePanel.open() and resolves it without actually creating a side
-// panel. We therefore verify the resulting extension context below instead of
-// treating the resolved promise as proof that the UI opened.
+// panel. We therefore verify the resulting panel below instead of treating the
+// resolved promise as proof that the UI opened.
 export function shouldUseNativeSidePanel(): boolean {
   return hasSidePanelApi() && !cachedUsePopupFallback
+}
+
+type SidePanelOpenedInfo = {
+  path: string
+  windowId: number
+}
+
+type SidePanelOpenedEvent = {
+  addListener: (callback: (info: SidePanelOpenedInfo) => void) => void
+  removeListener: (callback: (info: SidePanelOpenedInfo) => void) => void
+}
+
+type SidePanelWithOpenedEvent = typeof chrome.sidePanel & {
+  onOpened?: SidePanelOpenedEvent
 }
 
 type RuntimeContext = {
@@ -72,8 +86,9 @@ type RuntimeWithContexts = typeof chrome.runtime & {
   }) => Promise<RuntimeContext[]>
 }
 
-const NATIVE_PANEL_CHECK_ATTEMPTS = 3
+const NATIVE_PANEL_CHECK_ATTEMPTS = 5
 const NATIVE_PANEL_CHECK_INTERVAL_MS = 100
+const NATIVE_PANEL_OPEN_EVENT_TIMEOUT_MS = 500
 const POPUP_FALLBACK_WIDTH = 220
 
 const wait = (durationMs: number) => new Promise((resolve) => setTimeout(resolve, durationMs))
@@ -85,24 +100,57 @@ async function nativePanelContextAppeared(windowId: number): Promise<boolean> {
   const documentUrl = chrome.runtime.getURL("sidepanel.html")
   for (let attempt = 0; attempt < NATIVE_PANEL_CHECK_ATTEMPTS; attempt += 1) {
     const contexts = await getContexts.call(chrome.runtime, {
-      contextTypes: ["SIDE_PANEL"],
-      documentUrls: [documentUrl],
-      windowIds: [windowId]
+      contextTypes: ["SIDE_PANEL"]
     })
     if (contexts.some((context) =>
       context.contextType === "SIDE_PANEL" &&
-      context.windowId === windowId &&
-      context.documentUrl === documentUrl
+      context.documentUrl === documentUrl &&
+      (context.windowId === windowId || context.windowId === -1)
     )) return true
     if (attempt < NATIVE_PANEL_CHECK_ATTEMPTS - 1) await wait(NATIVE_PANEL_CHECK_INTERVAL_MS)
   }
   return false
 }
 
+type NativePanelOpenedWatcher = {
+  result: Promise<boolean>
+  cancel: () => void
+}
+
+// Chrome 141+ provides an explicit event when the side panel is visible. Start
+// listening before sidePanel.open() so a fast open cannot race past us. This is
+// materially more reliable than querying runtime contexts immediately after
+// the open promise resolves (the old query could lag and open both UIs).
+function watchForNativePanelOpened(windowId: number): NativePanelOpenedWatcher | null {
+  const onOpened = (chrome.sidePanel as SidePanelWithOpenedEvent).onOpened
+  if (!onOpened || typeof onOpened.addListener !== "function") return null
+
+  let finish: (opened: boolean) => void = () => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const result = new Promise<boolean>((resolve) => {
+    let settled = false
+    const listener = (info: SidePanelOpenedInfo) => {
+      if (info.windowId !== windowId || !info.path.endsWith("sidepanel.html")) return
+      finish(true)
+    }
+    finish = (opened) => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      onOpened.removeListener(listener)
+      resolve(opened)
+    }
+    onOpened.addListener(listener)
+    timer = setTimeout(() => finish(false), NATIVE_PANEL_OPEN_EVENT_TIMEOUT_MS)
+  })
+
+  return { result, cancel: () => finish(false) }
+}
+
 async function rememberPopupFallback(): Promise<void> {
   cachedUsePopupFallback = true
   usePopupFallbackLoaded = true
-  await setUsePopupFallback(true)
+  await setUsePopupFallback(true, "detected")
 }
 
 // Reuses sidepanel.html as-is (it has no dependency on actually being a
@@ -156,13 +204,21 @@ export function openLucent(windowId: number): void {
   console.log("[Lucent] openLucent called", { windowId, hasSidePanelApi: hasSidePanelApi(), usedNative })
 
   if (usedNative) {
+    const openedWatcher = watchForNativePanelOpened(windowId)
     chrome.sidePanel.open({ windowId }).then(
       async () => {
-        console.log("[Lucent] chrome.sidePanel.open() resolved; verifying visible panel context")
+        console.log("[Lucent] chrome.sidePanel.open() resolved; verifying the visible panel")
         try {
-          if (!(await nativePanelContextAppeared(windowId))) {
-            console.warn("[Lucent] native side panel created no context; remembering popup fallback")
-            await rememberPopupFallback()
+          const panelOpened = openedWatcher
+            ? await openedWatcher.result
+            : await nativePanelContextAppeared(windowId)
+          if (!panelOpened) {
+            console.warn("[Lucent] native side panel did not become visible; opening popup fallback")
+            // Browsers without the explicit opened event use the runtime-context
+            // fallback. Remember that result so Arc opens quickly next time. If
+            // an event-capable browser merely reports late, fall back for this
+            // click without permanently forcing Chrome into popup mode.
+            if (!openedWatcher) await rememberPopupFallback()
             openPopupFallback(windowId)
           }
         } catch (err) {
@@ -171,6 +227,7 @@ export function openLucent(windowId: number): void {
         }
       },
       (err) => {
+        openedWatcher?.cancel()
         console.error("Lucent: sidePanel.open() failed, falling back to a window", err)
         openPopupFallback(windowId)
       }
