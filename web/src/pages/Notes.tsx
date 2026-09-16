@@ -559,14 +559,29 @@ export function Notes() {
   return <div className="page notes-page">
     <header className="page-header"><p className="note-kicker">{routeDocumentId ? <Link to="/app">← Back to library</Link> : "Study library"}</p><h1>{routeDocumentId && materialTitle ? materialTitle : "Notes"}</h1><p className="page-subtitle">{routeDocumentId ? "Turn this material into a focused study guide." : "Turn a lecture, chapter, or slide deck into a focused study guide."}</p></header>
     <section className="notes-import">
-      <label htmlFor="notes-file">Import learning material</label>
-      <p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p>
-      <input id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} />
-      <label htmlFor="notes-generation-depth">Teaching depth</label>
-      <select id="notes-generation-depth" value={depth} onChange={(event) => setDepth(event.target.value as DepthMode)}>
-        <option value="concise">Concise Study Guide</option><option value="balanced">Balanced</option><option value="detailed">Detailed Explanation</option>
-      </select>
-      <button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button>
+      <div className="notes-import-intro">
+        <h2>Import learning material</h2>
+        <p>PDF, DOCX, or PPTX · Lucent keeps sections in source order and shows each one as it finishes.</p>
+      </div>
+      <div className="notes-file-control">
+        <input className="notes-file-input" id="notes-file" type="file" accept=".pdf,.docx,.pptx" onChange={(event: ChangeEvent<HTMLInputElement>) => setFile(event.target.files?.[0] ?? null)} />
+        <label className="notes-file-trigger" htmlFor="notes-file">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v2.25A2.25 2.25 0 0 0 7.25 20h9.5A2.25 2.25 0 0 0 19 17.75V15.5" /></svg>
+          {file ? "Choose another file" : "Choose a file"}
+        </label>
+        <span className={`notes-file-name${file ? " selected" : ""}`} aria-live="polite">{file ? file.name : "No file selected"}</span>
+      </div>
+      <fieldset className="notes-depth-fieldset">
+        <legend>Teaching depth</legend>
+        <div className="notes-depth-options">
+          {([
+            ["concise", "Concise", "Quick review"],
+            ["balanced", "Balanced", "Clear and complete"],
+            ["detailed", "Detailed", "Deeper explanation"],
+          ] as const).map(([value, label, description]) => <button key={value} className={depth === value ? "selected" : ""} type="button" aria-pressed={depth === value} onClick={() => setDepth(value)}><strong>{label}</strong><span>{description}</span></button>)}
+        </div>
+      </fieldset>
+      <div className="notes-import-actions"><button className="btn btn-primary" type="button" disabled={!file || state.status === "uploading" || state.status === "processing"} onClick={upload}>{state.status === "uploading" ? "Uploading…" : state.status === "processing" ? "Building notes…" : "Create notes"}</button></div>
       {state.status === "error" && <p className="error" role="alert">{state.message}</p>}
     </section>
     {state.status === "idle" && !state.result && !history.length && <p className="empty">Import a lecture, chapter, or slide deck to begin.</p>}
