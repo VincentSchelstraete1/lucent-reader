@@ -294,7 +294,10 @@ export function LearnView({ note, documentId, onBack }: { note: SectionNote; doc
     setHint(null)
     let cancelled = false
     api.getActiveLearnSession(documentId).then((active) => {
-      if (!cancelled && active && !sessionRef.current) {
+      // Defense in depth for older API deployments: the active-session route
+      // must return an active session or null. Do not strand the learner on a
+      // stale "progress saved" screen if a stopped row is returned instead.
+      if (!cancelled && active?.status === "active" && !sessionRef.current) {
         sessionRef.current = active
         setSession(active)
         setFocusMode(true)

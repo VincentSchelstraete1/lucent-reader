@@ -267,20 +267,28 @@ def _ensure_session_runtime(db, session: LearnSession) -> None:
     # Existing active sessions may predate the source-content boundary. Never
     # continue serving a persisted plan that contains extraction diagnostics;
     # stop it cleanly so the learner can restart after fixing the material.
-    if contains_source_diagnostic(session.plan or {}) or contains_source_diagnostic((session.state or {}).get("currentScene")):
-        state = dict(session.state or {})
-        state.pop("currentScene", None)
-        state.pop("currentScenePrivate", None)
+    state = dict(session.state or {})
+    boundary_validated = bool(state.get("sourceContentValidated"))
+    if not boundary_validated:
+        if contains_source_diagnostic(session.plan or {}) or contains_source_diagnostic(state.get("currentScene")):
+            state.pop("currentScene", None)
+            state.pop("currentScenePrivate", None)
+            session.state = state
+            session.status = "stopped"
+            session.ended_reason = "source_content_invalid"
+            db.commit()
+            db.refresh(session)
+            return
+        # Record the one-time legacy check. New sessions receive this marker
+        # during creation because build_learn_plan already validates the source
+        # boundary; rescanning generated learner content can otherwise mistake
+        # legitimate discussion of extraction/errors for a legacy diagnostic.
+        state["sourceContentValidated"] = True
         session.state = state
-        session.status = "stopped"
-        session.ended_reason = "source_content_invalid"
-        db.commit()
-        db.refresh(session)
-        return
     before = json.dumps(session.state or {}, sort_keys=True, default=str)
     ensure_runtime_state(session, db=db)
     after = json.dumps(session.state or {}, sort_keys=True, default=str)
-    if after != before:
+    if not boundary_validated or after != before:
         db.commit()
         db.refresh(session)
 
@@ -827,7 +835,7 @@ def _initial_state(db, user: User, document_id: int, plan: dict, *, source_gener
         previous = {}
         concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": previous.get("attempts", 0), "correct": previous.get("correct", 0), "partiallyCorrect": previous.get("partiallyCorrect", 0), "incorrect": previous.get("incorrect", 0), "insufficientEvidence": previous.get("insufficientEvidence", 0), "hintsUsed": previous.get("hintsUsed", 0), "interactionTypes": previous.get("interactionTypes", []), "misconceptions": previous.get("misconceptions", []), "failedStrategies": previous.get("failedStrategies", []), "successfulStrategies": previous.get("successfulStrategies", []), "failedModalities": previous.get("failedModalities", []), "successfulModalities": previous.get("successfulModalities", []), "recognitionEvidence": previous.get("recognitionEvidence", 0), "recallEvidence": previous.get("recallEvidence", 0), "explanationEvidence": previous.get("explanationEvidence", 0), "applicationEvidence": previous.get("applicationEvidence", 0), "transferEvidence": previous.get("transferEvidence", 0), "assistedSuccesses": previous.get("assistedSuccesses", 0), "independentSuccesses": previous.get("independentSuccesses", 0), "scaffoldingLevel": previous.get("scaffoldingLevel", "FULL"), "scaffold": previous.get("scaffold", "FULL"), "hintDependence": previous.get("hintDependence", 0), "scaffoldDependence": previous.get("scaffoldDependence", 0), "reviewDue": previous.get("reviewDue"), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None, "contentPolicy": content_policy(objective)})
     queue = [c["conceptId"] for c in concepts if c["state"] in {"NEEDS_REVIEW", "STRUGGLING"} or c.get("reviewDue") in {"NEXT_SESSION", "FUTURE_REVIEW"}]
-    state = {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": []}
+    state = {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": [], "sourceContentValidated": True}
     if source_generation:
         state["sourceGeneration"] = source_generation
     return state
@@ -884,7 +892,10 @@ def get_active_learn_session(document_id: int, db=Depends(get_db), user: User = 
     _owned_document(db, document_id, user); session = db.execute(select(LearnSession).where(LearnSession.document_id == document_id, LearnSession.user_id == user.id, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
     if session:
         _ensure_session_runtime(db, session)
-    return _session_payload(session) if session else None
+    # The legacy compatibility check above can intentionally stop a bad old
+    # session. This endpoint promises an active session or null, so never leak
+    # the newly-stopped row to the frontend as though it were resumable.
+    return _session_payload(session) if session and session.status == "active" else None
 
 @router.post("/learn-sessions/{session_id}/hints", response_model=LearnHintResponse, dependencies=[Depends(require_csrf)])
 def get_learn_hint(session_id: UUID, request: LearnHintRequest | None = None, db=Depends(get_db), user: User = Depends(get_current_user)):

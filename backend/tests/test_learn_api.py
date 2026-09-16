@@ -148,6 +148,47 @@ def test_learn_session_is_owned_and_resumable(client):
     assert active.json()["id"] == first["id"]
 
 
+def test_invalidated_legacy_session_is_not_returned_as_active(client):
+    document = _document_with_note(client)
+    created = client.post(
+        f"/documents/{document['id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new"},
+    ).json()
+
+    # Simulate an active session created before the source-content boundary.
+    # The compatibility check must archive it without returning a stopped row
+    # from an endpoint whose contract is active-or-null.
+    with TestSessionLocal() as db:
+        row = db.get(LearnSession, uuid.UUID(created["id"]))
+        state = dict(row.state or {})
+        state.pop("sourceContentValidated", None)
+        row.state = state
+        row.plan = {"objectives": [{"steps": [{"prompt": "Insufficient Source Material"}]}]}
+        db.commit()
+
+    active = client.get(f"/documents/{document['id']}/learn-sessions/active")
+    assert active.status_code == 200
+    assert active.json() is None
+
+    with TestSessionLocal() as db:
+        row = db.get(LearnSession, uuid.UUID(created["id"]))
+        assert row.status == "stopped"
+        assert row.ended_reason == "source_content_invalid"
+
+
+def test_new_session_records_source_boundary_validation(client):
+    document = _document_with_note(client)
+    created = client.post(
+        f"/documents/{document['id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new", "restart": True},
+    ).json()
+
+    assert created["status"] == "active"
+    with TestSessionLocal() as db:
+        row = db.get(LearnSession, uuid.UUID(created["id"]))
+        assert row.state["sourceContentValidated"] is True
+
+
 def test_stale_scene_mutations_are_rejected_without_changing_authoritative_state(client):
     document = _document_with_note(client)
     session = client.post(
