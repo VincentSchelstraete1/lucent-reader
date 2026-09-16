@@ -11,7 +11,9 @@ Lucent is a Chrome extension paired with a web app. The extension explains and s
 <a href="https://chromewebstore.google.com/detail/lucent-reader/jlacohdmkdcjhechfkbhkpdiaggffnkn?authuser=0&hl=en">
   <img src="https://img.shields.io/badge/Chrome%20Extension-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Install from the Chrome Web Store" />
 </a>
-<img src="https://img.shields.io/badge/Open%20Lucent-Coming%20September%2012-2b2b2b?style=for-the-badge" alt="Open Lucent web app — coming September 12" />
+<a href="https://lucentreader.com">
+  <img src="https://img.shields.io/badge/Open%20Lucent-lucentreader.com-2b2b2b?style=for-the-badge" alt="Open the Lucent web app" />
+</a>
 
 <br /><br />
 
@@ -213,14 +215,8 @@ npm run dev
 
 ## Status
 
-The extension is live on the Chrome Web Store. The backend — auth, ingestion, RAG indexing, Learn sessions, and the bounded tutor — is built and under test. Open Lucent, the hosted web app, is targeting **September 12** for its first public opening.
+The extension is live on the Chrome Web Store, and the hosted web app is available at [lucentreader.com](https://lucentreader.com). The production backend supports authentication, ingestion, RAG indexing, Learn sessions, and the bounded tutor.
 
 What's next: broadening the structured visual library beyond step-through mechanisms and worked examples, cross-session learner memory, and an evaluation harness for grading consistency and groundedness rather than just uptime.
 
 ---
-
-<div align="center">
-
-**Read less passively. Understand more deliberately.**
-
-</div>
