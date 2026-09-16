@@ -136,6 +136,14 @@ def test_diagnostic_or_metadata_only_source_cannot_create_a_corpus(client):
     assert diagnostic.status_code == 422
     assert diagnostic.json()["detail"]["code"] == "source_not_substantive"
 
+    production_wording = _upload(
+        client,
+        MutableIngestor("Unable to Design Learning Experience. No source content provided."),
+        "diagnostic-production-wording.pdf",
+    )
+    assert production_wording.status_code == 422
+    assert production_wording.json()["detail"]["code"] == "source_not_substantive"
+
     metadata = _upload(client, MutableIngestor("Title Author 2026"), "metadata.pdf")
     assert metadata.status_code == 422
     assert metadata.json()["detail"]["code"] == "source_not_substantive"

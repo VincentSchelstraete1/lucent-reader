@@ -34,6 +34,7 @@ from app.routing import AnthropicClassifierAdapter, ClassifierAdapter, Represent
 from app.schemas.ingestion import DocumentIngestionResponse, PdfIngestionResponse, ProgressivePollResponse, ProgressiveSectionResponse, ProgressiveStartResponse
 from app.segmentation import LearningBlock, segment_document
 from app.services.source_index import SourceCorpusInvalid, index_document, persist_source_corpus
+from app.services.source_quality import contains_source_diagnostic
 from app.services.usage_service import UsageClass, enforce_usage_limit
 from app.semantic import AnthropicSemanticGenerator, DeterministicSemanticGenerator, HybridSemanticGenerator, PedagogicalPlanner, SemanticGenerator, SectionNote, TeachingDepth, assemble_note, plain_text_fallback, build_context_packet, group_learning_blocks, generate_sections_concurrently, generate_sections_progressively, is_low_value_section
 from sqlalchemy import select
@@ -203,6 +204,20 @@ def _persist_learning_note(db, *, user_id, response: PdfIngestionResponse) -> Pd
     creating an ambiguous duplicate. Different filenames and formats remain
     isolated by the per-user Source identity.
     """
+    usable_section_notes = [note for note in response.section_notes if not contains_source_diagnostic(note)]
+    if len(usable_section_notes) != len(response.section_notes):
+        logger.error(
+            "section_note_diagnostic_rejected operation=persist_learning_note filename=%s rejected_count=%s",
+            response.filename,
+            len(response.section_notes) - len(usable_section_notes),
+        )
+    if not usable_section_notes:
+        raise _error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "source_not_substantive",
+            "Lucent could not create learning material from this file. Make sure it contains selectable text and upload it again.",
+        )
+    response = response.model_copy(update={"section_notes": usable_section_notes})
     source_key = f"{response.source_type}:{response.filename}"[:255]
     source = db.execute(select(Source).where(
         Source.user_id == user_id,

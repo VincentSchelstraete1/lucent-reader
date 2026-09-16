@@ -155,15 +155,17 @@ def test_invalidated_legacy_session_is_not_returned_as_active(client):
         json={"goal": "understand", "familiarity": "new"},
     ).json()
 
-    # Simulate an active session created before the source-content boundary.
+    # Simulate an active session created under the previous source-content
+    # boundary. The old boolean marker must not bypass the newer validator.
     # The compatibility check must archive it without returning a stopped row
     # from an endpoint whose contract is active-or-null.
     with TestSessionLocal() as db:
         row = db.get(LearnSession, uuid.UUID(created["id"]))
         state = dict(row.state or {})
-        state.pop("sourceContentValidated", None)
+        state["sourceContentValidated"] = True
+        state.pop("sourceContentValidationVersion", None)
         row.state = state
-        row.plan = {"objectives": [{"steps": [{"prompt": "Insufficient Source Material"}]}]}
+        row.plan = {"objectives": [{"title": "Unable to Design Learning Experience", "steps": [{"content": "No source content provided"}]}]}
         db.commit()
 
     active = client.get(f"/documents/{document['id']}/learn-sessions/active")
@@ -187,6 +189,33 @@ def test_new_session_records_source_boundary_validation(client):
     with TestSessionLocal() as db:
         row = db.get(LearnSession, uuid.UUID(created["id"]))
         assert row.state["sourceContentValidated"] is True
+        assert row.state["sourceContentValidationVersion"] == 2
+
+
+def test_diagnostic_note_returns_recoverable_error_without_creating_session(client):
+    source = client.post("/sources", json={"type": "website", "url": "https://example.com/diagnostic"}).json()
+    document = client.post("/documents", json={"source_id": source["id"], "title": "Broken material", "content": "legacy"}).json()
+    _save_indexed_note(client, document, title="Broken material", note={"title": "Broken material", "sectionNotes": [{
+        "id": "s1",
+        "title": "Unable to Design Learning Experience",
+        "bigIdea": "No source content provided",
+        "sourceBlockIds": ["metadata"],
+        "keyTakeaways": ["Source blocks contain only metadata, no substantive content"],
+        "components": [],
+    }]})
+
+    response = client.post(
+        f"/documents/{document['id']}/learn-sessions",
+        json={"goal": "understand", "familiarity": "new"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "source_not_substantive",
+        "message": "Lucent could not prepare this material for Learn. Re-upload the source and try again.",
+    }
+    with TestSessionLocal() as db:
+        assert db.execute(select(LearnSession).where(LearnSession.document_id == document["id"])).scalars().all() == []
 
 
 def test_stale_scene_mutations_are_rejected_without_changing_authoritative_state(client):
