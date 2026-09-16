@@ -1,6 +1,6 @@
 import hmac
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from authlib.jose import JsonWebToken, JoseError
@@ -42,7 +42,18 @@ def _web_redirect(path: str) -> str:
     web_origins = [origin for origin in settings.web_origins if origin.startswith(("http://", "https://"))]
     if not web_origins:
         raise HTTPException(status_code=503, detail="Web origin is not configured")
-    return f"{web_origins[0]}{_safe_return_to(path)}"
+    # A local API on 127.0.0.1 setting a SameSite cookie and then returning
+    # the browser to localhost makes the next credentialed fetch cross-site;
+    # the browser correctly withholds the cookie. Prefer a configured web
+    # origin with the API's hostname when one exists. Production falls back
+    # to its canonical web origin because api.example.com and example.com are
+    # already the same site for cookie purposes.
+    api_hostname = urlsplit(settings.api_origin).hostname
+    target_origin = next(
+        (origin for origin in web_origins if urlsplit(origin).hostname == api_hostname),
+        web_origins[0],
+    )
+    return f"{target_origin}{_safe_return_to(path)}"
 
 
 def _post_auth_return_to(requested_path: str, *, is_new_user: bool) -> str:
