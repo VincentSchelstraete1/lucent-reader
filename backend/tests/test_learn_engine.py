@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from app.services.learn_engine import build_learn_plan, build_remediation_step, contains_source_diagnostic, evaluate_step, grade_step, public_step, synthesize_visual_spec, student_facing_quality_issues, validate_substantive_source
 from app.services.learn_tutor import ask_lucent_model, choose_tutor_decision, diagnose_response, set_tutor_provider
@@ -24,6 +25,22 @@ def test_metadata_only_or_extraction_diagnostic_source_cannot_build_lesson():
         assert "substantive content" in str(exc)
     else:
         raise AssertionError("diagnostic-only source must not produce a LearnPlan")
+
+
+def test_production_diagnostic_wording_cannot_build_lesson():
+    payload = {"title": "Upload", "sectionNotes": [{
+        "id": "s1",
+        "title": "Unable to Design Learning Experience",
+        "bigIdea": "No source content provided",
+        "sourceBlockIds": ["metadata"],
+        "keyTakeaways": ["Source blocks contain only metadata (author, date, course), no substantive content"],
+        "components": [],
+    }]}
+
+    assert contains_source_diagnostic(payload)
+    assert validate_substantive_source(payload)
+    with pytest.raises(ValueError, match="substantive content"):
+        build_learn_plan(payload, "understand", "new")
 
 
 def test_invalid_section_is_skipped_when_document_has_other_teachable_sections():

@@ -35,6 +35,7 @@ from app.services.usage_service import UsageClass, enforce_usage_limit
 router = APIRouter()
 logger = logging.getLogger(__name__)
 STEP_ADAPTER = TypeAdapter(LearnStep)
+SOURCE_CONTENT_VALIDATION_VERSION = 2
 
 
 def _bounded_id(prefix: str, *parts: object, max_length: int = 60) -> str:
@@ -268,7 +269,7 @@ def _ensure_session_runtime(db, session: LearnSession) -> None:
     # continue serving a persisted plan that contains extraction diagnostics;
     # stop it cleanly so the learner can restart after fixing the material.
     state = dict(session.state or {})
-    boundary_validated = bool(state.get("sourceContentValidated"))
+    boundary_validated = state.get("sourceContentValidationVersion") == SOURCE_CONTENT_VALIDATION_VERSION
     if not boundary_validated:
         if contains_source_diagnostic(session.plan or {}) or contains_source_diagnostic(state.get("currentScene")):
             state.pop("currentScene", None)
@@ -284,6 +285,7 @@ def _ensure_session_runtime(db, session: LearnSession) -> None:
         # boundary; rescanning generated learner content can otherwise mistake
         # legitimate discussion of extraction/errors for a legacy diagnostic.
         state["sourceContentValidated"] = True
+        state["sourceContentValidationVersion"] = SOURCE_CONTENT_VALIDATION_VERSION
         session.state = state
     before = json.dumps(session.state or {}, sort_keys=True, default=str)
     ensure_runtime_state(session, db=db)
@@ -835,7 +837,7 @@ def _initial_state(db, user: User, document_id: int, plan: dict, *, source_gener
         previous = {}
         concepts.append({"conceptId": objective.get("id"), "title": objective.get("title", "Concept"), "state": previous.get("state", "NOT_SEEN"), "attempts": previous.get("attempts", 0), "correct": previous.get("correct", 0), "partiallyCorrect": previous.get("partiallyCorrect", 0), "incorrect": previous.get("incorrect", 0), "insufficientEvidence": previous.get("insufficientEvidence", 0), "hintsUsed": previous.get("hintsUsed", 0), "interactionTypes": previous.get("interactionTypes", []), "misconceptions": previous.get("misconceptions", []), "failedStrategies": previous.get("failedStrategies", []), "successfulStrategies": previous.get("successfulStrategies", []), "failedModalities": previous.get("failedModalities", []), "successfulModalities": previous.get("successfulModalities", []), "recognitionEvidence": previous.get("recognitionEvidence", 0), "recallEvidence": previous.get("recallEvidence", 0), "explanationEvidence": previous.get("explanationEvidence", 0), "applicationEvidence": previous.get("applicationEvidence", 0), "transferEvidence": previous.get("transferEvidence", 0), "assistedSuccesses": previous.get("assistedSuccesses", 0), "independentSuccesses": previous.get("independentSuccesses", 0), "scaffoldingLevel": previous.get("scaffoldingLevel", "FULL"), "scaffold": previous.get("scaffold", "FULL"), "hintDependence": previous.get("hintDependence", 0), "scaffoldDependence": previous.get("scaffoldDependence", 0), "reviewDue": previous.get("reviewDue"), "immediateSuccess": False, "delayedSuccess": False, "sourceSectionIds": objective.get("sourceSectionIds", []), "sourceBlockIds": objective.get("sourceBlockIds", []), "priorEvidence": previous.get("correct", 0), "lastResult": None, "contentPolicy": content_policy(objective)})
     queue = [c["conceptId"] for c in concepts if c["state"] in {"NEEDS_REVIEW", "STRUGGLING"} or c.get("reviewDue") in {"NEXT_SESSION", "FUTURE_REVIEW"}]
-    state = {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": [], "sourceContentValidated": True}
+    state = {"attempts": {}, "hints": {}, "concepts": concepts, "revisitQueue": queue, "revisitMode": bool(queue), "completed": [], "branchStack": [], "sourceContentValidated": True, "sourceContentValidationVersion": SOURCE_CONTENT_VALIDATION_VERSION}
     if source_generation:
         state["sourceGeneration"] = source_generation
     return state
@@ -856,7 +858,10 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     fingerprint = plan_fingerprint(payload, request.goal, request.familiarity)
     if not request.restart:
         existing = db.execute(select(LearnSession).where(LearnSession.user_id == user.id, LearnSession.document_id == document.id, LearnSession.plan_fingerprint == fingerprint, LearnSession.status == "active").order_by(LearnSession.updated_at.desc())).scalars().first()
-        if existing: return _session_payload(existing)
+        if existing:
+            _ensure_session_runtime(db, existing)
+            if existing.status == "active":
+                return _session_payload(existing)
     else:
         # A restart is a clean acceptance/user journey boundary.  Retaining
         # older active rows makes the active-session lookup nondeterministic
@@ -873,8 +878,10 @@ def create_learn_session(document_id: int, request: LearnSessionCreateRequest, d
     except ValueError as exc:
         # Source extraction diagnostics are not learner content. Refuse to
         # start a session and send a recoverable, user-facing source error.
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail={"code": "source_not_substantive", "message": "Lucent could not prepare this material for Learn. Re-upload the source and try again."}) from exc
     plan_data = plan.model_dump(by_alias=True)
+    if contains_source_diagnostic(plan_data):
+        raise HTTPException(status_code=409, detail={"code": "source_not_substantive", "message": "Lucent could not prepare this material for Learn. Re-upload the source and try again."})
     session = LearnSession(user_id=user.id, document_id=document.id, note_id=note.id, goal=request.goal, familiarity=request.familiarity, plan=plan_data, objective_index=0, state=_initial_state(db, user, document.id, plan_data, source_generation=source_generation), status="active", plan_fingerprint=fingerprint)
     db.add(session); db.commit(); db.refresh(session)
     _ensure_session_runtime(db, session)

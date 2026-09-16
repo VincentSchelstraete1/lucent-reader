@@ -11,6 +11,7 @@ from app.segmentation import LearningBlock
 from app.semantic.section_notes import model_section_note, GeneratedSectionNote, _normalize_generated_section_payload
 from app.semantic.schema import CausalObject, PlainTextObject
 from app.schemas.ingestion import ProgressiveSectionResponse
+from app.services.source_quality import contains_source_diagnostic
 
 
 def make_block(ident, text, ancestry=None):
@@ -321,6 +322,40 @@ def test_model_failure_then_fallback_produces_valid_section_note(monkeypatch):
     assert len(notes) == 1
     assert notes[0].components[0].kind == "explanation"
     assert completed[0][1] == "provider unavailable"
+
+
+def test_model_diagnostic_then_fallback_uses_real_source_content(monkeypatch):
+    block = make_block("photosynthesis", "Photosynthesis converts light energy into chemical energy stored in glucose.")
+    section = SectionInput("section-photosynthesis", "Photosynthesis", ["Photosynthesis"], [block.id], [block], {})
+    obj = PlainTextObject(
+        id=block.id,
+        type="plain_text",
+        title="Photosynthesis",
+        learningGoal="Understand energy conversion",
+        sourceText=block.text,
+        paragraphs=[block.text],
+    )
+
+    monkeypatch.setattr("app.services.anthropic_service._run_structured_tool", lambda *a, **k: {
+        "title": "Unable to Design Learning Experience",
+        "bigIdea": "No source content provided",
+        "learningGoals": [],
+        "components": [],
+        "keyTakeaways": ["Source blocks contain only metadata, no substantive content"],
+        "omittedNoise": [],
+    })
+    completed = []
+
+    async def on_complete(index, note, error):
+        completed.append((note, error))
+
+    notes = asyncio.run(generate_sections_progressively([section], {block.id: obj}, on_complete, concurrency=1, use_model=True))
+
+    assert len(notes) == 1
+    assert notes[0].title == "Photosynthesis"
+    assert "converts light energy" in notes[0].big_idea
+    assert not contains_source_diagnostic(notes[0])
+    assert "source diagnostic" in completed[0][1]
 
 
 def test_progressive_job_survives_fallback_failure(monkeypatch):

@@ -17,6 +17,7 @@ from app.models.learn import LearnSession
 from app.models.learning_block import DocumentSourceIndex, PersistedLearningBlock
 from app.database import SessionLocal
 from app.services.embeddings import EmbeddingError, get_embedding_provider
+from app.services.source_quality import is_source_diagnostic_text
 
 
 logger = logging.getLogger(__name__)
@@ -25,19 +26,6 @@ EMBEDDING_INPUT_VERSION = "learning-block-input-v1"
 DEFAULT_EMBEDDING_PROVIDER = "voyage"
 DEFAULT_EMBEDDING_MODEL = "voyage-3-lite"
 DEFAULT_EMBEDDING_DIMENSIONS = 512
-
-_DIAGNOSTIC_PATTERNS = (
-    "insufficient source",
-    "no substantive content",
-    "extraction error",
-    "unable to extract",
-    "could not extract",
-    "metadata header",
-    "source material unavailable",
-    "document contains no text",
-    "unable to design a learning experience",
-)
-
 
 class SourceCorpusInvalid(ValueError):
     """The extracted representation is not safe or substantive enough to teach."""
@@ -75,8 +63,7 @@ def _sha256(value: Any) -> str:
 
 
 def _is_diagnostic(text: str) -> bool:
-    lowered = text.casefold()
-    return any(pattern in lowered for pattern in _DIAGNOSTIC_PATTERNS)
+    return is_source_diagnostic_text(text)
 
 
 def _substantive_words(text: str) -> set[str]:

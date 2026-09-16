@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from app.segmentation import LearningBlock
 from app.routing import RepresentationDecision
 from app.schemas.step_through import GeneratedStepThroughMechanism, StepThroughMechanism
+from app.services.source_quality import contains_source_diagnostic
 from .schema import LearningObject, PlainTextObject
 
 _SECTION_CACHE: dict[str, SectionNote] = {}
@@ -65,6 +66,8 @@ def is_low_value_section(section: SectionInput) -> bool:
     title = (section.title or "").strip()
     text = "\n".join(block.text for block in section.blocks).strip()
     if not text or len(text) < 8:
+        return True
+    if contains_source_diagnostic({"title": title, "text": text}):
         return True
     normalized_title = title.lower().rstrip(":")
     if title and (len(title) <= 1 or normalized_title in {"references", "bibliography", "contents", "table of contents", "agenda", "today's topics"}):
@@ -541,6 +544,8 @@ def model_section_note(section: SectionInput, *, model_version: str = "section-v
                 assert isinstance(generated_component, GeneratedWalkthroughComponent)
                 component["mechanism"] = generated_component.mechanism.to_canonical().model_dump(by_alias=True)
         note = SectionNote.model_validate({**generated_payload, "id": section.id, "sourceBlockIds": section.learning_block_ids})
+        if contains_source_diagnostic(note):
+            raise ValueError("model returned a source diagnostic instead of learner content")
     except Exception as exc:
         logger.warning("section_generation_failure section_id=%s stage=section_note_validation exception_type=%s latency_ms=%.1f fallback=true", section.id, type(exc).__name__, (time.perf_counter() - started) * 1000)
         raise
