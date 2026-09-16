@@ -5,6 +5,7 @@ import type { LearningObject } from "../learning/schema/learningObject"
 const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 let csrfToken: string | null = null
 export function setCsrfToken(token: string | null) { csrfToken = token }
+export function getCsrfToken() { return csrfToken }
 
 export type Source = {
   id: number

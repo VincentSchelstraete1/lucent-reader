@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link, NavLink, Outlet } from "react-router-dom"
 import { AppWalkthrough } from "../walkthrough/AppWalkthrough"
 import { useAuth } from "../../lib/AuthContext"
@@ -12,6 +13,20 @@ function SidebarIcon({ name }: { name: "library" | "learn" | "cards" | "quiz" | 
 // Public routes stay on the smaller base stylesheet until the app is opened.
 export function AppLayout() {
   const { user, logout } = useAuth()
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState("")
+
+  async function handleLogout() {
+    setLoggingOut(true)
+    setLogoutError("")
+    try {
+      await logout()
+    } catch {
+      setLogoutError("We couldn't log you out. Please try again.")
+      setLoggingOut(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Study navigation">
@@ -24,7 +39,7 @@ export function AppLayout() {
         </nav>
         <div className="app-sidebar-footer">
           <NavLink to="/app/settings" className={({ isActive }) => `app-sidebar-settings${isActive ? " active" : ""}`}><SidebarIcon name="settings" />Settings</NavLink>
-          {user && <SidebarAccount user={user} onLogout={() => void logout()} />}
+          {user && <SidebarAccount user={user} onLogout={() => void handleLogout()} loggingOut={loggingOut} error={logoutError} />}
         </div>
       </aside>
       <main><Outlet /></main>
@@ -33,12 +48,14 @@ export function AppLayout() {
   )
 }
 
-export function SidebarAccount({ user, onLogout }: {
+export function SidebarAccount({ user, onLogout, loggingOut = false, error = "" }: {
   user: { display_name: string | null; email: string | null }
   onLogout: () => void
+  loggingOut?: boolean
+  error?: string
 }) {
   const label = user.display_name || user.email || "Account"
-  return <div className="app-sidebar-account" aria-label="Account"><span className="account-avatar">{getUserInitials(user)}</span><span className="account-label">{label}</span><button type="button" onClick={onLogout}>Log out</button></div>
+  return <div className="app-sidebar-account" aria-label="Account"><span className="account-avatar">{getUserInitials(user)}</span><span className="account-label">{label}</span><button type="button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? "Logging out…" : "Log out"}</button>{error && <span className="error" role="alert">{error}</span>}</div>
 }
 
 export function getUserInitials(user: { display_name: string | null; email: string | null }): string {
