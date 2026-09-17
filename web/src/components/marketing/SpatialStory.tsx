@@ -121,10 +121,10 @@ export function SpatialStory() {
       </div>
 
       <motion.div className={`${styles.storyCopy} ${styles.heroStoryCopy}`} {...accessible(beat === 0)} style={staticStory ? undefined : { opacity: heroOpacity }}>
-        <p className={styles.eyebrowLight}>Read. Understand. Go further.</p>
-        <h1 className={styles.storyHeadline}>Turn any<br/>material into<br/><em>understanding.</em></h1>
-        <p className={styles.storyBody}>Your documents, opened up.<br/>Clear explanations, interactive visuals, and a tutor that helps the idea click.</p>
-        <div className={styles.heroActions}><Link to="/signup" className={styles.btnLight}>Get started <span aria-hidden="true">↗</span></Link><a href="#learn-in-action" className={styles.watchLink}><span aria-hidden="true">▷</span> Explore Lucent</a></div>
+        <p className={styles.eyebrowLight}>Read. Understand. Learn.</p>
+        <h1 className={styles.storyHeadline}>For the stuff<br/>you have to<br/><em>read twice.</em></h1>
+        <p className={styles.storyBody}>Upload a document. Lucent breaks down difficult sections, explains what you’re stuck on, and helps you work through it with an interactive tutor.</p>
+        <div className={styles.heroActions}><Link to="/signup" className={styles.btnLight}>Try Lucent <span aria-hidden="true">→</span></Link><a href="#learn-in-action" className={styles.watchLink}>See how it works</a></div>
       </motion.div>
 
       <motion.div className={styles.documentScene} {...accessible(beat === 0)} style={staticStory ? undefined : { x: documentX, y: documentY, scale: documentScale, opacity: documentOpacity }}>
@@ -169,26 +169,26 @@ export function SpatialStory() {
       </motion.div>
 
       <motion.div className={`${styles.storyCopy} ${styles.clarityCopy}`} {...accessible(beat === 1)} style={staticStory ? undefined : { opacity: clarityOpacity }}>
-        <p className={styles.eyebrowLight}>A calmer way to learn</p>
-        <h2 className={styles.storyHeading}>Same material.<br/><em>A clearer path.</em></h2>
-        <p className={styles.storyBody}>Read it. See it. Try it.<br/>Keep the explanation beside the question, so understanding has room to grow.</p>
+        <p className={styles.eyebrowLight}>Built around your material</p>
+        <h2 className={styles.storyHeading}><span className={styles.headingLine}>Read it. Ask about it.</span><br/><em>Work through it.</em></h2>
+        <p className={styles.storyBody}>Lucent doesn’t replace what you’re reading. It helps you make sense of it.</p>
       </motion.div>
 
       <motion.section id={staticStory ? "learn-in-action" : undefined} tabIndex={-1} className={styles.productStage} {...accessible(beat === 2)} aria-label="Interactive Lucent preview" style={staticStory ? undefined : { opacity: productOpacity, scale: productScale, rotateY: productRotateY, x: productX, y: productY, z: productZ }}>
-        <div className={styles.productStageIntro}><div><p className={styles.eyebrowLight}>See Lucent in action</p><h2>From reading <em>to reasoning.</em></h2></div><p>Try an answer. Ask for another explanation.<br/>See what happens when the idea clicks.</p></div>
+        <div className={styles.productStageIntro}><div><p className={styles.eyebrowLight}>See Lucent in action</p><h2>Try it <em>yourself.</em></h2></div><p>Ask a question, request another explanation,<br/>or work through the problem with Lucent.</p></div>
         {(loadDemo || staticStory) && <Suspense fallback={<div className={styles.demoLoading} role="status">Opening the learning preview…</div>}><ProductDemo /></Suspense>}
       </motion.section>
 
       <motion.div className={`${styles.fog} ${styles.fogNear}`} aria-hidden="true" style={staticStory ? undefined : { x: fogNearX, y: fogNearY, opacity: fogNearOpacity }} />
 
-      <motion.section className={styles.resolutionCopy} {...accessible(beat === 3)} aria-label="Go further with Lucent" style={staticStory ? undefined : { opacity: endingOpacity }}>
-        <p className={styles.eyebrowLight}>Go further</p>
-        <h2>A little further<br/>from the familiar.</h2>
-        <p>Bring your material.<br/>Leave with a new way of seeing it.</p>
-        <Link to="/signup" className={styles.btnLight}>Begin with your material <span aria-hidden="true">↗</span></Link>
+      <motion.section className={styles.resolutionCopy} {...accessible(beat === 3)} aria-label="Start learning with Lucent" style={staticStory ? undefined : { opacity: endingOpacity }}>
+        <p className={styles.eyebrowLight}>Start learning</p>
+        <h2>Start with<br/>something difficult.</h2>
+        <p>A paper, textbook chapter, lecture notes, whatever you’re trying to understand.</p>
+        <Link to="/signup" className={styles.btnLight}>Open it in Lucent <span aria-hidden="true">→</span></Link>
       </motion.section>
       <motion.div className={styles.scrollCue} aria-hidden="true" style={staticStory ? undefined : { opacity: scrollCueOpacity }}><span/> Scroll to explore</motion.div>
-      <div className={styles.storyIndex} aria-hidden="true"><span>0{beat + 1}</span><i/><span>{["Your material", "A clearer path", "Learn with Lucent", "Go further"][beat]}</span></div>
+      <div className={styles.storyIndex} aria-hidden="true"><span>0{beat + 1}</span><i/><span>{["Read twice", "Your material", "Try Lucent", "Start learning"][beat]}</span></div>
     </div>
   </main>
 }
