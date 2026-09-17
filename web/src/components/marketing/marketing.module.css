@@ -51,7 +51,8 @@
 .heroActions { display: flex; align-items: center; gap: 28px; margin-top: 28px; }
 .watchLink { display: flex; gap: 10px; align-items: center; font-size: 12px; text-decoration: none; }
 .watchLink span { display: grid; place-items: center; width: 27px; height: 27px; border: 1px solid #e4ece57d; border-radius: 50%; font-size: 18px; }
-.clarityCopy { top: 33%; width: 40%; }
+.clarityCopy { top: 33%; width: 76%; }
+.headingLine { white-space: nowrap; }
 .documentScene { position: absolute; inset: 20% 12% 10% 51%; perspective: 1250px; transform-style: preserve-3d; pointer-events: none; }
 .documentStack { position: absolute; left: 0; top: 6%; width: clamp(280px,26vw,390px); aspect-ratio: .72; transform-style: preserve-3d; pointer-events: auto; touch-action: pan-y pinch-zoom; }
 .pageTurnTarget { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
@@ -157,6 +158,7 @@
 [data-static-story=true] .capabilityLabels { right: -1%; top: 4%; font-size: 10px; }
 [data-static-story=true] .paperCaption { display: none; }
 [data-static-story=true] .clarityCopy { margin: 90px 0; padding-block: 70px; min-height: 50svh; max-width: 550px; }
+[data-static-story=true] .headingLine { white-space: normal; }
 [data-static-story=true] .storyHeading { font-size: clamp(48px,8vw,72px); }
 [data-static-story=true] .productStage { position: relative; inset: auto; margin: 0 -2vw; padding: 25px; border-radius: 12px; background: transparent; }
 [data-static-story=true] .productStageIntro { display: block; }
